@@ -1,21 +1,52 @@
-# Credentials — NEVER commit these
-auth/service_account.json
-.env
+# ============================================================
+# GCP Bot — .gitignore
+# ============================================================
 
-# Python
+# --- CRITICAL: Never commit credentials ---
+.env
+.env.local
+.env.production
+auth/service_account.json
+auth/*.json
+*.json
+!package.json
+!package-lock.json
+
+# --- Python ---
 __pycache__/
 *.py[cod]
-*.egg-info/
-dist/
-build/
-.venv/
-venv/
+*$py.class
 *.pyo
+*.pyd
+.Python
+build/
+dist/
+*.egg-info/
+*.egg
 
-# Reports (local only)
-reports/*.csv
-reports/*.json
+# --- Virtual environments ---
+venv/
+.venv/
+env/
+.env/
+ENV/
 
-# Misc
+# --- IDE & OS ---
 .DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+Thumbs.db
+
+# --- Logs ---
 *.log
+logs/
+
+# --- Testing ---
+.pytest_cache/
+.coverage
+htmlcov/
+
+# --- APScheduler jobstore (if persisted to disk) ---
+jobs.sqlite
