@@ -1,11 +1,21 @@
-google-cloud-storage==2.16.0
-google-cloud-compute==1.19.0
-google-cloud-billing==1.13.0
-google-cloud-monitoring==2.21.0
-google-cloud-bigquery==3.21.0
-google-auth==2.29.0
-google-api-python-client==2.128.0
-python-dotenv==1.0.1
-requests==2.31.0
-schedule==1.2.2
-click==8.1.7
+# Google Cloud
+google-cloud-compute>=1.14.0
+google-cloud-storage>=2.10.0
+google-cloud-bigquery>=3.11.0
+google-cloud-billing>=1.11.0
+google-cloud-monitoring>=2.18.0
+google-auth>=2.22.0
+google-api-python-client>=2.97.0
+
+# FastAPI & server
+fastapi>=0.103.0
+uvicorn[standard]>=0.23.0
+python-multipart>=0.0.6
+
+# Scheduler
+apscheduler>=3.10.4
+
+# Utilities
+python-dotenv>=1.0.0
+requests>=2.31.0
+click>=8.1.7
