@@ -1,8 +1,6 @@
 # Credentials — NEVER commit these
 auth/service_account.json
 .env
-*.json
-!.env.example
 
 # Python
 __pycache__/
@@ -13,6 +11,10 @@ build/
 .venv/
 venv/
 *.pyo
+
+# Reports (local only)
+reports/*.csv
+reports/*.json
 
 # Misc
 .DS_Store
