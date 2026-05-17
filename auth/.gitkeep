@@ -1,0 +1,2 @@
+# Place your service_account.json here — never commit it to Git.
+# Add auth/service_account.json to your .gitignore.

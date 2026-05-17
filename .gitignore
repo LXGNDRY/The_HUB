@@ -1,0 +1,19 @@
+# Credentials — NEVER commit these
+auth/service_account.json
+.env
+*.json
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.pyo
+
+# Misc
+.DS_Store
+*.log
