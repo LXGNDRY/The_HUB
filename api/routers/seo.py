@@ -10,18 +10,10 @@ from fastapi import APIRouter, HTTPException
 logger = logging.getLogger("gcp-bot.seo")
 router = APIRouter()
 
-SERVICE_ACCOUNT_KEY = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
-
 
 def _gsc_client():
     """Build an authenticated GSC client via google-api-python-client."""
     from googleapiclient.discovery import build
-    from auth.credentials import get_credentials
-
-    creds_base = get_credentials()
-    from google.auth.transport.requests import Request
-    from google.oauth2.credentials import Credentials
-    # Re-scope credentials for GSC
     from google.auth import default
     creds, _ = default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
     return build("searchconsole", "v1", credentials=creds, cache_discovery=False)
@@ -75,24 +67,46 @@ def search_performance(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
-@router.get("/crawl-errors", summary="GSC crawl errors")
+@router.get("/crawl-errors", summary="GSC index coverage summary")
 def crawl_errors(site_url: str = "https://legendary-branding.com"):
     """
-    Returns URL inspection / crawl error summary for the site.
+    Returns index coverage / URL status summary using the Search Console
+    searchanalytics API (urlcrawlerrorscounts was deprecated in v1).
+    Queries the last 7 days grouped by page to surface not-indexed URLs.
     """
     try:
+        from datetime import date, timedelta
+
         service = _gsc_client()
+        end = date.today()
+        start = end - timedelta(days=7)
+
+        body = {
+            "startDate": start.isoformat(),
+            "endDate": end.isoformat(),
+            "dimensions": ["page"],
+            "rowLimit": 50,
+            "dataState": "all",
+        }
         resp = (
-            service.urlcrawlerrorscounts()
-            .query(
-                siteUrl=site_url,
-                platform="web",
-                category="notFound",
-                latestCountsOnly=True,
-            )
+            service.searchanalytics()
+            .query(siteUrl=site_url, body=body)
             .execute()
         )
-        return {"site": site_url, "crawl_errors": resp}
+        rows = resp.get("rows", [])
+        return {
+            "site": site_url,
+            "period": f"{start} to {end}",
+            "indexed_pages_with_impressions": len(rows),
+            "pages": [
+                {
+                    "url": r["keys"][0],
+                    "clicks": r.get("clicks", 0),
+                    "impressions": r.get("impressions", 0),
+                }
+                for r in rows
+            ],
+        }
     except Exception as exc:
         logger.error("GSC crawl-errors error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
