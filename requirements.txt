@@ -9,7 +9,7 @@ httpx==0.28.1
 apscheduler==3.11.0
 
 # Google Cloud
-google-cloud-billing==1.15.1
+google-cloud-billing==1.15.0
 google-cloud-compute==1.23.0
 google-cloud-monitoring==2.24.1
 google-cloud-storage==2.19.0
