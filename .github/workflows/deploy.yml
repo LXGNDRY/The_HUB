@@ -172,13 +172,16 @@ jobs:
           push_secret "GCP_SA_KEY_JSON"    '${{ secrets.GCP_SA_KEY }}'
           push_secret "GSC_TOKEN_JSON"     '${{ secrets.GSC_TOKEN_JSON }}'
 
-          # Grant Cloud Run SA access to these secrets
-          SA="${{ secrets.GCP_PROJECT_ID }}@appspot.gserviceaccount.com"
+          # Grant Cloud Run default compute SA access to these secrets
+          # Cloud Run uses: <project-number>-compute@developer.gserviceaccount.com
+          PROJECT_NUMBER=$(gcloud projects describe "${PROJECT}" --format='value(projectNumber)')
+          SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+          echo "Granting Secret Accessor to: ${SA}"
           for SECRET in GCP_SA_KEY_JSON GSC_TOKEN_JSON; do
             gcloud secrets add-iam-policy-binding "${SECRET}" \
               --project="${PROJECT}" \
               --member="serviceAccount:${SA}" \
-              --role="roles/secretmanager.secretAccessor" &>/dev/null || true
+              --role="roles/secretmanager.secretAccessor"
           done
 
       - name: Deploy to Cloud Run
