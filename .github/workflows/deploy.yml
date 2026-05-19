@@ -158,6 +158,7 @@ jobs:
             --set-env-vars="DASHBOARD_API_KEY=${{ secrets.DASHBOARD_API_KEY }}" \
             --set-env-vars="GA4_PROPERTY_ID=${{ secrets.GA4_PROPERTY_ID }}" \
             --set-env-vars="GSC_TOKEN_JSON=${{ secrets.GSC_TOKEN_JSON }}" \
+            --set-env-vars="GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" \
             --set-env-vars="BUDGET_THRESHOLD=${{ secrets.BUDGET_THRESHOLD }}" \
             --set-env-vars="IDLE_CPU_THRESHOLD=${{ secrets.IDLE_CPU_THRESHOLD }}" \
             --set-env-vars="QUOTA_ALERT_PERCENT=${{ secrets.QUOTA_ALERT_PERCENT }}" \
