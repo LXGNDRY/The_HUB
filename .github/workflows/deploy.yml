@@ -80,8 +80,6 @@ jobs:
     name: 🐳 Build & Push Image
     runs-on: ubuntu-latest
     needs: test
-    outputs:
-      image_tag: ${{ steps.meta.outputs.image_tag }}
 
     steps:
       - name: Checkout code
@@ -100,28 +98,21 @@ jobs:
       - name: Configure Docker for GCR
         run: gcloud auth configure-docker --quiet
 
-      - name: Generate image tag
-        id: meta
+      - name: Build & Push Docker image
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           IMAGE_TAG="${{ env.IMAGE }}:${SHORT_SHA}"
-          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
-          echo "Building image: ${IMAGE_TAG}"
 
-      - name: Build Docker image
-        run: |
           docker build \
-            --tag ${{ steps.meta.outputs.image_tag }} \
-            --tag ${{ env.IMAGE }}:latest \
+            --tag "${IMAGE_TAG}" \
+            --tag "${{ env.IMAGE }}:latest" \
             --label "git-commit=${{ github.sha }}" \
             --label "build-date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
             .
 
-      - name: Push Docker image to GCR
-        run: |
-          docker push ${{ steps.meta.outputs.image_tag }}
-          docker push ${{ env.IMAGE }}:latest
-          echo "✅ Image pushed: ${{ steps.meta.outputs.image_tag }}"
+          docker push "${IMAGE_TAG}"
+          docker push "${{ env.IMAGE }}:latest"
+          echo "✅ Image pushed: ${IMAGE_TAG}"
 
   # ─────────────────────────────────────────
   # JOB 3: Deploy to Cloud Run
@@ -147,10 +138,14 @@ jobs:
 
       - name: Deploy to Cloud Run
         run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_TAG="${{ env.IMAGE }}:${SHORT_SHA}"
           DRY_RUN_VAL="${{ github.event.inputs.dry_run || 'false' }}"
 
+          echo "Deploying image: ${IMAGE_TAG}"
+
           gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image ${{ needs.build.outputs.image_tag }} \
+            --image "${IMAGE_TAG}" \
             --region ${{ env.REGION }} \
             --platform managed \
             --allow-unauthenticated \
@@ -161,13 +156,9 @@ jobs:
             --port 8080 \
             --set-env-vars="GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" \
             --set-env-vars="DASHBOARD_API_KEY=${{ secrets.DASHBOARD_API_KEY }}" \
-            --set-env-vars="DISCORD_WEBHOOK_URL=${{ secrets.DISCORD_WEBHOOK_URL }}" \
-            --set-env-vars="SLACK_WEBHOOK_URL=${{ secrets.SLACK_WEBHOOK_URL }}" \
-            --set-env-vars="TELEGRAM_BOT_TOKEN=${{ secrets.TELEGRAM_BOT_TOKEN }}" \
-            --set-env-vars="TELEGRAM_CHAT_ID=${{ secrets.TELEGRAM_CHAT_ID }}" \
-            --set-env-vars="BUDGET_THRESHOLD=${{ secrets.BUDGET_THRESHOLD || '100.00' }}" \
-            --set-env-vars="IDLE_CPU_THRESHOLD=${{ secrets.IDLE_CPU_THRESHOLD || '2.0' }}" \
-            --set-env-vars="QUOTA_ALERT_PERCENT=${{ secrets.QUOTA_ALERT_PERCENT || '80.0' }}" \
+            --set-env-vars="BUDGET_THRESHOLD=${{ secrets.BUDGET_THRESHOLD }}" \
+            --set-env-vars="IDLE_CPU_THRESHOLD=${{ secrets.IDLE_CPU_THRESHOLD }}" \
+            --set-env-vars="QUOTA_ALERT_PERCENT=${{ secrets.QUOTA_ALERT_PERCENT }}" \
             --set-env-vars="DRY_RUN=${DRY_RUN_VAL}" \
             --quiet
 
@@ -198,12 +189,14 @@ jobs:
 
       - name: Deployment summary
         run: |
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE_TAG="${{ env.IMAGE }}:${SHORT_SHA}"
           echo "### 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
           echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| **Service** | ${{ env.SERVICE_NAME }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Region** | ${{ env.REGION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image** | \`${{ needs.build.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Image** | \`${IMAGE_TAG}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **URL** | ${{ steps.service_url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
           echo "| **Dry Run** | ${{ github.event.inputs.dry_run || 'false' }} |" >> $GITHUB_STEP_SUMMARY
