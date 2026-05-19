@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from api.middleware.auth import verify_api_key
-from api.routers import compute, storage, billing, monitoring
+from api.routers import compute, storage, billing, monitoring, seo, analytics, pagespeed
 from scheduler.engine import BotScheduler
 
 logging.basicConfig(
@@ -59,6 +59,9 @@ app.include_router(compute.router,    prefix="/api/compute",    tags=["Compute"]
 app.include_router(storage.router,    prefix="/api/storage",    tags=["Storage"],    **protected)
 app.include_router(billing.router,    prefix="/api/billing",    tags=["Billing"],    **protected)
 app.include_router(monitoring.router, prefix="/api/monitoring", tags=["Monitoring"], **protected)
+app.include_router(seo.router,        prefix="/api/seo",        tags=["SEO"],        **protected)
+app.include_router(analytics.router,  prefix="/api/analytics",  tags=["Analytics"],  **protected)
+app.include_router(pagespeed.router,  prefix="/api/pagespeed",  tags=["PageSpeed"],  **protected)
 
 # -------------------------------------------------------------------------
 # Scheduler control routes
