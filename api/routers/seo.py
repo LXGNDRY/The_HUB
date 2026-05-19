@@ -1,9 +1,15 @@
 """
 SEO router — Google Search Console integration.
 Prefix in main.py: /api/seo
+
+Auth priority:
+  1. GSC_TOKEN_JSON env var — JSON string of an authorized user credential
+     (obtained via `gcloud auth application-default print-access-token` flow)
+  2. Application Default Credentials (service account) as fallback
 """
 
 import os
+import json
 import logging
 from fastapi import APIRouter, HTTPException
 
@@ -12,10 +18,25 @@ router = APIRouter()
 
 
 def _gsc_client():
-    """Build an authenticated GSC client via google-api-python-client."""
+    """Build GSC client — prefers GSC_TOKEN_JSON env var over ADC."""
     from googleapiclient.discovery import build
-    from google.auth import default
-    creds, _ = default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+
+    token_json = os.getenv("GSC_TOKEN_JSON", "")
+    if token_json:
+        from google.oauth2.credentials import Credentials
+        info = json.loads(token_json)
+        creds = Credentials(
+            token=info.get("access_token"),
+            refresh_token=info.get("refresh_token"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=info.get("client_id"),
+            client_secret=info.get("client_secret"),
+            scopes=["https://www.googleapis.com/auth/webmasters.readonly"],
+        )
+    else:
+        from google.auth import default
+        creds, _ = default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
+
     return build("searchconsole", "v1", credentials=creds, cache_discovery=False)
 
 
@@ -24,17 +45,11 @@ def search_performance(
     site_url: str = "https://legendary-branding.com",
     days: int = 28,
 ):
-    """
-    Returns clicks, impressions, CTR, and position from Google Search Console
-    for the given site over the last `days` days.
-    """
     try:
         from datetime import date, timedelta
-
         service = _gsc_client()
         end = date.today()
         start = end - timedelta(days=days)
-
         body = {
             "startDate": start.isoformat(),
             "endDate": end.isoformat(),
@@ -42,11 +57,7 @@ def search_performance(
             "rowLimit": 25,
             "startRow": 0,
         }
-        resp = (
-            service.searchanalytics()
-            .query(siteUrl=site_url, body=body)
-            .execute()
-        )
+        resp = service.searchanalytics().query(siteUrl=site_url, body=body).execute()
         rows = resp.get("rows", [])
         return {
             "site": site_url,
@@ -69,18 +80,11 @@ def search_performance(
 
 @router.get("/crawl-errors", summary="GSC index coverage summary")
 def crawl_errors(site_url: str = "https://legendary-branding.com"):
-    """
-    Returns index coverage / URL status summary using the Search Console
-    searchanalytics API (urlcrawlerrorscounts was deprecated in v1).
-    Queries the last 7 days grouped by page to surface not-indexed URLs.
-    """
     try:
         from datetime import date, timedelta
-
         service = _gsc_client()
         end = date.today()
         start = end - timedelta(days=7)
-
         body = {
             "startDate": start.isoformat(),
             "endDate": end.isoformat(),
@@ -88,11 +92,7 @@ def crawl_errors(site_url: str = "https://legendary-branding.com"):
             "rowLimit": 50,
             "dataState": "all",
         }
-        resp = (
-            service.searchanalytics()
-            .query(siteUrl=site_url, body=body)
-            .execute()
-        )
+        resp = service.searchanalytics().query(siteUrl=site_url, body=body).execute()
         rows = resp.get("rows", [])
         return {
             "site": site_url,

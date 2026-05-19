@@ -1,9 +1,14 @@
 """
 Analytics router — Google Analytics 4 (Data API) integration.
 Prefix in main.py: /api/analytics
+
+Auth priority:
+  1. GA4_TOKEN_JSON env var — JSON string of an authorized user credential
+  2. Application Default Credentials with explicit analytics scope
 """
 
 import os
+import json
 import logging
 from fastapi import APIRouter, HTTPException
 
@@ -14,12 +19,27 @@ GA4_PROPERTY_ID = os.getenv("GA4_PROPERTY_ID", "")
 
 
 def _ga4_client():
-    """Build an authenticated GA4 Data API client with explicit analytics scope."""
+    """Build GA4 client — prefers GA4_TOKEN_JSON env var over ADC."""
     from google.analytics.data_v1beta import BetaAnalyticsDataClient
-    from google.auth import default
-    creds, _ = default(
-        scopes=["https://www.googleapis.com/auth/analytics.readonly"]
-    )
+
+    token_json = os.getenv("GA4_TOKEN_JSON", "")
+    if token_json:
+        from google.oauth2.credentials import Credentials
+        info = json.loads(token_json)
+        creds = Credentials(
+            token=info.get("access_token"),
+            refresh_token=info.get("refresh_token"),
+            token_uri="https://oauth2.googleapis.com/token",
+            client_id=info.get("client_id"),
+            client_secret=info.get("client_secret"),
+            scopes=["https://www.googleapis.com/auth/analytics.readonly"],
+        )
+    else:
+        from google.auth import default
+        creds, _ = default(
+            scopes=["https://www.googleapis.com/auth/analytics.readonly"]
+        )
+
     return BetaAnalyticsDataClient(credentials=creds)
 
 
