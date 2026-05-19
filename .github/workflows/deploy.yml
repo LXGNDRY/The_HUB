@@ -119,9 +119,10 @@ jobs:
           DRY_RUN:             ${{ github.event.inputs.dry_run || 'false' }}
           GCP_SA_KEY_JSON:     ${{ secrets.GCP_SA_KEY }}
           GSC_TOKEN_JSON:      ${{ secrets.GSC_TOKEN_JSON }}
+          IMAGE:               gcr.io/${{ secrets.GCP_PROJECT_ID }}/gcp-bot
         run: |
           SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          IMAGE="${{ env.IMAGE }}:${SHA}"
+          export IMAGE="${IMAGE}:${SHA}"
 
           # Python writes the YAML service spec — env values are Python strings,
           # PyYAML serialises them as quoted YAML scalars, bypassing gcloud entirely.
@@ -203,8 +204,6 @@ jobs:
 
           print("✅ Deploy complete")
           PYEOF
-        env:
-          IMAGE: gcr.io/${{ secrets.GCP_PROJECT_ID }}/gcp-bot
 
       - name: Get service URL
         id: url
