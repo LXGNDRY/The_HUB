@@ -60,9 +60,7 @@ jobs:
 
       - name: Lint with flake8
         run: |
-          # Stop the build if there are Python syntax errors or undefined names
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          # Warn on complexity / style (non-blocking)
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
       - name: Run tests (if tests/ exists)
@@ -136,74 +134,69 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Write env-vars file
-        run: |
-          DRY_RUN_VAL="${{ github.event.inputs.dry_run || 'false' }}"
-          # gcloud --env-vars-file expects KEY=VALUE, one per line
-          # Simple scalars go here; JSON blobs are handled via Secret Manager refs below
-          cat > /tmp/envvars.yaml <<EOF
-          GCP_PROJECT_ID: "${{ secrets.GCP_PROJECT_ID }}"
-          DASHBOARD_API_KEY: "${{ secrets.DASHBOARD_API_KEY }}"
-          GA4_PROPERTY_ID: "${{ secrets.GA4_PROPERTY_ID }}"
-          GOOGLE_API_KEY: "${{ secrets.GOOGLE_API_KEY }}"
-          BUDGET_THRESHOLD: "${{ secrets.BUDGET_THRESHOLD }}"
-          IDLE_CPU_THRESHOLD: "${{ secrets.IDLE_CPU_THRESHOLD }}"
-          QUOTA_ALERT_PERCENT: "${{ secrets.QUOTA_ALERT_PERCENT }}"
-          DRY_RUN: "${DRY_RUN_VAL}"
-          EOF
-
-      - name: Push JSON secrets to Secret Manager
-        run: |
-          PROJECT="${{ secrets.GCP_PROJECT_ID }}"
-
-          push_secret() {
-            local NAME=$1
-            local VALUE=$2
-            # Create or add new version
-            if gcloud secrets describe "${NAME}" --project="${PROJECT}" &>/dev/null; then
-              printf '%s' "${VALUE}" | gcloud secrets versions add "${NAME}" \
-                --project="${PROJECT}" --data-file=-
-            else
-              printf '%s' "${VALUE}" | gcloud secrets create "${NAME}" \
-                --project="${PROJECT}" --data-file=- --replication-policy=automatic
-            fi
-          }
-
-          push_secret "GCP_SA_KEY_JSON"    '${{ secrets.GCP_SA_KEY }}'
-          push_secret "GSC_TOKEN_JSON"     '${{ secrets.GSC_TOKEN_JSON }}'
-
-          # Grant Cloud Run default compute SA access to these secrets
-          # Cloud Run uses: <project-number>-compute@developer.gserviceaccount.com
-          PROJECT_NUMBER=$(gcloud projects describe "${PROJECT}" --format='value(projectNumber)')
-          SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-          echo "Granting Secret Accessor to: ${SA}"
-          for SECRET in GCP_SA_KEY_JSON GSC_TOKEN_JSON; do
-            gcloud secrets add-iam-policy-binding "${SECRET}" \
-              --project="${PROJECT}" \
-              --member="serviceAccount:${SA}" \
-              --role="roles/secretmanager.secretAccessor"
-          done
-
       - name: Deploy to Cloud Run
         run: |
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           IMAGE_TAG="${{ env.IMAGE }}:${SHORT_SHA}"
+          DRY_RUN_VAL="${{ github.event.inputs.dry_run || 'false' }}"
 
           echo "Deploying image: ${IMAGE_TAG}"
 
-          gcloud run deploy ${{ env.SERVICE_NAME }} \
-            --image "${IMAGE_TAG}" \
-            --region ${{ env.REGION }} \
-            --platform managed \
-            --allow-unauthenticated \
-            --memory 512Mi \
-            --cpu 1 \
-            --min-instances 1 \
-            --max-instances 3 \
-            --port 8080 \
-            --env-vars-file=/tmp/envvars.yaml \
-            --set-secrets="GCP_SA_KEY_JSON=GCP_SA_KEY_JSON:latest,GSC_TOKEN_JSON=GSC_TOKEN_JSON:latest" \
-            --quiet
+          # Use a Python script to build and execute the gcloud deploy command.
+          # This avoids all shell escaping issues with JSON values that contain
+          # commas, quotes, and colons — which break --set-env-vars parsing.
+          python3 - <<'PYEOF'
+          import subprocess, sys, os
+
+          cmd = [
+              "gcloud", "run", "deploy", "gcp-bot",
+              "--image",    os.environ["IMAGE_TAG"],
+              "--region",   "us-central1",
+              "--platform", "managed",
+              "--allow-unauthenticated",
+              "--memory",   "512Mi",
+              "--cpu",      "1",
+              "--min-instances", "1",
+              "--max-instances", "3",
+              "--port",     "8080",
+              "--quiet",
+              "--update-env-vars",
+              "GCP_PROJECT_ID="    + os.environ["GCP_PROJECT_ID"],
+              "--update-env-vars",
+              "DASHBOARD_API_KEY=" + os.environ["DASHBOARD_API_KEY"],
+              "--update-env-vars",
+              "GA4_PROPERTY_ID="   + os.environ["GA4_PROPERTY_ID"],
+              "--update-env-vars",
+              "GOOGLE_API_KEY="    + os.environ["GOOGLE_API_KEY"],
+              "--update-env-vars",
+              "BUDGET_THRESHOLD="  + os.environ["BUDGET_THRESHOLD"],
+              "--update-env-vars",
+              "IDLE_CPU_THRESHOLD="+ os.environ["IDLE_CPU_THRESHOLD"],
+              "--update-env-vars",
+              "QUOTA_ALERT_PERCENT="+ os.environ["QUOTA_ALERT_PERCENT"],
+              "--update-env-vars",
+              "DRY_RUN="           + os.environ["DRY_RUN_VAL"],
+              "--update-env-vars",
+              "GCP_SA_KEY_JSON="   + os.environ["GCP_SA_KEY"],
+              "--update-env-vars",
+              "GSC_TOKEN_JSON="    + os.environ["GSC_TOKEN_JSON"],
+          ]
+
+          result = subprocess.run(cmd, text=True, capture_output=False)
+          sys.exit(result.returncode)
+          PYEOF
+        env:
+          IMAGE_TAG: gcr.io/${{ secrets.GCP_PROJECT_ID }}/gcp-bot
+          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+          DASHBOARD_API_KEY: ${{ secrets.DASHBOARD_API_KEY }}
+          GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          BUDGET_THRESHOLD: ${{ secrets.BUDGET_THRESHOLD }}
+          IDLE_CPU_THRESHOLD: ${{ secrets.IDLE_CPU_THRESHOLD }}
+          QUOTA_ALERT_PERCENT: ${{ secrets.QUOTA_ALERT_PERCENT }}
+          DRY_RUN_VAL: ${{ github.event.inputs.dry_run || 'false' }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          GSC_TOKEN_JSON: ${{ secrets.GSC_TOKEN_JSON }}
 
       - name: Get Cloud Run service URL
         id: service_url
