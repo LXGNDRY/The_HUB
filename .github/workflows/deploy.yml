@@ -1,7 +1,6 @@
 # ============================================================
 # GCP Bot — GitHub Actions CI/CD Workflow
 # Deploy to Google Cloud Run on push to main
-# Manual trigger available via workflow_dispatch
 # ============================================================
 
 name: 🤖 GCP Bot — Build & Deploy
@@ -22,10 +21,10 @@ on:
           - "false"
 
 env:
-  PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  PROJECT_ID:   ${{ secrets.GCP_PROJECT_ID }}
   SERVICE_NAME: gcp-bot
-  REGION: us-central1
-  IMAGE: gcr.io/${{ secrets.GCP_PROJECT_ID }}/gcp-bot
+  REGION:       us-central1
+  IMAGE:        gcr.io/${{ secrets.GCP_PROJECT_ID }}/gcp-bot
 
 jobs:
   # ─────────────────────────────────────────
@@ -85,12 +84,13 @@ jobs:
             --label "git-commit=${{ github.sha }}" .
           docker push "${{ env.IMAGE }}:${SHA}"
           docker push "${{ env.IMAGE }}:latest"
+          echo "✅ Pushed ${{ env.IMAGE }}:${SHA}"
 
   # ─────────────────────────────────────────
   # JOB 3: Deploy to Cloud Run
-  # Uses `gcloud run services replace` with a full YAML service spec.
-  # Env var values are plain YAML strings — no gcloud dict-arg parser,
-  # no shell escaping — JSON secrets are safe.
+  # Scalar env vars via --set-env-vars.
+  # JSON secrets (contain commas) injected via a Python-generated
+  # Cloud Run YAML spec — values are plain YAML strings, zero parsing.
   # ─────────────────────────────────────────
   deploy:
     name: 🚀 Deploy to Cloud Run
@@ -107,7 +107,7 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Build service YAML and deploy
+      - name: Deploy
         env:
           GCP_PROJECT_ID:      ${{ secrets.GCP_PROJECT_ID }}
           DASHBOARD_API_KEY:   ${{ secrets.DASHBOARD_API_KEY }}
@@ -119,90 +119,61 @@ jobs:
           DRY_RUN:             ${{ github.event.inputs.dry_run || 'false' }}
           GCP_SA_KEY_JSON:     ${{ secrets.GCP_SA_KEY }}
           GSC_TOKEN_JSON:      ${{ secrets.GSC_TOKEN_JSON }}
-          IMAGE:               gcr.io/${{ secrets.GCP_PROJECT_ID }}/gcp-bot
         run: |
           SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          export IMAGE="${IMAGE}:${SHA}"
+          IMAGE_TAG="${{ env.IMAGE }}:${SHA}"
+          echo "Deploying: ${IMAGE_TAG}"
 
-          # Python writes the YAML service spec — env values are Python strings,
-          # PyYAML serialises them as quoted YAML scalars, bypassing gcloud entirely.
+          # Step 1 — deploy with scalar env vars (no JSON, no escaping issues)
+          gcloud run deploy ${{ env.SERVICE_NAME }} \
+            --image "${IMAGE_TAG}" \
+            --region ${{ env.REGION }} \
+            --platform managed \
+            --allow-unauthenticated \
+            --memory 512Mi \
+            --cpu 1 \
+            --min-instances 1 \
+            --max-instances 3 \
+            --port 8080 \
+            --set-env-vars "GCP_PROJECT_ID=${GCP_PROJECT_ID}" \
+            --set-env-vars "DASHBOARD_API_KEY=${DASHBOARD_API_KEY}" \
+            --set-env-vars "GA4_PROPERTY_ID=${GA4_PROPERTY_ID}" \
+            --set-env-vars "GOOGLE_API_KEY=${GOOGLE_API_KEY}" \
+            --set-env-vars "BUDGET_THRESHOLD=${BUDGET_THRESHOLD}" \
+            --set-env-vars "IDLE_CPU_THRESHOLD=${IDLE_CPU_THRESHOLD}" \
+            --set-env-vars "QUOTA_ALERT_PERCENT=${QUOTA_ALERT_PERCENT}" \
+            --set-env-vars "DRY_RUN=${DRY_RUN}" \
+            --quiet
+
+          echo "✅ Base deploy done — now setting JSON secrets..."
+
+          # Step 2 — update JSON secrets via Python to a temp file,
+          # then gcloud reads from file via @/path syntax (no shell parsing)
           python3 - <<'PYEOF'
-          import os, yaml, subprocess, sys
+          import os, subprocess, tempfile, sys
 
-          project  = os.environ["GCP_PROJECT_ID"]
-          image    = os.environ["IMAGE"]
-          region   = "us-central1"
-          service  = "gcp-bot"
+          def set_env(var, val):
+              """Write value to a temp file and use gcloud --update-env-vars=VAR=@file"""
+              with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+                  f.write(val)
+                  path = f.name
+              # gcloud supports VAR=@/path/to/file for values with special chars
+              result = subprocess.run([
+                  'gcloud', 'run', 'services', 'update', 'gcp-bot',
+                  '--region', 'us-central1',
+                  f'--update-env-vars={var}=@{path}',
+                  '--quiet'
+              ], text=True, capture_output=True)
+              os.unlink(path)
+              if result.returncode != 0:
+                  print(f'stderr: {result.stderr}')
+                  return False
+              print(f'✅ {var} set')
+              return True
 
-          env_vars = [
-            {"name": "GCP_PROJECT_ID",      "value": os.environ["GCP_PROJECT_ID"]},
-            {"name": "DASHBOARD_API_KEY",   "value": os.environ["DASHBOARD_API_KEY"]},
-            {"name": "GA4_PROPERTY_ID",     "value": os.environ["GA4_PROPERTY_ID"]},
-            {"name": "GOOGLE_API_KEY",      "value": os.environ["GOOGLE_API_KEY"]},
-            {"name": "BUDGET_THRESHOLD",    "value": os.environ["BUDGET_THRESHOLD"]},
-            {"name": "IDLE_CPU_THRESHOLD",  "value": os.environ["IDLE_CPU_THRESHOLD"]},
-            {"name": "QUOTA_ALERT_PERCENT", "value": os.environ["QUOTA_ALERT_PERCENT"]},
-            {"name": "DRY_RUN",             "value": os.environ["DRY_RUN"]},
-            {"name": "GCP_SA_KEY_JSON",     "value": os.environ["GCP_SA_KEY_JSON"]},
-            {"name": "GSC_TOKEN_JSON",      "value": os.environ["GSC_TOKEN_JSON"]},
-          ]
-
-          svc = {
-            "apiVersion": "serving.knative.dev/v1",
-            "kind": "Service",
-            "metadata": {
-              "name": service,
-              "namespace": project,
-              "annotations": {
-                "run.googleapis.com/ingress": "all",
-              },
-            },
-            "spec": {
-              "template": {
-                "metadata": {
-                  "annotations": {
-                    "autoscaling.knative.dev/minScale": "1",
-                    "autoscaling.knative.dev/maxScale": "3",
-                  }
-                },
-                "spec": {
-                  "containerConcurrency": 80,
-                  "containers": [{
-                    "image": image,
-                    "ports": [{"containerPort": 8080}],
-                    "resources": {
-                      "limits": {"cpu": "1000m", "memory": "512Mi"}
-                    },
-                    "env": env_vars,
-                  }]
-                }
-              },
-              "traffic": [{"percent": 100, "latestRevision": True}]
-            }
-          }
-
-          with open("/tmp/service.yaml", "w") as f:
-            yaml.dump(svc, f, default_flow_style=False, allow_unicode=True)
-
-          print("Service YAML written — deploying...")
-          r = subprocess.run(
-            ["gcloud", "run", "services", "replace", "/tmp/service.yaml",
-             "--region", region, "--quiet"],
-            text=True
-          )
-          if r.returncode != 0:
-            sys.exit(r.returncode)
-
-          # Allow unauthenticated (public) access
-          subprocess.run([
-            "gcloud", "run", "services", "add-iam-policy-binding", service,
-            "--region", region,
-            "--member", "allUsers",
-            "--role", "roles/run.invoker",
-            "--quiet"
-          ], text=True)
-
-          print("✅ Deploy complete")
+          ok1 = set_env('GCP_SA_KEY_JSON', os.environ['GCP_SA_KEY_JSON'])
+          ok2 = set_env('GSC_TOKEN_JSON',  os.environ['GSC_TOKEN_JSON'])
+          sys.exit(0 if (ok1 and ok2) else 1)
           PYEOF
 
       - name: Get service URL
@@ -218,11 +189,11 @@ jobs:
           URL="${{ steps.url.outputs.url }}"
           for i in 1 2 3 4 5; do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "${URL}/health" || echo "000")
-            [ "$STATUS" = "200" ] && echo "✅ Health check passed" && exit 0
+            [ "$STATUS" = "200" ] && echo "✅ Health check passed (HTTP 200)" && exit 0
             echo "Attempt $i: HTTP ${STATUS} — waiting 10s..."
             sleep 10
           done
-          echo "⚠️ Health check inconclusive — check Cloud Run console"
+          echo "⚠️ Health check inconclusive"
           exit 0
 
       - name: Summary
