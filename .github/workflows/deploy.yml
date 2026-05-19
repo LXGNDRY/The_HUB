@@ -20,14 +20,6 @@ on:
         options:
           - "true"
           - "false"
-      environment:
-        description: "Target environment"
-        required: false
-        default: "production"
-        type: choice
-        options:
-          - production
-          - staging
 
 env:
   PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
@@ -43,33 +35,26 @@ jobs:
     name: 🧪 Lint & Test
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
 
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install flake8 pytest
+          pip install --upgrade pip
+          pip install -r requirements.txt flake8 pytest
 
-      - name: Lint with flake8
+      - name: Lint
         run: |
           flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
           flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
 
-      - name: Run tests (if tests/ exists)
+      - name: Test
         run: |
-          if [ -d "tests" ]; then
-            pytest tests/ -v --tb=short
-          else
-            echo "No tests/ directory found — skipping pytest."
-          fi
+          [ -d tests ] && pytest tests/ -v --tb=short || echo "No tests/ — skipping."
 
   # ─────────────────────────────────────────
   # JOB 2: Build & Push Docker Image
@@ -78,161 +63,178 @@ jobs:
     name: 🐳 Build & Push Image
     runs-on: ubuntu-latest
     needs: test
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Configure Docker for GCR
-        run: gcloud auth configure-docker --quiet
+      - run: gcloud auth configure-docker --quiet
 
-      - name: Build & Push Docker image
+      - name: Build & Push
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          IMAGE_TAG="${{ env.IMAGE }}:${SHORT_SHA}"
-
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           docker build \
-            --tag "${IMAGE_TAG}" \
+            --tag "${{ env.IMAGE }}:${SHA}" \
             --tag "${{ env.IMAGE }}:latest" \
-            --label "git-commit=${{ github.sha }}" \
-            --label "build-date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-            .
-
-          docker push "${IMAGE_TAG}"
+            --label "git-commit=${{ github.sha }}" .
+          docker push "${{ env.IMAGE }}:${SHA}"
           docker push "${{ env.IMAGE }}:latest"
-          echo "✅ Image pushed: ${IMAGE_TAG}"
 
   # ─────────────────────────────────────────
   # JOB 3: Deploy to Cloud Run
+  # Uses `gcloud run services replace` with a full YAML service spec.
+  # Env var values are plain YAML strings — no gcloud dict-arg parser,
+  # no shell escaping — JSON secrets are safe.
   # ─────────────────────────────────────────
   deploy:
     name: 🚀 Deploy to Cloud Run
     runs-on: ubuntu-latest
     needs: build
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
 
-      - name: Set up Cloud SDK
-        uses: google-github-actions/setup-gcloud@v2
+      - uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Deploy to Cloud Run
+      - name: Build service YAML and deploy
+        env:
+          GCP_PROJECT_ID:      ${{ secrets.GCP_PROJECT_ID }}
+          DASHBOARD_API_KEY:   ${{ secrets.DASHBOARD_API_KEY }}
+          GA4_PROPERTY_ID:     ${{ secrets.GA4_PROPERTY_ID }}
+          GOOGLE_API_KEY:      ${{ secrets.GOOGLE_API_KEY }}
+          BUDGET_THRESHOLD:    ${{ secrets.BUDGET_THRESHOLD }}
+          IDLE_CPU_THRESHOLD:  ${{ secrets.IDLE_CPU_THRESHOLD }}
+          QUOTA_ALERT_PERCENT: ${{ secrets.QUOTA_ALERT_PERCENT }}
+          DRY_RUN:             ${{ github.event.inputs.dry_run || 'false' }}
+          GCP_SA_KEY_JSON:     ${{ secrets.GCP_SA_KEY }}
+          GSC_TOKEN_JSON:      ${{ secrets.GSC_TOKEN_JSON }}
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          IMAGE_TAG="${{ env.IMAGE }}:${SHORT_SHA}"
-          DRY_RUN_VAL="${{ github.event.inputs.dry_run || 'false' }}"
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          IMAGE="${{ env.IMAGE }}:${SHA}"
 
-          echo "Deploying image: ${IMAGE_TAG}"
-
-          # Use a Python script to build and execute the gcloud deploy command.
-          # This avoids all shell escaping issues with JSON values that contain
-          # commas, quotes, and colons — which break --set-env-vars parsing.
+          # Python writes the YAML service spec — env values are Python strings,
+          # PyYAML serialises them as quoted YAML scalars, bypassing gcloud entirely.
           python3 - <<'PYEOF'
-          import subprocess, sys, os
+          import os, yaml, subprocess, sys
 
-          cmd = [
-              "gcloud", "run", "deploy", "gcp-bot",
-              "--image",    os.environ["IMAGE_TAG"],
-              "--region",   "us-central1",
-              "--platform", "managed",
-              "--allow-unauthenticated",
-              "--memory",   "512Mi",
-              "--cpu",      "1",
-              "--min-instances", "1",
-              "--max-instances", "3",
-              "--port",     "8080",
-              "--quiet",
-              "--update-env-vars",
-              "GCP_PROJECT_ID="    + os.environ["GCP_PROJECT_ID"],
-              "--update-env-vars",
-              "DASHBOARD_API_KEY=" + os.environ["DASHBOARD_API_KEY"],
-              "--update-env-vars",
-              "GA4_PROPERTY_ID="   + os.environ["GA4_PROPERTY_ID"],
-              "--update-env-vars",
-              "GOOGLE_API_KEY="    + os.environ["GOOGLE_API_KEY"],
-              "--update-env-vars",
-              "BUDGET_THRESHOLD="  + os.environ["BUDGET_THRESHOLD"],
-              "--update-env-vars",
-              "IDLE_CPU_THRESHOLD="+ os.environ["IDLE_CPU_THRESHOLD"],
-              "--update-env-vars",
-              "QUOTA_ALERT_PERCENT="+ os.environ["QUOTA_ALERT_PERCENT"],
-              "--update-env-vars",
-              "DRY_RUN="           + os.environ["DRY_RUN_VAL"],
-              "--update-env-vars",
-              "GCP_SA_KEY_JSON="   + os.environ["GCP_SA_KEY"],
-              "--update-env-vars",
-              "GSC_TOKEN_JSON="    + os.environ["GSC_TOKEN_JSON"],
+          project  = os.environ["GCP_PROJECT_ID"]
+          image    = os.environ["IMAGE"]
+          region   = "us-central1"
+          service  = "gcp-bot"
+
+          env_vars = [
+            {"name": "GCP_PROJECT_ID",      "value": os.environ["GCP_PROJECT_ID"]},
+            {"name": "DASHBOARD_API_KEY",   "value": os.environ["DASHBOARD_API_KEY"]},
+            {"name": "GA4_PROPERTY_ID",     "value": os.environ["GA4_PROPERTY_ID"]},
+            {"name": "GOOGLE_API_KEY",      "value": os.environ["GOOGLE_API_KEY"]},
+            {"name": "BUDGET_THRESHOLD",    "value": os.environ["BUDGET_THRESHOLD"]},
+            {"name": "IDLE_CPU_THRESHOLD",  "value": os.environ["IDLE_CPU_THRESHOLD"]},
+            {"name": "QUOTA_ALERT_PERCENT", "value": os.environ["QUOTA_ALERT_PERCENT"]},
+            {"name": "DRY_RUN",             "value": os.environ["DRY_RUN"]},
+            {"name": "GCP_SA_KEY_JSON",     "value": os.environ["GCP_SA_KEY_JSON"]},
+            {"name": "GSC_TOKEN_JSON",      "value": os.environ["GSC_TOKEN_JSON"]},
           ]
 
-          result = subprocess.run(cmd, text=True, capture_output=False)
-          sys.exit(result.returncode)
+          svc = {
+            "apiVersion": "serving.knative.dev/v1",
+            "kind": "Service",
+            "metadata": {
+              "name": service,
+              "namespace": project,
+              "annotations": {
+                "run.googleapis.com/ingress": "all",
+              },
+            },
+            "spec": {
+              "template": {
+                "metadata": {
+                  "annotations": {
+                    "autoscaling.knative.dev/minScale": "1",
+                    "autoscaling.knative.dev/maxScale": "3",
+                  }
+                },
+                "spec": {
+                  "containerConcurrency": 80,
+                  "containers": [{
+                    "image": image,
+                    "ports": [{"containerPort": 8080}],
+                    "resources": {
+                      "limits": {"cpu": "1000m", "memory": "512Mi"}
+                    },
+                    "env": env_vars,
+                  }]
+                }
+              },
+              "traffic": [{"percent": 100, "latestRevision": True}]
+            }
+          }
+
+          with open("/tmp/service.yaml", "w") as f:
+            yaml.dump(svc, f, default_flow_style=False, allow_unicode=True)
+
+          print("Service YAML written — deploying...")
+          r = subprocess.run(
+            ["gcloud", "run", "services", "replace", "/tmp/service.yaml",
+             "--region", region, "--quiet"],
+            text=True
+          )
+          if r.returncode != 0:
+            sys.exit(r.returncode)
+
+          # Allow unauthenticated (public) access
+          subprocess.run([
+            "gcloud", "run", "services", "add-iam-policy-binding", service,
+            "--region", region,
+            "--member", "allUsers",
+            "--role", "roles/run.invoker",
+            "--quiet"
+          ], text=True)
+
+          print("✅ Deploy complete")
           PYEOF
         env:
-          IMAGE_TAG: gcr.io/${{ secrets.GCP_PROJECT_ID }}/gcp-bot
-          GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-          DASHBOARD_API_KEY: ${{ secrets.DASHBOARD_API_KEY }}
-          GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
-          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
-          BUDGET_THRESHOLD: ${{ secrets.BUDGET_THRESHOLD }}
-          IDLE_CPU_THRESHOLD: ${{ secrets.IDLE_CPU_THRESHOLD }}
-          QUOTA_ALERT_PERCENT: ${{ secrets.QUOTA_ALERT_PERCENT }}
-          DRY_RUN_VAL: ${{ github.event.inputs.dry_run || 'false' }}
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          GSC_TOKEN_JSON: ${{ secrets.GSC_TOKEN_JSON }}
+          IMAGE: gcr.io/${{ secrets.GCP_PROJECT_ID }}/gcp-bot
 
-      - name: Get Cloud Run service URL
-        id: service_url
+      - name: Get service URL
+        id: url
         run: |
           URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
-            --region ${{ env.REGION }} \
-            --format="value(status.url)")
+            --region ${{ env.REGION }} --format="value(status.url)")
           echo "url=${URL}" >> $GITHUB_OUTPUT
-          echo "🌐 Service URL: ${URL}"
+          echo "🌐 ${URL}"
 
-      - name: Smoke test — health check
+      - name: Health check
         run: |
-          URL="${{ steps.service_url.outputs.url }}"
-          echo "Running health check against ${URL}/health ..."
-          for i in 1 2 3; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${URL}/health" || echo "000")
-            if [ "$STATUS" = "200" ]; then
-              echo "✅ Health check passed (HTTP 200)"
-              exit 0
-            fi
-            echo "Attempt $i: HTTP $STATUS — retrying in 5s..."
-            sleep 5
+          URL="${{ steps.url.outputs.url }}"
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "${URL}/health" || echo "000")
+            [ "$STATUS" = "200" ] && echo "✅ Health check passed" && exit 0
+            echo "Attempt $i: HTTP ${STATUS} — waiting 10s..."
+            sleep 10
           done
-          echo "⚠️  Health check did not return 200 — deployment may still be starting up."
+          echo "⚠️ Health check inconclusive — check Cloud Run console"
           exit 0
 
-      - name: Deployment summary
+      - name: Summary
         run: |
-          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-          IMAGE_TAG="${{ env.IMAGE }}:${SHORT_SHA}"
-          echo "### 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
-          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Service** | ${{ env.SERVICE_NAME }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Region** | ${{ env.REGION }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Image** | \`${IMAGE_TAG}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Commit** | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **URL** | ${{ steps.service_url.outputs.url }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Dry Run** | ${{ github.event.inputs.dry_run || 'false' }} |" >> $GITHUB_STEP_SUMMARY
+          SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          {
+            echo "### 🚀 Deployment Complete"
+            echo "| | |"
+            echo "|---|---|"
+            echo "| Service | ${{ env.SERVICE_NAME }} |"
+            echo "| Image | \`${{ env.IMAGE }}:${SHA}\` |"
+            echo "| URL | ${{ steps.url.outputs.url }} |"
+            echo "| Commit | \`${{ github.sha }}\` |"
+          } >> $GITHUB_STEP_SUMMARY
