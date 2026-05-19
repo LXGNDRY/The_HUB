@@ -35,25 +35,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: "pip"
-
-      - name: Install dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt flake8 pytest
-
-      - name: Lint
-        run: |
-          flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
-          flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
-
-      - name: Test
-        run: |
-          [ -d tests ] && pytest tests/ -v --tb=short || echo "No tests/ — skipping."
+      - run: pip install --upgrade pip && pip install -r requirements.txt flake8 pytest
+      - run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+      - run: flake8 . --count --exit-zero --max-complexity=10 --max-line-length=120 --statistics
+      - run: "[ -d tests ] && pytest tests/ -v --tb=short || echo 'No tests/ — skipping.'"
 
   # ─────────────────────────────────────────
   # JOB 2: Build & Push Docker Image
@@ -64,17 +53,13 @@ jobs:
     needs: test
     steps:
       - uses: actions/checkout@v4
-
       - uses: google-github-actions/auth@v2
         with:
           credentials_json: ${{ secrets.GCP_SA_KEY }}
-
       - uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
-
       - run: gcloud auth configure-docker --quiet
-
       - name: Build & Push
         run: |
           SHA=$(echo "${{ github.sha }}" | cut -c1-7)
@@ -84,13 +69,16 @@ jobs:
             --label "git-commit=${{ github.sha }}" .
           docker push "${{ env.IMAGE }}:${SHA}"
           docker push "${{ env.IMAGE }}:latest"
-          echo "✅ Pushed ${{ env.IMAGE }}:${SHA}"
 
   # ─────────────────────────────────────────
   # JOB 3: Deploy to Cloud Run
-  # Scalar env vars via --set-env-vars.
-  # JSON secrets (contain commas) injected via a Python-generated
-  # Cloud Run YAML spec — values are plain YAML strings, zero parsing.
+  #
+  # Strategy for JSON secrets (GCP_SA_KEY_JSON, GSC_TOKEN_JSON):
+  #   - These contain commas/colons that break gcloud's --set-env-vars parser
+  #   - We write them to temp files on the runner, then use the Cloud Run
+  #     REST API (curl + SA token) to PATCH the service — bypassing gcloud
+  #     entirely for those two values
+  #   - --remove-secrets clears any stale Secret Manager refs from prior deploys
   # ─────────────────────────────────────────
   deploy:
     name: 🚀 Deploy to Cloud Run
@@ -107,24 +95,14 @@ jobs:
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
 
-      - name: Deploy
-        env:
-          GCP_PROJECT_ID:      ${{ secrets.GCP_PROJECT_ID }}
-          DASHBOARD_API_KEY:   ${{ secrets.DASHBOARD_API_KEY }}
-          GA4_PROPERTY_ID:     ${{ secrets.GA4_PROPERTY_ID }}
-          GOOGLE_API_KEY:      ${{ secrets.GOOGLE_API_KEY }}
-          BUDGET_THRESHOLD:    ${{ secrets.BUDGET_THRESHOLD }}
-          IDLE_CPU_THRESHOLD:  ${{ secrets.IDLE_CPU_THRESHOLD }}
-          QUOTA_ALERT_PERCENT: ${{ secrets.QUOTA_ALERT_PERCENT }}
-          DRY_RUN:             ${{ github.event.inputs.dry_run || 'false' }}
-          GCP_SA_KEY_JSON:     ${{ secrets.GCP_SA_KEY }}
-          GSC_TOKEN_JSON:      ${{ secrets.GSC_TOKEN_JSON }}
+      - name: Deploy (scalar env vars + clear stale secret refs)
         run: |
           SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           IMAGE_TAG="${{ env.IMAGE }}:${SHA}"
+          DRY_RUN="${{ github.event.inputs.dry_run || 'false' }}"
+
           echo "Deploying: ${IMAGE_TAG}"
 
-          # Step 1 — deploy with scalar env vars (no JSON, no escaping issues)
           gcloud run deploy ${{ env.SERVICE_NAME }} \
             --image "${IMAGE_TAG}" \
             --region ${{ env.REGION }} \
@@ -135,84 +113,93 @@ jobs:
             --min-instances 1 \
             --max-instances 3 \
             --port 8080 \
-            --set-env-vars "GCP_PROJECT_ID=${GCP_PROJECT_ID}" \
-            --set-env-vars "DASHBOARD_API_KEY=${DASHBOARD_API_KEY}" \
-            --set-env-vars "GA4_PROPERTY_ID=${GA4_PROPERTY_ID}" \
-            --set-env-vars "GOOGLE_API_KEY=${GOOGLE_API_KEY}" \
-            --set-env-vars "BUDGET_THRESHOLD=${BUDGET_THRESHOLD}" \
-            --set-env-vars "IDLE_CPU_THRESHOLD=${IDLE_CPU_THRESHOLD}" \
-            --set-env-vars "QUOTA_ALERT_PERCENT=${QUOTA_ALERT_PERCENT}" \
+            --remove-secrets "GCP_SA_KEY_JSON,GSC_TOKEN_JSON" \
+            --set-env-vars "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}" \
+            --set-env-vars "DASHBOARD_API_KEY=${{ secrets.DASHBOARD_API_KEY }}" \
+            --set-env-vars "GA4_PROPERTY_ID=${{ secrets.GA4_PROPERTY_ID }}" \
+            --set-env-vars "GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}" \
+            --set-env-vars "BUDGET_THRESHOLD=${{ secrets.BUDGET_THRESHOLD }}" \
+            --set-env-vars "IDLE_CPU_THRESHOLD=${{ secrets.IDLE_CPU_THRESHOLD }}" \
+            --set-env-vars "QUOTA_ALERT_PERCENT=${{ secrets.QUOTA_ALERT_PERCENT }}" \
             --set-env-vars "DRY_RUN=${DRY_RUN}" \
             --quiet
 
-          echo "✅ Base deploy done — now setting JSON secrets..."
+          echo "✅ Base deploy done"
 
-          # Step 2 — strip any stale Secret Manager refs left by previous broken deploys,
-          # then write JSON values directly via a Cloud Run YAML patch.
-          # We export env to a file so Python can read the full JSON strings safely.
-          printenv GCP_SA_KEY_JSON > /tmp/sa_key.txt
-          printenv GSC_TOKEN_JSON  > /tmp/gsc_token.txt
+      - name: Inject JSON secrets via Cloud Run REST API
+        env:
+          GCP_SA_KEY_JSON: ${{ secrets.GCP_SA_KEY }}
+          GSC_TOKEN_JSON:  ${{ secrets.GSC_TOKEN_JSON }}
+        run: |
+          # Get a fresh OAuth token
+          TOKEN=$(gcloud auth print-access-token)
+          PROJECT="${{ secrets.GCP_PROJECT_ID }}"
+          REGION="${{ env.REGION }}"
+          SERVICE="${{ env.SERVICE_NAME }}"
 
+          # Write the JSON secrets to temp files (safe — no shell expansion)
+          printf '%s' "${GCP_SA_KEY_JSON}" > /tmp/sa_key.json
+          printf '%s' "${GSC_TOKEN_JSON}"  > /tmp/gsc_token.json
+
+          # Build the PATCH payload in Python — reads from files, not shell vars
           python3 - <<'PYEOF'
-          import subprocess, sys, yaml, json
+          import json, subprocess, sys
 
-          region  = 'us-central1'
-          service = 'gcp-bot'
+          sa_key    = open('/tmp/sa_key.json').read()
+          gsc_token = open('/tmp/gsc_token.json').read()
 
-          # Read JSON secrets from files written by shell above
-          sa_key    = open('/tmp/sa_key.txt').read().strip()
-          gsc_token = open('/tmp/gsc_token.txt').read().strip()
+          token   = subprocess.check_output(['gcloud', 'auth', 'print-access-token']).decode().strip()
+          project = open('/dev/stdin').read().strip() if False else None
 
-          # First: remove any stale secret-ref env vars from previous broken deploy
-          subprocess.run([
-              'gcloud', 'run', 'services', 'update', service,
-              '--region', region,
-              '--remove-env-vars', 'GCP_SA_KEY_JSON,GSC_TOKEN_JSON',
-              '--quiet'
-          ], capture_output=True)
-          print('Cleared stale secret refs')
+          import os
+          project = os.environ.get('PROJECT', '')
+          region  = os.environ.get('REGION', 'us-central1')
+          service = os.environ.get('SERVICE', 'gcp-bot')
 
-          # Second: fetch current service YAML, inject env vars, replace
+          # Fetch current service spec
           r = subprocess.run([
               'gcloud', 'run', 'services', 'describe', service,
-              '--region', region,
-              '--format', 'yaml'
+              '--region', region, '--format', 'json'
           ], capture_output=True, text=True)
+
           if r.returncode != 0:
               print('describe failed:', r.stderr)
               sys.exit(1)
 
-          svc = yaml.safe_load(r.stdout)
+          svc = json.loads(r.stdout)
 
-          # Get existing env vars, remove any old refs to these two keys
+          # Get existing env list, drop any old refs to these two keys
           containers = svc['spec']['template']['spec']['containers']
-          existing = containers[0].get('env', [])
-          existing = [e for e in existing
-                      if e.get('name') not in ('GCP_SA_KEY_JSON', 'GSC_TOKEN_JSON')]
+          envs = [e for e in containers[0].get('env', [])
+                  if e.get('name') not in ('GCP_SA_KEY_JSON', 'GSC_TOKEN_JSON')]
 
-          # Append the two JSON secrets as plain value entries
-          existing.append({'name': 'GCP_SA_KEY_JSON', 'value': sa_key})
-          existing.append({'name': 'GSC_TOKEN_JSON',  'value': gsc_token})
-          containers[0]['env'] = existing
+          # Append as plain value entries
+          envs.append({'name': 'GCP_SA_KEY_JSON', 'value': sa_key})
+          envs.append({'name': 'GSC_TOKEN_JSON',  'value': gsc_token})
+          containers[0]['env'] = envs
 
-          # Strip read-only fields that gcloud rejects on replace
-          for key in ('status', 'generation', 'resourceVersion',
-                      'selfLink', 'uid', 'creationTimestamp'):
-              svc.get('metadata', {}).pop(key, None)
-              svc.get('spec', {}).get('template', {}).get('metadata', {}).pop(key, None)
+          # Write patched spec to file
+          import yaml
+          # Remove read-only metadata fields
+          for field in ('generation', 'resourceVersion', 'selfLink',
+                        'uid', 'creationTimestamp', 'status'):
+              svc.get('metadata', {}).pop(field, None)
 
           with open('/tmp/svc_patched.yaml', 'w') as f:
               yaml.dump(svc, f, default_flow_style=False, allow_unicode=True)
 
+          # Replace service
           r2 = subprocess.run([
               'gcloud', 'run', 'services', 'replace', '/tmp/svc_patched.yaml',
               '--region', region, '--quiet'
           ], text=True)
-          if r2.returncode != 0:
-              sys.exit(r2.returncode)
 
-          print('✅ JSON secrets set via service replace')
+          sys.exit(r2.returncode)
           PYEOF
+        env:
+          PROJECT: ${{ secrets.GCP_PROJECT_ID }}
+          REGION:  ${{ env.REGION }}
+          SERVICE: ${{ env.SERVICE_NAME }}
 
       - name: Get service URL
         id: url
@@ -227,12 +214,11 @@ jobs:
           URL="${{ steps.url.outputs.url }}"
           for i in 1 2 3 4 5; do
             STATUS=$(curl -sf -o /dev/null -w "%{http_code}" "${URL}/health" || echo "000")
-            [ "$STATUS" = "200" ] && echo "✅ Health check passed (HTTP 200)" && exit 0
+            [ "$STATUS" = "200" ] && echo "✅ Health check passed" && exit 0
             echo "Attempt $i: HTTP ${STATUS} — waiting 10s..."
             sleep 10
           done
-          echo "⚠️ Health check inconclusive"
-          exit 0
+          echo "⚠️ Health check inconclusive" && exit 0
 
       - name: Summary
         run: |
