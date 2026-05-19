@@ -147,33 +147,71 @@ jobs:
 
           echo "✅ Base deploy done — now setting JSON secrets..."
 
-          # Step 2 — update JSON secrets via Python to a temp file,
-          # then gcloud reads from file via @/path syntax (no shell parsing)
+          # Step 2 — strip any stale Secret Manager refs left by previous broken deploys,
+          # then write JSON values directly via a Cloud Run YAML patch.
+          # We export env to a file so Python can read the full JSON strings safely.
+          printenv GCP_SA_KEY_JSON > /tmp/sa_key.txt
+          printenv GSC_TOKEN_JSON  > /tmp/gsc_token.txt
+
           python3 - <<'PYEOF'
-          import os, subprocess, tempfile, sys
+          import subprocess, sys, yaml, json
 
-          def set_env(var, val):
-              """Write value to a temp file and use gcloud --update-env-vars=VAR=@file"""
-              with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                  f.write(val)
-                  path = f.name
-              # gcloud supports VAR=@/path/to/file for values with special chars
-              result = subprocess.run([
-                  'gcloud', 'run', 'services', 'update', 'gcp-bot',
-                  '--region', 'us-central1',
-                  f'--update-env-vars={var}=@{path}',
-                  '--quiet'
-              ], text=True, capture_output=True)
-              os.unlink(path)
-              if result.returncode != 0:
-                  print(f'stderr: {result.stderr}')
-                  return False
-              print(f'✅ {var} set')
-              return True
+          region  = 'us-central1'
+          service = 'gcp-bot'
 
-          ok1 = set_env('GCP_SA_KEY_JSON', os.environ['GCP_SA_KEY_JSON'])
-          ok2 = set_env('GSC_TOKEN_JSON',  os.environ['GSC_TOKEN_JSON'])
-          sys.exit(0 if (ok1 and ok2) else 1)
+          # Read JSON secrets from files written by shell above
+          sa_key    = open('/tmp/sa_key.txt').read().strip()
+          gsc_token = open('/tmp/gsc_token.txt').read().strip()
+
+          # First: remove any stale secret-ref env vars from previous broken deploy
+          subprocess.run([
+              'gcloud', 'run', 'services', 'update', service,
+              '--region', region,
+              '--remove-env-vars', 'GCP_SA_KEY_JSON,GSC_TOKEN_JSON',
+              '--quiet'
+          ], capture_output=True)
+          print('Cleared stale secret refs')
+
+          # Second: fetch current service YAML, inject env vars, replace
+          r = subprocess.run([
+              'gcloud', 'run', 'services', 'describe', service,
+              '--region', region,
+              '--format', 'yaml'
+          ], capture_output=True, text=True)
+          if r.returncode != 0:
+              print('describe failed:', r.stderr)
+              sys.exit(1)
+
+          svc = yaml.safe_load(r.stdout)
+
+          # Get existing env vars, remove any old refs to these two keys
+          containers = svc['spec']['template']['spec']['containers']
+          existing = containers[0].get('env', [])
+          existing = [e for e in existing
+                      if e.get('name') not in ('GCP_SA_KEY_JSON', 'GSC_TOKEN_JSON')]
+
+          # Append the two JSON secrets as plain value entries
+          existing.append({'name': 'GCP_SA_KEY_JSON', 'value': sa_key})
+          existing.append({'name': 'GSC_TOKEN_JSON',  'value': gsc_token})
+          containers[0]['env'] = existing
+
+          # Strip read-only fields that gcloud rejects on replace
+          for key in ('status', 'generation', 'resourceVersion',
+                      'selfLink', 'uid', 'creationTimestamp'):
+              svc.get('metadata', {}).pop(key, None)
+              svc.get('spec', {}).get('template', {}).get('metadata', {}).pop(key, None)
+
+          with open('/tmp/svc_patched.yaml', 'w') as f:
+              yaml.dump(svc, f, default_flow_style=False, allow_unicode=True)
+
+          r2 = subprocess.run([
+              'gcloud', 'run', 'services', 'replace', '/tmp/svc_patched.yaml',
+              '--region', region, '--quiet'
+          ], text=True)
+          if r2.returncode != 0:
+              sys.exit(r2.returncode)
+
+          print('✅ JSON secrets set via service replace')
           PYEOF
 
       - name: Get service URL
