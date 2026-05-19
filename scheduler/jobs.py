@@ -2,6 +2,9 @@
 Job definitions for the GCP Bot scheduler.
 Each function is a standalone, independently testable unit.
 All destructive actions are wrapped in safe_execute() for dry-run support.
+
+Compute Engine API is OPTIONAL — if unavailable, all compute-dependent
+jobs log a clear warning and skip gracefully without crashing the scheduler.
 """
 
 import os
@@ -16,7 +19,7 @@ logger = logging.getLogger("gcp-bot.jobs")
 
 PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
 BUDGET_THRESHOLD = float(os.getenv("BUDGET_THRESHOLD", "100.0"))
-IDLE_CPU_THRESHOLD = float(os.getenv("IDLE_CPU_THRESHOLD", "2.0"))  # percent
+IDLE_CPU_THRESHOLD = float(os.getenv("IDLE_CPU_THRESHOLD", "2.0"))
 SNAPSHOT_MAX_AGE_DAYS = int(os.getenv("SNAPSHOT_MAX_AGE_DAYS", "30"))
 QUOTA_ALERT_PERCENT = float(os.getenv("QUOTA_ALERT_PERCENT", "80.0"))
 STORAGE_INACTIVE_DAYS = int(os.getenv("STORAGE_INACTIVE_DAYS", "90"))
@@ -24,7 +27,40 @@ GCP_ZONES = os.getenv("GCP_ZONES", "us-central1-a,us-central1-b").split(",")
 
 
 # ---------------------------------------------------------------------------
-# JOB 1 — Daily Billing Cost Alert
+# Compute availability check — run once at import time
+# ---------------------------------------------------------------------------
+
+def _compute_available() -> bool:
+    """
+    Returns True if google-cloud-compute is installed AND
+    the Compute Engine API is reachable for this project.
+    Caches result to avoid redundant API calls.
+    """
+    if not hasattr(_compute_available, "_cached"):
+        try:
+            import google.cloud.compute_v1  # noqa: F401
+            _compute_available._cached = True
+            logger.info("[compute_check] Compute Engine API available.")
+        except (ImportError, Exception) as e:
+            _compute_available._cached = False
+            logger.warning(
+                "[compute_check] Compute Engine API unavailable — "
+                "VM jobs will be skipped until enabled. Reason: %s", e
+            )
+    return _compute_available._cached
+
+
+def _compute_skip_notice(job_name: str):
+    """Log a clean skip message for compute-dependent jobs."""
+    logger.warning(
+        "[%s] Skipped — Compute Engine API not enabled. "
+        "Enable it at: console.cloud.google.com/apis/library/compute.googleapis.com",
+        job_name,
+    )
+
+
+# ---------------------------------------------------------------------------
+# JOB 1 — Daily Billing Cost Alert  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
 
 def cost_alert_job():
@@ -60,15 +96,20 @@ def cost_alert_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 2 — Weekly Snapshot Cleanup
+# JOB 2 — Weekly Snapshot Cleanup  [COMPUTE REQUIRED — GRACEFUL SKIP]
 # ---------------------------------------------------------------------------
 
 def cleanup_snapshots_job():
     """
     Deletes GCP disk snapshots older than SNAPSHOT_MAX_AGE_DAYS.
-    Uses safe_execute to respect DRY_RUN mode.
+    Skips gracefully if Compute Engine API is not enabled.
     """
     logger.info("[cleanup_snapshots_job] Running...")
+
+    if not _compute_available():
+        _compute_skip_notice("cleanup_snapshots_job")
+        return
+
     try:
         from modules.compute import ComputeModule
         compute = ComputeModule(PROJECT_ID, get_credentials())
@@ -96,15 +137,20 @@ def cleanup_snapshots_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 3 — VM Health Check (every 15 min)
+# JOB 3 — VM Health Check  [COMPUTE REQUIRED — GRACEFUL SKIP]
 # ---------------------------------------------------------------------------
 
 def vm_health_check_job():
     """
     Scans all configured zones for VMs in unexpected states.
-    Alerts immediately if any VM is in an error or staging state.
+    Skips gracefully if Compute Engine API is not enabled.
     """
     logger.info("[vm_health_check_job] Running across zones: %s", GCP_ZONES)
+
+    if not _compute_available():
+        _compute_skip_notice("vm_health_check_job")
+        return
+
     try:
         from modules.compute import ComputeModule
         compute = ComputeModule(PROJECT_ID, get_credentials())
@@ -120,9 +166,7 @@ def vm_health_check_job():
                     healthy_count += 1
 
         if issues:
-            send_alert(
-                f"🔴 *VM Health Issues Detected*\n" + "\n".join(issues)
-            )
+            send_alert(f"🔴 *VM Health Issues Detected*\n" + "\n".join(issues))
             logger.warning("[vm_health_check_job] %d issue(s) found.", len(issues))
         else:
             logger.info("[vm_health_check_job] All %d VMs healthy.", healthy_count)
@@ -133,15 +177,20 @@ def vm_health_check_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 4 — Nightly Idle VM Auto-Shutdown
+# JOB 4 — Nightly Idle VM Auto-Shutdown  [COMPUTE REQUIRED — GRACEFUL SKIP]
 # ---------------------------------------------------------------------------
 
 def idle_vm_shutdown_job():
     """
     Stops VMs with average CPU < IDLE_CPU_THRESHOLD% over the last 60 minutes.
-    Excludes VMs tagged with 'no-autostop' label.
+    Skips gracefully if Compute Engine API is not enabled.
     """
     logger.info("[idle_vm_shutdown_job] Running...")
+
+    if not _compute_available():
+        _compute_skip_notice("idle_vm_shutdown_job")
+        return
+
     try:
         from modules.compute import ComputeModule
         from modules.monitoring import MonitoringModule
@@ -177,29 +226,34 @@ def idle_vm_shutdown_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 5 — Monthly GCP Usage Report
+# JOB 5 — Monthly GCP Usage Report  [COMPUTE OPTIONAL — PARTIAL IF MISSING]
 # ---------------------------------------------------------------------------
 
 def monthly_report_job():
     """
-    Generates a full monthly GCP usage summary:
-    spend by service, active VM count, storage usage, top costs.
-    Sends via all configured notification channels.
+    Generates a full monthly GCP usage summary.
+    VM count is reported as 'N/A' if Compute Engine API is unavailable.
     """
     logger.info("[monthly_report_job] Running...")
     try:
         from modules.billing import BillingModule
-        from modules.compute import ComputeModule
         from modules.storage import StorageModule
         billing = BillingModule(get_credentials())
-        compute = ComputeModule(PROJECT_ID, get_credentials())
         storage = StorageModule(get_credentials())
 
         monthly_spend = billing.get_monthly_spend()
         spend_by_service = billing.get_spend_by_service()
-        total_vms = sum(len(compute.list_instances(z)) for z in GCP_ZONES)
         buckets = storage.list_buckets()
         total_buckets = len(list(buckets))
+
+        # VM count: include if compute available, show N/A otherwise
+        if _compute_available():
+            from modules.compute import ComputeModule
+            compute = ComputeModule(PROJECT_ID, get_credentials())
+            total_vms = sum(len(compute.list_instances(z)) for z in GCP_ZONES)
+            vm_line = f"Active VMs    : {total_vms}"
+        else:
+            vm_line = "Active VMs    : N/A (Compute Engine API not enabled)"
 
         service_lines = "\n".join(
             [f"  • {svc}: ${cost:.2f}" for svc, cost in spend_by_service.items()]
@@ -207,8 +261,8 @@ def monthly_report_job():
 
         report = (
             f"📅 *Monthly GCP Report — {datetime.now(timezone.utc).strftime('%B %Y')}*\n"
-            f"Total Spend   : ${monthly_spend:.2f}\n"
-            f"Active VMs    : {total_vms}\n"
+            f"Total Spend    : ${monthly_spend:.2f}\n"
+            f"{vm_line}\n"
             f"Storage Buckets: {total_buckets}\n\n"
             f"*Spend by Service:*\n{service_lines}"
         )
@@ -221,13 +275,12 @@ def monthly_report_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 6 — Weekly Storage Bucket Audit
+# JOB 6 — Weekly Storage Bucket Audit  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
 
 def storage_audit_job():
     """
-    Flags GCP Storage buckets that have had no object access
-    in STORAGE_INACTIVE_DAYS days. Sends a review alert.
+    Flags GCP Storage buckets with no object access in STORAGE_INACTIVE_DAYS days.
     """
     logger.info("[storage_audit_job] Running...")
     try:
@@ -252,7 +305,7 @@ def storage_audit_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 7 — Quota Usage Check (every 6 hours)
+# JOB 7 — Quota Usage Check  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
 
 def quota_check_job():

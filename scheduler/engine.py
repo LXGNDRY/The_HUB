@@ -1,7 +1,12 @@
 """
 BotScheduler — APScheduler-based automation engine.
-All jobs are registered here with their triggers.
-The scheduler runs as a background thread alongside the FastAPI server.
+All jobs registered here with their triggers.
+Runs as a background thread alongside the FastAPI server.
+
+NOTE: Compute-dependent jobs (VM health, idle shutdown, snapshot cleanup)
+are registered on schedule regardless — the jobs themselves detect
+Compute Engine API availability and skip gracefully if unavailable.
+No scheduler changes are needed when Compute Engine API is later enabled.
 """
 
 import logging
@@ -23,16 +28,15 @@ from scheduler.jobs import (
 
 logger = logging.getLogger("gcp-bot.scheduler")
 
-# APScheduler configuration
-JOBSTORES = {"default": MemoryJobStore()}
-EXECUTORS = {"default": ThreadPoolExecutor(max_workers=5)}
+JOBSTORES  = {"default": MemoryJobStore()}
+EXECUTORS  = {"default": ThreadPoolExecutor(max_workers=5)}
 JOB_DEFAULTS = {"coalesce": True, "max_instances": 1, "misfire_grace_time": 60}
 
 
 class BotScheduler:
     """
     Central scheduler for all GCP bot automation jobs.
-    Wraps APScheduler with register, control, and introspection methods.
+    Compute jobs register normally — each job self-checks API availability.
     """
 
     def __init__(self, timezone: str = "America/Chicago"):
@@ -45,9 +49,9 @@ class BotScheduler:
         self._register_jobs()
 
     def _register_jobs(self):
-        """Register all automation jobs with their schedules."""
+        """Register all 7 automation jobs."""
 
-        # --- Daily: Billing cost check at 8:00 AM CDT ---
+        # Daily 8:00 AM — Billing alert (always runs)
         self.scheduler.add_job(
             cost_alert_job,
             CronTrigger(hour=8, minute=0),
@@ -56,34 +60,34 @@ class BotScheduler:
             replace_existing=True,
         )
 
-        # --- Weekly: Snapshot cleanup every Monday at 9:00 AM ---
+        # Monday 9:00 AM — Snapshot cleanup (skips if no Compute API)
         self.scheduler.add_job(
             cleanup_snapshots_job,
             CronTrigger(day_of_week="mon", hour=9, minute=0),
             id="weekly_snapshot_cleanup",
-            name="Cleanup Old Snapshots (30d+)",
+            name="Cleanup Old Snapshots (30d+) — requires Compute API",
             replace_existing=True,
         )
 
-        # --- Every 15 min: VM health pulse ---
+        # Every 15 min — VM health pulse (skips if no Compute API)
         self.scheduler.add_job(
             vm_health_check_job,
             IntervalTrigger(minutes=15),
             id="vm_health_pulse",
-            name="VM Health Check",
+            name="VM Health Check — requires Compute API",
             replace_existing=True,
         )
 
-        # --- Nightly: Idle VM auto-shutdown at midnight ---
+        # Midnight nightly — Idle VM shutdown (skips if no Compute API)
         self.scheduler.add_job(
             idle_vm_shutdown_job,
             CronTrigger(hour=0, minute=0),
             id="nightly_idle_shutdown",
-            name="Shutdown Idle VMs",
+            name="Shutdown Idle VMs — requires Compute API",
             replace_existing=True,
         )
 
-        # --- Monthly: Full GCP usage report on 1st of month at 7:00 AM ---
+        # 1st of month 7:00 AM — Monthly report (partial if no Compute API)
         self.scheduler.add_job(
             monthly_report_job,
             CronTrigger(day=1, hour=7, minute=0),
@@ -92,7 +96,7 @@ class BotScheduler:
             replace_existing=True,
         )
 
-        # --- Weekly: Storage bucket audit every Sunday at 6:00 AM ---
+        # Sunday 6:00 AM — Storage audit (always runs)
         self.scheduler.add_job(
             storage_audit_job,
             CronTrigger(day_of_week="sun", hour=6, minute=0),
@@ -101,7 +105,7 @@ class BotScheduler:
             replace_existing=True,
         )
 
-        # --- Every 6 hours: Quota usage check ---
+        # Every 6 hours — Quota check (always runs)
         self.scheduler.add_job(
             quota_check_job,
             IntervalTrigger(hours=6),
@@ -112,10 +116,6 @@ class BotScheduler:
 
         logger.info("Registered %d scheduler jobs.", len(self.scheduler.get_jobs()))
 
-    # -------------------------------------------------------------------------
-    # Lifecycle
-    # -------------------------------------------------------------------------
-
     def start(self):
         self.scheduler.start()
         logger.info("BotScheduler started.")
@@ -124,12 +124,7 @@ class BotScheduler:
         self.scheduler.shutdown(wait=False)
         logger.info("BotScheduler stopped.")
 
-    # -------------------------------------------------------------------------
-    # Introspection & Control (exposed via FastAPI /api/scheduler routes)
-    # -------------------------------------------------------------------------
-
     def get_jobs(self) -> list[dict]:
-        """Return serializable list of all registered jobs."""
         return [
             {
                 "id": job.id,
@@ -150,7 +145,6 @@ class BotScheduler:
         logger.info("Resumed job: %s", job_id)
 
     def run_now(self, job_id: str):
-        """Immediately execute a job outside its schedule."""
         job = self.scheduler.get_job(job_id)
         if not job:
             raise ValueError(f"Job not found: {job_id}")
