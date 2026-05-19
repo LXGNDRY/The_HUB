@@ -1,0 +1,108 @@
+# ============================================================
+# Legendary Branding — Google PageSpeed Insights Runner
+# Runs mobile + desktop PageSpeed audit and prints all data
+# ============================================================
+
+name: 📊 Legendary PageSpeed Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      url:
+        description: "URL to audit (default: legendarybrandingco.com)"
+        required: false
+        default: "https://www.legendarybrandingco.com"
+        type: string
+  schedule:
+    # Run every day at 8am CST (14:00 UTC)
+    - cron: "0 14 * * *"
+
+jobs:
+  pagespeed:
+    name: 📊 PageSpeed Audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      - name: Run PageSpeed Audit — Mobile + Desktop
+        env:
+          PAGESPEED_API_KEY: ${{ secrets.PAGESPEED_API_KEY }}
+          PAGESPEED_URL: ${{ github.event.inputs.url || 'https://www.legendarybrandingco.com' }}
+        run: |
+          python -c "
+import sys
+sys.path.insert(0, '.')
+from agents.pagespeed_agent import run
+results = run()
+
+# GitHub Actions Step Summary
+import os, json
+summary_path = os.environ.get('GITHUB_STEP_SUMMARY', '')
+if summary_path:
+    with open(summary_path, 'a') as f:
+        f.write('## 📊 Legendary Branding — PageSpeed Report\n\n')
+        for strategy, r in results.items():
+            if not r: continue
+            s = r['scores']
+            v = r['core_web_vitals']
+            f.write(f'### {strategy.upper()} 📱\n\n' if strategy == 'mobile' else f'### {strategy.upper()} 🖥️\n\n')
+            f.write('| Metric | Score |\n|--------|-------|\n')
+            f.write(f'| 🎯 Performance | **{s[\"performance\"]}/100** |\n')
+            f.write(f'| 🔍 SEO | **{s[\"seo\"]}/100** |\n')
+            f.write(f'| ♿ Accessibility | **{s[\"accessibility\"]}/100** |\n')
+            f.write(f'| ✅ Best Practices | **{s[\"best_practices\"]}/100** |\n')
+            f.write('\n**Core Web Vitals**\n\n')
+            f.write('| Metric | Value |\n|--------|-------|\n')
+            f.write(f'| LCP | {v[\"lcp\"]} |\n')
+            f.write(f'| FCP | {v[\"fcp\"]} |\n')
+            f.write(f'| CLS | {v[\"cls\"]} |\n')
+            f.write(f'| INP/TBT | {v[\"inp\"]} |\n')
+            f.write(f'| Speed Index | {v[\"speed_index\"]} |\n')
+            f.write(f'| TTFB | {v[\"ttfb\"]} |\n')
+            f.write(f'| TTI | {v[\"tti\"]} |\n')
+            if r.get(\"opportunities\"):
+                f.write('\n**Top Opportunities**\n\n')
+                for opp in r[\"opportunities\"][:5]:
+                    f.write(f\"- ⚡ {opp['title']} — save ~{opp['savings_ms']}ms\\n\")
+            f.write('\n---\n\n')
+"
+
+      - name: Export JSON artifact
+        env:
+          PAGESPEED_API_KEY: ${{ secrets.PAGESPEED_API_KEY }}
+          PAGESPEED_URL: ${{ github.event.inputs.url || 'https://www.legendarybrandingco.com' }}
+        run: |
+          python -c "
+import json, sys
+sys.path.insert(0, '.')
+from agents.pagespeed_agent import run_pagespeed
+results = {}
+for s in ['mobile', 'desktop']:
+    try:
+        results[s] = run_pagespeed(strategy=s)
+    except Exception as e:
+        results[s] = {'error': str(e)}
+with open('pagespeed_results.json', 'w') as f:
+    json.dump(results, f, indent=2)
+print('Results saved to pagespeed_results.json')
+"
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pagespeed-results
+          path: pagespeed_results.json
+          retention-days: 30
