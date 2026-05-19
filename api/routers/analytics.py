@@ -14,23 +14,21 @@ GA4_PROPERTY_ID = os.getenv("GA4_PROPERTY_ID", "")
 
 
 def _ga4_client():
-    """Build an authenticated GA4 Data API client."""
+    """Build an authenticated GA4 Data API client with explicit analytics scope."""
     from google.analytics.data_v1beta import BetaAnalyticsDataClient
-    from auth.credentials import get_credentials
-    return BetaAnalyticsDataClient(credentials=get_credentials())
+    from google.auth import default
+    creds, _ = default(
+        scopes=["https://www.googleapis.com/auth/analytics.readonly"]
+    )
+    return BetaAnalyticsDataClient(credentials=creds)
 
 
 @router.get("/traffic", summary="GA4 traffic overview")
 def traffic_overview(days: int = 28):
-    """
-    Returns sessions, users, bounce rate, and avg session duration
-    from GA4 for legendary-branding.com over the last `days` days.
-    """
     try:
         from google.analytics.data_v1beta.types import (
             DateRange, Dimension, Metric, RunReportRequest,
         )
-
         prop = GA4_PROPERTY_ID or os.getenv("GA4_PROPERTY_ID", "")
         if not prop:
             raise ValueError("GA4_PROPERTY_ID env var not set")
@@ -66,14 +64,10 @@ def traffic_overview(days: int = 28):
 
 @router.get("/top-pages", summary="GA4 top pages by sessions")
 def top_pages(days: int = 28, limit: int = 20):
-    """
-    Returns the top pages ranked by sessions over the last `days` days.
-    """
     try:
         from google.analytics.data_v1beta.types import (
             DateRange, Dimension, Metric, RunReportRequest, OrderBy,
         )
-
         prop = GA4_PROPERTY_ID or os.getenv("GA4_PROPERTY_ID", "")
         if not prop:
             raise ValueError("GA4_PROPERTY_ID env var not set")

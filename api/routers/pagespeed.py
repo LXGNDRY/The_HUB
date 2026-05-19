@@ -12,7 +12,6 @@ logger = logging.getLogger("gcp-bot.pagespeed")
 router = APIRouter()
 
 PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 
 @router.get("/report", summary="PageSpeed Insights report")
@@ -26,12 +25,13 @@ def pagespeed_report(
     Returns Core Web Vitals + Lighthouse performance score.
     """
     try:
-        params = {
+        # Build params — API key optional (rate-limited without it)
+        params: dict = {
             "url": url,
             "strategy": strategy,
             "category": "performance",
         }
-        api_key = GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY", "")
+        api_key = os.getenv("GOOGLE_API_KEY", "")
         if api_key:
             params["key"] = api_key
 
@@ -67,8 +67,9 @@ def pagespeed_report(
             },
         }
     except httpx.HTTPStatusError as exc:
-        logger.error("PSI HTTP error: %s", exc)
-        raise HTTPException(status_code=exc.response.status_code, detail=str(exc))
+        body = exc.response.text[:300]
+        logger.error("PSI HTTP error %s: %s", exc.response.status_code, body)
+        raise HTTPException(status_code=exc.response.status_code, detail=body)
     except Exception as exc:
         logger.error("PSI error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

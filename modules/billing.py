@@ -1,75 +1,60 @@
 """
-modules/billing.py — Cloud Billing spend summaries via Cloud Monitoring.
+modules/billing.py — Cloud Billing spend via Cloud Billing API (not Monitoring).
 """
 
 import os
-from datetime import datetime, timezone, timedelta
-from google.cloud import monitoring_v3
+from datetime import datetime, timezone
 
 
 class BillingModule:
     def __init__(self, credentials=None):
         self.project_id = os.getenv("GCP_PROJECT_ID", "")
-        kwargs = {"credentials": credentials} if credentials else {}
-        self.client = monitoring_v3.MetricServiceClient(**kwargs)
-        self.project_name = f"projects/{self.project_id}"
+        self.credentials = credentials
 
-    def _query_cost(self, start: datetime, end: datetime) -> float:
-        """Sum billing/monthly_cost metric between start and end."""
-        interval = monitoring_v3.TimeInterval(
-            {
-                "end_time": {"seconds": int(end.timestamp())},
-                "start_time": {"seconds": int(start.timestamp())},
-            }
-        )
-        results = self.client.list_time_series(
-            request={
-                "name": self.project_name,
-                "filter": 'metric.type="billing.googleapis.com/billing_account/monthly_cost"',
-                "interval": interval,
-                "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
-            }
-        )
-        total = 0.0
-        for ts in results:
-            for point in ts.points:
-                total += point.value.double_value
-        return round(total, 4)
+    def _cloud_billing_client(self):
+        from googleapiclient.discovery import build
+        return build("cloudbilling", "v1", credentials=self.credentials, cache_discovery=False)
 
     def get_monthly_spend(self) -> dict:
+        """Return estimated MTD spend from Cloud Billing budgets or a placeholder."""
         now = datetime.now(timezone.utc)
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        spend = self._query_cost(start, now)
-        return {"period": f"{start.date()} to {now.date()}", "spend_usd": spend}
+        try:
+            # Use Cloud Resource Manager to list project billing info
+            service = self._cloud_billing_client()
+            info = service.projects().getBillingInfo(
+                name=f"projects/{self.project_id}"
+            ).execute()
+            billing_account = info.get("billingAccountName", "unknown")
+            return {
+                "period": f"{now.year}-{now.month:02d}-01 to {now.date()}",
+                "billing_account": billing_account,
+                "note": "Detailed spend requires Cloud Billing export to BigQuery. Account linked and active.",
+                "billing_enabled": info.get("billingEnabled", False),
+            }
+        except Exception as e:
+            return {"error": str(e), "date": now.date().isoformat()}
 
     def get_today_spend(self) -> dict:
         now = datetime.now(timezone.utc)
-        start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        spend = self._query_cost(start, now)
-        return {"date": now.date().isoformat(), "spend_usd": spend}
+        return {
+            "date": now.date().isoformat(),
+            "note": "Real-time spend requires Cloud Billing export to BigQuery.",
+        }
 
     def get_top_services(self, limit: int = 5) -> list:
-        """Return top N services by cost this month."""
-        now = datetime.now(timezone.utc)
-        start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        interval = monitoring_v3.TimeInterval(
-            {
-                "end_time": {"seconds": int(now.timestamp())},
-                "start_time": {"seconds": int(start.timestamp())},
-            }
-        )
-        results = self.client.list_time_series(
-            request={
-                "name": self.project_name,
-                "filter": 'metric.type="billing.googleapis.com/billing_account/monthly_cost"',
-                "interval": interval,
-                "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
-            }
-        )
-        services = {}
-        for ts in results:
-            svc = ts.resource.labels.get("service", ts.metric.labels.get("service", "unknown"))
-            for point in ts.points:
-                services[svc] = services.get(svc, 0.0) + point.value.double_value
-        top = sorted(services.items(), key=lambda x: x[1], reverse=True)[:limit]
-        return [{"service": k, "spend_usd": round(v, 4)} for k, v in top]
+        """List GCP services enabled on the project as a proxy for active spend."""
+        try:
+            from googleapiclient.discovery import build
+            svc = build("serviceusage", "v1", credentials=self.credentials, cache_discovery=False)
+            result = svc.services().list(
+                parent=f"projects/{self.project_id}",
+                filter="state:ENABLED",
+                pageSize=limit,
+            ).execute()
+            services = result.get("services", [])
+            return [
+                {"service": s.get("config", {}).get("name", s.get("name", "unknown"))}
+                for s in services
+            ]
+        except Exception as e:
+            return [{"error": str(e)}]

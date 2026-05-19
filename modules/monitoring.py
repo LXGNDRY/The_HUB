@@ -13,35 +13,38 @@ class MonitoringModule:
         self.project_id = project_id
         kwargs = {"credentials": credentials} if credentials else {}
         self.metric_client = monitoring_v3.MetricServiceClient(**kwargs)
-        self.service_client = monitoring_v3.ServiceMonitoringServiceClient(**kwargs)
         self.compute_client = compute_v1.InstancesClient(**kwargs)
         self.project_name = f"projects/{self.project_id}"
 
     def get_quotas_above_threshold(self, threshold_percent: float = 80.0) -> list:
-        """Return quota metrics above threshold% utilization."""
+        """Return quota utilization using serviceruntime quota metrics."""
         now = datetime.now(timezone.utc)
-        start = now - timedelta(minutes=10)
+        start = now - timedelta(hours=1)
         interval = monitoring_v3.TimeInterval(
             {
                 "end_time": {"seconds": int(now.timestamp())},
                 "start_time": {"seconds": int(start.timestamp())},
             }
         )
-        results = self.metric_client.list_time_series(
-            request={
-                "name": self.project_name,
-                "filter": 'metric.type="compute.googleapis.com/quota/exceeded"',
-                "interval": interval,
-                "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
-            }
-        )
-        quotas = []
-        for ts in results:
-            labels = ts.metric.labels
-            quota_metric = labels.get("quota_metric", "unknown")
-            limit_name = labels.get("limit_name", "")
-            quotas.append({"quota": quota_metric, "limit": limit_name})
-        return quotas or [{"message": "No quotas exceeded above threshold."}]
+        try:
+            results = self.metric_client.list_time_series(
+                request={
+                    "name": self.project_name,
+                    "filter": 'metric.type="serviceruntime.googleapis.com/quota/rate/net_usage"',
+                    "interval": interval,
+                    "view": monitoring_v3.ListTimeSeriesRequest.TimeSeriesView.FULL,
+                }
+            )
+            quotas = []
+            for ts in results:
+                labels = ts.metric.labels
+                quotas.append({
+                    "quota_metric": labels.get("quota_metric", "unknown"),
+                    "service": ts.resource.labels.get("service", "unknown"),
+                })
+            return quotas or [{"message": "No quota usage data found in the last hour."}]
+        except Exception as e:
+            return [{"error": str(e)}]
 
     def get_low_cpu_instances(
         self, threshold_percent: float = 2.0, lookback_minutes: int = 60
