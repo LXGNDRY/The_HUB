@@ -8,8 +8,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-
 from api.middleware.auth import verify_api_key
 from api.routers import compute, storage, billing, monitoring, seo, analytics, pagespeed
 from scheduler.engine import BotScheduler

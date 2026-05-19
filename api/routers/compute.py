@@ -10,11 +10,29 @@ from config import safe_execute
 
 router = APIRouter()
 PROJECT_ID = os.getenv("GCP_PROJECT_ID", "")
+GCP_ZONES = os.getenv("GCP_ZONES", "us-central1-a,us-central1-b").split(",")
 
 
 def _compute():
     from modules.compute import ComputeModule
     return ComputeModule(PROJECT_ID, get_credentials())
+
+
+@router.get("/vms", summary="List all VMs across all configured zones")
+def list_all_vms():
+    """List every VM instance across all GCP_ZONES. Used for health checks."""
+    try:
+        compute = _compute()
+        all_vms = []
+        for zone in GCP_ZONES:
+            vms = compute.list_instances(zone)
+            all_vms.extend(
+                {"name": vm.name, "status": vm.status, "zone": zone}
+                for vm in vms
+            )
+        return all_vms
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/instances/{zone}")

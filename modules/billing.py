@@ -41,6 +41,27 @@ class BillingModule:
             "note": "Real-time spend requires Cloud Billing export to BigQuery.",
         }
 
+    def get_spend_by_service(self) -> dict:
+        """
+        Return active services as a proxy spend breakdown.
+        Real per-service spend requires Cloud Billing export to BigQuery.
+        """
+        try:
+            from googleapiclient.discovery import build
+            svc = build("serviceusage", "v1", credentials=self.credentials, cache_discovery=False)
+            result = svc.services().list(
+                parent=f"projects/{self.project_id}",
+                filter="state:ENABLED",
+                pageSize=20,
+            ).execute()
+            services = result.get("services", [])
+            return {
+                s.get("config", {}).get("name", s.get("name", "unknown")): 0.0
+                for s in services
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
     def get_top_services(self, limit: int = 5) -> list:
         """List GCP services enabled on the project as a proxy for active spend."""
         try:

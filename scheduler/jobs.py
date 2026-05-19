@@ -72,23 +72,28 @@ def cost_alert_job():
     try:
         from modules.billing import BillingModule
         billing = BillingModule(get_credentials())
-        monthly_spend = billing.get_monthly_spend()
-        daily_spend = billing.get_today_spend()
+        monthly_data = billing.get_monthly_spend()
+        daily_data = billing.get_today_spend()
         top_services = billing.get_top_services(limit=3)
+
+        # get_monthly_spend returns a dict — extract a note string for the report
+        billing_account = monthly_data.get("billing_account", "unknown")
+        billing_enabled = monthly_data.get("billing_enabled", False)
+        monthly_note = monthly_data.get("note", "")
+        daily_note = daily_data.get("note", "")
+        top_svc_names = [s.get("service", str(s)) for s in top_services]
 
         summary = (
             f"📊 *GCP Daily Cost Report* — {datetime.now(timezone.utc).strftime('%Y-%m-%d')}\n"
-            f"Monthly Total : ${monthly_spend:.2f} / Budget ${BUDGET_THRESHOLD:.2f}\n"
-            f"Today         : ${daily_spend:.2f}\n"
-            f"Top Services  : {', '.join(top_services)}"
+            f"Billing Account : {billing_account}\n"
+            f"Billing Enabled : {billing_enabled}\n"
+            f"Spend Note      : {monthly_note}\n"
+            f"Daily Note      : {daily_note}\n"
+            f"Top Services    : {', '.join(top_svc_names)}"
         )
 
-        if monthly_spend > BUDGET_THRESHOLD:
-            summary = f"🚨 *BUDGET EXCEEDED*\n" + summary
-            logger.warning("[cost_alert_job] Budget threshold exceeded: $%.2f", monthly_spend)
-
         send_alert(summary)
-        logger.info("[cost_alert_job] Completed. Monthly: $%.2f", monthly_spend)
+        logger.info("[cost_alert_job] Completed. Billing enabled: %s", billing_enabled)
 
     except Exception as e:
         logger.error("[cost_alert_job] Failed: %s", e)
@@ -166,7 +171,7 @@ def vm_health_check_job():
                     healthy_count += 1
 
         if issues:
-            send_alert(f"🔴 *VM Health Issues Detected*\n" + "\n".join(issues))
+            send_alert("🔴 *VM Health Issues Detected*\n" + "\n".join(issues))
             logger.warning("[vm_health_check_job] %d issue(s) found.", len(issues))
         else:
             logger.info("[vm_health_check_job] All %d VMs healthy.", healthy_count)
@@ -241,10 +246,14 @@ def monthly_report_job():
         billing = BillingModule(get_credentials())
         storage = StorageModule(get_credentials())
 
-        monthly_spend = billing.get_monthly_spend()
+        monthly_data = billing.get_monthly_spend()
         spend_by_service = billing.get_spend_by_service()
         buckets = storage.list_buckets()
         total_buckets = len(list(buckets))
+
+        billing_account = monthly_data.get("billing_account", "unknown")
+        billing_enabled = monthly_data.get("billing_enabled", False)
+        monthly_note = monthly_data.get("note", "No spend data available.")
 
         # VM count: include if compute available, show N/A otherwise
         if _compute_available():
@@ -256,18 +265,19 @@ def monthly_report_job():
             vm_line = "Active VMs    : N/A (Compute Engine API not enabled)"
 
         service_lines = "\n".join(
-            [f"  • {svc}: ${cost:.2f}" for svc, cost in spend_by_service.items()]
-        )
+            [f"  • {svc}" for svc in spend_by_service]
+        ) if spend_by_service else "  (Billing export to BigQuery required for per-service data)"
 
         report = (
             f"📅 *Monthly GCP Report — {datetime.now(timezone.utc).strftime('%B %Y')}*\n"
-            f"Total Spend    : ${monthly_spend:.2f}\n"
+            f"Billing Account : {billing_account} (enabled={billing_enabled})\n"
+            f"Spend Note      : {monthly_note}\n"
             f"{vm_line}\n"
-            f"Storage Buckets: {total_buckets}\n\n"
-            f"*Spend by Service:*\n{service_lines}"
+            f"Storage Buckets : {total_buckets}\n\n"
+            f"*Active Services:*\n{service_lines}"
         )
         send_alert(report)
-        logger.info("[monthly_report_job] Completed. Spend: $%.2f", monthly_spend)
+        logger.info("[monthly_report_job] Completed. Billing enabled: %s", billing_enabled)
 
     except Exception as e:
         logger.error("[monthly_report_job] Failed: %s", e)

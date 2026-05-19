@@ -206,7 +206,6 @@ class ThemeDeploymentAgent:
             if blob.name.endswith("meta.json"):
                 continue
             relative = blob.name[len(version_pfx):]
-            live_blob = self.bucket.blob(f"live/{relative}")
             self.bucket.copy_blob(blob, self.bucket, f"live/{relative}")
             rolled_back.append(relative)
             print(f"  [rollback] {relative}")

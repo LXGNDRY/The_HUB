@@ -23,6 +23,25 @@ class StorageModule:
             total += blob.size or 0
         return total
 
+    def get_inactive_buckets(self, days: int = 90) -> list:
+        """
+        Return bucket names whose most recently updated object is older than N days.
+        Buckets with no objects at all are also flagged.
+        """
+        from datetime import datetime, timezone, timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        inactive = []
+        for bucket in self.client.list_buckets():
+            blobs = list(self.client.list_blobs(bucket.name, max_results=1,
+                                                 fields="items(updated)"))
+            if not blobs:
+                inactive.append(bucket.name)
+            else:
+                latest = max((b.updated for b in blobs if b.updated), default=None)
+                if latest and latest < cutoff:
+                    inactive.append(bucket.name)
+        return inactive
+
     def delete_old_objects(self, bucket_name: str, older_than_days: int = 90) -> list:
         """Delete objects not modified in older_than_days days. Returns list of deleted names."""
         from datetime import datetime, timezone, timedelta

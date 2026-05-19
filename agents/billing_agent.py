@@ -27,7 +27,6 @@ import os
 import csv
 import json
 import datetime
-from io import StringIO
 from typing import Optional
 
 import requests
@@ -130,8 +129,6 @@ class BillingAgent:
             elif b.amount.last_period_amount:
                 amount = "last_period"
 
-            # Current spend from budget.budget_filter or alerts
-            spend_pct = None
             thresholds = sorted(
                 [t.threshold_percent for t in b.threshold_rules], reverse=True
             ) if b.threshold_rules else []

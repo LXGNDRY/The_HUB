@@ -2,7 +2,6 @@
 modules/monitoring.py — Cloud Monitoring: quotas and idle VM detection.
 """
 
-import os
 from datetime import datetime, timezone, timedelta
 from google.cloud import monitoring_v3
 from google.cloud import compute_v1
@@ -47,9 +46,13 @@ class MonitoringModule:
             return [{"error": str(e)}]
 
     def get_low_cpu_instances(
-        self, threshold_percent: float = 2.0, lookback_minutes: int = 60
+        self, threshold_percent: float = 2.0, lookback_minutes: int = 60,
+        exclude_label: str = None
     ) -> list:
-        """Return (name, zone) tuples for VMs with avg CPU below threshold."""
+        """
+        Return (name, zone) tuples for VMs with avg CPU below threshold.
+        exclude_label: if set, skip VMs whose metadata labels contain this key.
+        """
         now = datetime.now(timezone.utc)
         start = now - timedelta(minutes=lookback_minutes)
         interval = monitoring_v3.TimeInterval(
