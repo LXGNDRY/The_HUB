@@ -1,28 +1,28 @@
 # Web framework
-fastapi==0.115.12
-uvicorn[standard]==0.34.3
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
 
 # HTTP client
-httpx==0.28.1
+httpx>=0.27.0
 
 # Scheduler
-apscheduler==3.11.0
+apscheduler>=3.10.0
 
 # Google Cloud
-google-cloud-billing==1.15.0
-google-cloud-compute==1.23.0
-google-cloud-monitoring==2.24.1
-google-cloud-storage==2.19.0
-google-analytics-data==0.18.14
-googleapis-common-protos==1.70.0
+google-cloud-billing>=1.13.0
+google-cloud-compute>=1.20.0
+google-cloud-monitoring>=2.20.0
+google-cloud-storage>=2.16.0
+google-analytics-data>=0.18.0
+googleapis-common-protos>=1.63.0
 
 # Google Auth
-google-auth==2.40.1
-google-auth-oauthlib==1.2.1
-google-api-python-client==2.170.0
+google-auth>=2.30.0
+google-auth-oauthlib>=1.2.0
+google-api-python-client>=2.150.0
 
 # Environment
-python-dotenv==1.1.0
+python-dotenv>=1.0.0
 
 # Utilities
-requests==2.32.3
+requests>=2.32.0
