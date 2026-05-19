@@ -3,15 +3,16 @@ PageSpeed router — Google PageSpeed Insights API.
 Prefix in main.py: /api/pagespeed
 """
 
+import os
 import logging
 import httpx
 from fastapi import APIRouter, HTTPException
-from config import settings
 
 logger = logging.getLogger("gcp-bot.pagespeed")
 router = APIRouter()
 
 PSI_URL = "https://www.googleapis.com/pagespeedonline/v5/runPagespeed"
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 
 
 @router.get("/report", summary="PageSpeed Insights report")
@@ -28,9 +29,12 @@ def pagespeed_report(
         params = {
             "url": url,
             "strategy": strategy,
-            "key": settings.google_api_key,
             "category": "performance",
         }
+        api_key = GOOGLE_API_KEY or os.getenv("GOOGLE_API_KEY", "")
+        if api_key:
+            params["key"] = api_key
+
         resp = httpx.get(PSI_URL, params=params, timeout=60)
         resp.raise_for_status()
         data = resp.json()

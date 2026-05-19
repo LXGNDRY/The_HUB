@@ -3,23 +3,27 @@ SEO router — Google Search Console integration.
 Prefix in main.py: /api/seo
 """
 
+import os
 import logging
 from fastapi import APIRouter, HTTPException
-from config import settings
 
 logger = logging.getLogger("gcp-bot.seo")
 router = APIRouter()
+
+SERVICE_ACCOUNT_KEY = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "")
 
 
 def _gsc_client():
     """Build an authenticated GSC client via google-api-python-client."""
     from googleapiclient.discovery import build
-    from google.oauth2 import service_account
+    from auth.credentials import get_credentials
 
-    creds = service_account.Credentials.from_service_account_file(
-        settings.google_service_account_key_path,
-        scopes=["https://www.googleapis.com/auth/webmasters.readonly"],
-    )
+    creds_base = get_credentials()
+    from google.auth.transport.requests import Request
+    from google.oauth2.credentials import Credentials
+    # Re-scope credentials for GSC
+    from google.auth import default
+    creds, _ = default(scopes=["https://www.googleapis.com/auth/webmasters.readonly"])
     return build("searchconsole", "v1", credentials=creds, cache_discovery=False)
 
 

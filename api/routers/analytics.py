@@ -3,24 +3,21 @@ Analytics router — Google Analytics 4 (Data API) integration.
 Prefix in main.py: /api/analytics
 """
 
+import os
 import logging
 from fastapi import APIRouter, HTTPException
-from config import settings
 
 logger = logging.getLogger("gcp-bot.analytics")
 router = APIRouter()
+
+GA4_PROPERTY_ID = os.getenv("GA4_PROPERTY_ID", "")
 
 
 def _ga4_client():
     """Build an authenticated GA4 Data API client."""
     from google.analytics.data_v1beta import BetaAnalyticsDataClient
-    from google.oauth2 import service_account
-
-    creds = service_account.Credentials.from_service_account_file(
-        settings.google_service_account_key_path,
-        scopes=["https://www.googleapis.com/auth/analytics.readonly"],
-    )
-    return BetaAnalyticsDataClient(credentials=creds)
+    from auth.credentials import get_credentials
+    return BetaAnalyticsDataClient(credentials=get_credentials())
 
 
 @router.get("/traffic", summary="GA4 traffic overview")
@@ -34,9 +31,13 @@ def traffic_overview(days: int = 28):
             DateRange, Dimension, Metric, RunReportRequest,
         )
 
+        prop = GA4_PROPERTY_ID or os.getenv("GA4_PROPERTY_ID", "")
+        if not prop:
+            raise ValueError("GA4_PROPERTY_ID env var not set")
+
         client = _ga4_client()
         request = RunReportRequest(
-            property=f"properties/{settings.ga4_property_id}",
+            property=f"properties/{prop}",
             date_ranges=[DateRange(start_date=f"{days}daysAgo", end_date="today")],
             dimensions=[Dimension(name="date")],
             metrics=[
@@ -73,9 +74,13 @@ def top_pages(days: int = 28, limit: int = 20):
             DateRange, Dimension, Metric, RunReportRequest, OrderBy,
         )
 
+        prop = GA4_PROPERTY_ID or os.getenv("GA4_PROPERTY_ID", "")
+        if not prop:
+            raise ValueError("GA4_PROPERTY_ID env var not set")
+
         client = _ga4_client()
         request = RunReportRequest(
-            property=f"properties/{settings.ga4_property_id}",
+            property=f"properties/{prop}",
             date_ranges=[DateRange(start_date=f"{days}daysAgo", end_date="today")],
             dimensions=[Dimension(name="pagePath")],
             metrics=[
