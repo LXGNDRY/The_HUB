@@ -16,7 +16,7 @@ import requests
 logger = logging.getLogger("gcp-bot.gemini")
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_VERTEX_PROJECT = os.getenv("GCP_PROJECT_ID", "idx-lngndny")
 GEMINI_VERTEX_REGION = os.getenv("GEMINI_VERTEX_REGION", "us-central1")
