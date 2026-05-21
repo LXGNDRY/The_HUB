@@ -31,7 +31,7 @@ def pagespeed_report(
             "strategy": strategy,
             "category": "performance",
         }
-        api_key = os.getenv("GOOGLE_API_KEY", "")
+        api_key = os.getenv("PAGESPEED_API_KEY", "")
         if api_key:
             params["key"] = api_key
 
