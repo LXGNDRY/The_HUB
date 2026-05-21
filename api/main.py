@@ -10,7 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from api.middleware.auth import verify_api_key
 from api.routers import compute, storage, billing, monitoring, seo, analytics, pagespeed
-from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs
+from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs, higgsfield
 from scheduler.engine import BotScheduler
 
 logging.basicConfig(
@@ -66,7 +66,8 @@ app.include_router(sheets.router,     prefix="/api/sheets",     tags=["Sheets"],
 app.include_router(indexing.router,   prefix="/api/indexing",   tags=["Indexing"],   **protected)
 app.include_router(tag_manager.router,prefix="/api/gtm",        tags=["Tag Manager"],**protected)
 app.include_router(secrets.router,    prefix="/api/secrets",    tags=["Secrets"],    **protected)
-app.include_router(logs.router,       prefix="/api/logs",       tags=["Logs"],       **protected)
+app.include_router(logs.router,        prefix="/api/logs",        tags=["Logs"],        **protected)
+app.include_router(higgsfield.router,  prefix="/api/higgsfield",  tags=["Higgsfield AI"], **protected)
 
 # -------------------------------------------------------------------------
 # Scheduler control routes
