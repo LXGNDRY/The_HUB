@@ -51,25 +51,30 @@ class GeminiModule:
 
     def _init_vertex(self):
         """
-        Verify SA credentials are present and refreshable.
-        Generation is done via Vertex AI REST (us-central1-aiplatform.googleapis.com)
-        which natively accepts SA bearer tokens.
-        Requires: roles/aiplatform.user granted to the SA in IAM.
+        Verify SA credentials, eagerly fetch the first token at startup.
+        Stores the refreshed credentials as self._sa_creds so _get_sa_token()
+        reuses the same object (with a valid cached token) on every request.
         """
         if not self.credentials:
             self._sa_ready = False
+            self._sa_creds = None
             return
         try:
             import google.auth.transport.requests
             request = google.auth.transport.requests.Request()
             if not self.credentials.valid:
                 self.credentials.refresh(request)
+            self._sa_creds = self.credentials  # store refreshed creds as the cache object
             self._sa_ready = bool(self.credentials.token)
             if self._sa_ready:
-                logger.info("[gemini] SA credentials ready — using Vertex AI REST.")
+                logger.info(
+                    "[gemini] SA token obtained at startup. Expiry: %s",
+                    getattr(self.credentials, 'expiry', 'unknown')
+                )
         except Exception as e:
             logger.warning("[gemini] SA credential refresh failed (%s) — falling back to API key.", e)
             self._sa_ready = False
+            self._sa_creds = None
 
     def _init_sdk(self):
         """Try google-generativeai SDK with API key."""
