@@ -302,16 +302,23 @@ class GeminiModule:
             brand_voice: Writing style context.
         """
         prompt = (
-            f"Write one complete, punchy {theme} quote for Legendary Branding's daily social post.\n"
-            f"Brand voice: {brand_voice}, bold, authentic, premium streetwear.\n"
-            f"Rules:\n"
-            f"- MUST be a complete, finished sentence or phrase (never cut off mid-word)\n"
-            f"- 5-12 words max\n"
-            f"- No quotation marks\n"
-            f"- No hashtags, no attribution\n"
-            f"Return ONLY the quote text. Nothing else."
+            f"You are a copywriter for Legendary Branding, a premium streetwear label.\n"
+            f"Write ONE brand quote for today's social post. Theme: {theme}.\n"
+            f"\n"
+            f"The quote MUST:\n"
+            f"- Be a grammatically complete sentence ending with a period or exclamation mark\n"
+            f"- Contain between 4 and 8 words (count carefully)\n"
+            f"- Sound bold, confident, authentic to {brand_voice} culture\n"
+            f"- Contain NO quotation marks, hashtags, or line breaks\n"
+            f"\n"
+            f"Examples of correct format:\n"
+            f"Built different. Worn by legends.\n"
+            f"Your style tells the story.\n"
+            f"Quality is the only flex that matters.\n"
+            f"\n"
+            f"Output the quote and nothing else."
         )
-        return self.generate(prompt, temperature=0.9, max_tokens=80)
+        return self.generate(prompt, temperature=0.85, max_tokens=40)
 
     def analyze_seo_data(self, gsc_data: dict, ga4_data: dict) -> str:
         """
