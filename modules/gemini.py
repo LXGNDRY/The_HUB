@@ -183,7 +183,17 @@ class GeminiModule:
         resp = requests.post(url, json=body, headers=headers, timeout=30)
         resp.raise_for_status()
         data = resp.json()
-        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
+        # gemini-2.5-flash returns a thinking block in candidates[0] with no 'text'
+        # The actual text response is in the last candidate with finishReason=STOP
+        candidates = data.get("candidates", [])
+        for candidate in candidates:
+            finish = candidate.get("finishReason", "")
+            parts = candidate.get("content", {}).get("parts", [])
+            for part in parts:
+                text = part.get("text", "").strip()
+                if text:  # skip empty thinking blocks
+                    return text
+        raise ValueError(f"No text in Vertex response. Keys: {list(data.keys())}, candidates: {len(candidates)}")
 
     def _generate_sdk(self, prompt: str, temperature: float, max_tokens: int) -> str:
         import google.generativeai as genai
