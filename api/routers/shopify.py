@@ -110,9 +110,28 @@ class SetMetafieldRequest(BaseModel):
 # System / Connection
 # ─────────────────────────────────────────────
 
+@router.get("/token/status", summary="Token cache status (no API call)")
+def token_status():
+    """Returns TTL, expiry time, and next auto-refresh window for the admin token."""
+    try:
+        return sh.token_status()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/token/refresh", summary="Force immediate token refresh")
+def force_token_refresh():
+    """Immediately discard the cached token and fetch a fresh one via Client Credentials Grant."""
+    try:
+        return sh.force_token_refresh()
+    except Exception as e:
+        logger.error("Force token refresh failed: %s", e)
+        raise HTTPException(status_code=502, detail=str(e))
+
+
 @router.get("/ping", summary="Test Shopify admin token connection")
 def shopify_ping():
-    """Verify admin token and return shop info."""
+    """Verify admin token and return shop info (includes token_status)."""
     try:
         return sh.test_connection()
     except Exception as e:

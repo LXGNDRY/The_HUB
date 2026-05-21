@@ -4,11 +4,24 @@ Covers: Products, Orders, Customers, Inventory, Content (Pages/Blogs/Articles),
         Themes, Price Rules / Discounts, SEO meta patching.
 
 All calls use the Admin REST API v2026-04.
-Token is injected via SHOPIFY_ADMIN_TOKEN env var (shpat_...).
+Token is obtained (and auto-refreshed) via OAuth Client Credentials Grant
+using SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET env vars.
+
+Refresh strategy:
+  - Token is cached in module memory with its expiry timestamp.
+  - Before every API call, _ensure_token() checks if we are within
+    REFRESH_BUFFER_SECONDS (300s = 5 min) of expiry.
+  - If so, a new grant is issued and the cache is updated.
+  - Bootstrap: if SHOPIFY_ADMIN_TOKEN is pre-set in env, it is used
+    as the initial token with an assumed expiry of 23h from boot,
+    so the first refresh happens ~1 hour before it would actually expire.
+
 Store domain is SHOPIFY_STORE_DOMAIN (default: lngndny.myshopify.com).
 """
 
 import os
+import time
+import threading
 import logging
 import requests
 from typing import Optional
@@ -19,14 +32,93 @@ logger = logging.getLogger("gcp-bot.shopify")
 # Config
 # ─────────────────────────────────────────────
 SHOPIFY_STORE_DOMAIN: str = os.getenv("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
-SHOPIFY_ADMIN_TOKEN: str = os.getenv("SHOPIFY_ADMIN_TOKEN", "")
+SHOPIFY_CLIENT_ID: str = os.getenv("SHOPIFY_CLIENT_ID", "")
+SHOPIFY_CLIENT_SECRET: str = os.getenv("SHOPIFY_CLIENT_SECRET", "")
 API_VERSION = "2026-04"
 BASE_URL = f"https://{SHOPIFY_STORE_DOMAIN}/admin/api/{API_VERSION}"
+OAUTH_URL = f"https://{SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token"
+
+# How many seconds before expiry to proactively refresh
+REFRESH_BUFFER_SECONDS = 300  # 5 minutes
+
+
+# ─────────────────────────────────────────────
+# Token cache (module-level singleton)
+# ─────────────────────────────────────────────
+class _TokenCache:
+    """
+    Thread-safe in-memory token cache.
+    Stores the current access token and its Unix expiry timestamp.
+    """
+    def __init__(self):
+        self._lock = threading.Lock()
+        # Seed from env var if provided (assumed ~23h remaining at boot)
+        _env_token = os.getenv("SHOPIFY_ADMIN_TOKEN", "")
+        if _env_token:
+            self._token: str = _env_token
+            # Assume token was just issued — set expiry to 23h from now
+            # so we refresh ~1h before the real 24h window closes
+            self._expires_at: float = time.time() + (23 * 3600)
+            logger.info("Shopify token seeded from SHOPIFY_ADMIN_TOKEN env var (assumed 23h TTL).")
+        else:
+            self._token = ""
+            self._expires_at = 0.0
+
+    def get(self) -> str:
+        """Return the current token, refreshing first if near expiry."""
+        with self._lock:
+            if time.time() >= (self._expires_at - REFRESH_BUFFER_SECONDS):
+                self._refresh()
+            return self._token
+
+    def _refresh(self):
+        """Fetch a new token via Client Credentials Grant (called under lock)."""
+        if not SHOPIFY_CLIENT_ID or not SHOPIFY_CLIENT_SECRET:
+            raise RuntimeError(
+                "SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set to refresh the admin token."
+            )
+        logger.info("Shopify token near expiry — requesting new Client Credentials token...")
+        r = requests.post(
+            OAUTH_URL,
+            json={
+                "client_id": SHOPIFY_CLIENT_ID,
+                "client_secret": SHOPIFY_CLIENT_SECRET,
+                "grant_type": "client_credentials",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        self._token = data["access_token"]
+        expires_in = int(data.get("expires_in", 86399))
+        self._expires_at = time.time() + expires_in
+        logger.info(
+            "Shopify token refreshed. New token expires in %ds (%s).",
+            expires_in,
+            time.strftime("%Y-%m-%d %H:%M:%S UTC", time.gmtime(self._expires_at)),
+        )
+
+    def status(self) -> dict:
+        """Return cache status for diagnostics."""
+        with self._lock:
+            ttl = max(0, int(self._expires_at - time.time()))
+            return {
+                "token_set": bool(self._token),
+                "token_prefix": self._token[:12] + "..." if self._token else None,
+                "expires_at_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(self._expires_at)),
+                "ttl_seconds": ttl,
+                "ttl_minutes": round(ttl / 60, 1),
+                "will_refresh_in_seconds": max(0, int(self._expires_at - REFRESH_BUFFER_SECONDS - time.time())),
+            }
+
+
+# Module-level singleton
+_token_cache = _TokenCache()
 
 
 def _headers() -> dict:
     return {
-        "X-Shopify-Access-Token": SHOPIFY_ADMIN_TOKEN,
+        "X-Shopify-Access-Token": _token_cache.get(),
         "Content-Type": "application/json",
     }
 
@@ -63,6 +155,19 @@ def _delete(path: str) -> dict:
 # Health / Connection Test
 # ─────────────────────────────────────────────
 
+def token_status() -> dict:
+    """Return current token cache status without making an API call."""
+    return _token_cache.status()
+
+
+def force_token_refresh() -> dict:
+    """Force an immediate token refresh regardless of TTL."""
+    with _token_cache._lock:
+        _token_cache._expires_at = 0.0  # force expiry
+    _token_cache.get()  # triggers refresh
+    return {"refreshed": True, **_token_cache.status()}
+
+
 def test_connection() -> dict:
     """Ping the shop endpoint to verify admin token works."""
     data = _get("/shop.json")
@@ -75,6 +180,7 @@ def test_connection() -> dict:
         "plan": shop.get("plan_name"),
         "currency": shop.get("currency"),
         "timezone": shop.get("iana_timezone"),
+        "token_status": _token_cache.status(),
     }
 
 
