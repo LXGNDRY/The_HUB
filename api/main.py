@@ -10,7 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from api.middleware.auth import verify_api_key
 from api.routers import compute, storage, billing, monitoring, seo, analytics, pagespeed
-from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs, higgsfield
+from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs, higgsfield, shopify
 from scheduler.engine import BotScheduler
 
 logging.basicConfig(
@@ -35,7 +35,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="GCP Control Bot",
-    description="Autonomous GCP management API — compute, storage, billing, monitoring, scheduler.",
+    description="Autonomous GCP management API — compute, storage, billing, monitoring, scheduler, shopify.",
     version="1.0.0",
     lifespan=lifespan,
 )
@@ -68,6 +68,7 @@ app.include_router(tag_manager.router,prefix="/api/gtm",        tags=["Tag Manag
 app.include_router(secrets.router,    prefix="/api/secrets",    tags=["Secrets"],    **protected)
 app.include_router(logs.router,        prefix="/api/logs",        tags=["Logs"],        **protected)
 app.include_router(higgsfield.router,  prefix="/api/higgsfield",  tags=["Higgsfield AI"], **protected)
+app.include_router(shopify.router,     prefix="/api/shopify",     tags=["Shopify"],        **protected)
 
 # -------------------------------------------------------------------------
 # Scheduler control routes
