@@ -332,16 +332,19 @@ class GeminiModule:
             f"Output the quote and nothing else."
         )
         raw = self.generate(prompt, temperature=0.85, max_tokens=200)
-        # Extract first complete sentence — model sometimes returns multiple
-        # or omits terminal punctuation. Normalise to a single clean sentence.
         import re
-        # Split on sentence-ending punctuation followed by whitespace
-        sentences = re.split(r'(?<=[.!?])\s+', raw.strip())
-        first = next((s.strip() for s in sentences if len(s.split()) >= 4), None)
-        quote = first if first else raw.strip()
-        # Strip any trailing incomplete fragment after the last real sentence boundary
-        # e.g. "Grind hard, shine brighter" → keep as-is but ensure terminal punctuation
-        quote = re.sub(r'[\s,]+$', '', quote)  # strip trailing whitespace/commas
+        # Clean up: strip markdown, quotes, newlines
+        clean = re.sub(r'["\u201c\u201d\u2018\u2019*_]', '', raw).strip()
+        clean = re.sub(r'\n+', ' ', clean)
+        # Split on sentence-ending punctuation
+        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', clean) if s.strip()]
+        # Pick the longest sentence (gives best chance of a complete, meaningful quote)
+        if sentences:
+            quote = max(sentences, key=lambda s: len(s.split()))
+        else:
+            quote = clean
+        # Ensure terminal punctuation
+        quote = re.sub(r'[\s,;]+$', '', quote)
         if quote and quote[-1] not in '.!?':
             quote += '.'
         return quote
