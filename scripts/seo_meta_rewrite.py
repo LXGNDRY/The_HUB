@@ -78,9 +78,16 @@ for col_id, handle, seo_title, seo_desc in COLLECTIONS:
     rate()
 
 # ── Product meta rewrites ─────────────────────────────────────────────────────
-# Load product list
-with open("/home/user/workspace/products_for_seo.json") as f:
-    products = json.load(f)
+# Fetch products live from Shopify API
+def shopify_get(path, params=None):
+    r = requests.get(f"{BASE}{path}", headers=HEADERS, params=params or {})
+    r.raise_for_status()
+    return r.json()
+
+print("Fetching products from Shopify...")
+resp = shopify_get("/products.json", {"limit": 250, "status": "active", "fields": "id,title,product_type,tags"})
+products = resp.get("products", [])
+print(f"Fetched {len(products)} products")
 
 # Build SEO data per product
 # Pattern: "{Descriptive Title} | Legendary Branding" (≤60 chars)
