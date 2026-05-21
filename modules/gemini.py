@@ -111,25 +111,46 @@ class GeminiModule:
             return self._generate_sdk(prompt, temperature, max_tokens)
         return self._generate_rest(prompt, temperature, max_tokens)
 
+    def _get_sa_token(self) -> str:
+        """
+        Return a valid SA bearer token, refreshing only when expired.
+        Caches the refreshed credentials object on self so we don't re-parse
+        the SA key JSON on every call, but still refreshes the token when
+        it's within 5 minutes of expiry.
+        """
+        import datetime
+        import google.auth.transport.requests
+        from auth.credentials import get_credentials
+
+        # Build or reuse the credentials object
+        if not getattr(self, '_sa_creds', None):
+            self._sa_creds = get_credentials()
+
+        creds = self._sa_creds
+        now = datetime.datetime.utcnow()
+        expiry = getattr(creds, 'expiry', None)
+        needs_refresh = (
+            not creds.token
+            or not expiry
+            or (expiry - now).total_seconds() < 300  # refresh 5 min before expiry
+        )
+        if needs_refresh:
+            logger.info("[gemini] Refreshing SA token (expiry: %s)", expiry)
+            req = google.auth.transport.requests.Request()
+            creds.refresh(req)
+            logger.info("[gemini] SA token refreshed, expiry: %s", getattr(creds, 'expiry', '?'))
+
+        if not creds.token:
+            raise ValueError("SA token empty after refresh — check GCP_SA_KEY_JSON secret.")
+        return creds.token
+
     def _generate_sa_rest(self, prompt: str, temperature: float, max_tokens: int) -> str:
         """
         Call Vertex AI REST API authenticated via SA bearer token.
         Endpoint: {region}-aiplatform.googleapis.com/v1/projects/{project}/...
         Requires: roles/aiplatform.user on the SA.
-        Fresh credentials are built on every call to avoid stale token issues
-        (SA tokens expire after 1h; Cloud Run instances can live much longer).
         """
-        import google.auth.transport.requests
-        from auth.credentials import get_credentials
-
-        # Always fetch a fresh credential object to avoid 1h token expiry
-        fresh_creds = get_credentials()
-        request = google.auth.transport.requests.Request()
-        if not fresh_creds.valid:
-            fresh_creds.refresh(request)
-        token = fresh_creds.token
-        if not token:
-            raise ValueError("SA token is empty after refresh — check GCP_SA_KEY_JSON secret.")
+        token = self._get_sa_token()
 
         # Vertex AI uses a different model path format
         vertex_model = GEMINI_MODEL  # e.g. gemini-2.0-flash
