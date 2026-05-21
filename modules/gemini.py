@@ -305,7 +305,7 @@ class GeminiModule:
             f"- No hashtags, no attribution\n"
             f"Return ONLY the quote text. Nothing else."
         )
-        return self.generate(prompt, temperature=0.9, max_tokens=60)
+        return self.generate(prompt, temperature=0.9, max_tokens=80)
 
     def analyze_seo_data(self, gsc_data: dict, ga4_data: dict) -> str:
         """
