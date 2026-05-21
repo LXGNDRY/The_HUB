@@ -156,7 +156,35 @@ def daily_quote(theme: str = "motivation", brand_voice: str = "streetwear"):
         return {"quote": result, "theme": theme}
     except Exception as e:
         logger.error("[gemini] daily-quote failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+        error_str = str(e)
+        # Provide actionable fix instructions for the two known auth failure modes
+        if "API_KEY_SERVICE_BLOCKED" in error_str:
+            return {
+                "status": "setup_required",
+                "error": "GOOGLE_API_KEY is restricted and does not allow generativelanguage.googleapis.com",
+                "fix": (
+                    "Go to https://console.cloud.google.com/apis/credentials?project=idx-lngndny, "
+                    "find the API key, and either: (A) remove all API restrictions, or "
+                    "(B) add 'Generative Language API' to the allowed APIs list."
+                ),
+                "or_grant_iam": (
+                    "Alternatively, grant roles/aiplatform.user to "
+                    "901935277314-compute@developer.gserviceaccount.com at "
+                    "https://console.cloud.google.com/iam-admin/iam?project=idx-lngndny "
+                    "to use Vertex AI instead (more secure, no API key needed)."
+                ),
+            }
+        if "403" in error_str or "aiplatform" in error_str:
+            return {
+                "status": "setup_required",
+                "error": "SA lacks Vertex AI permissions",
+                "fix": (
+                    "Grant roles/aiplatform.user to "
+                    "901935277314-compute@developer.gserviceaccount.com at "
+                    "https://console.cloud.google.com/iam-admin/iam?project=idx-lngndny"
+                ),
+            }
+        raise HTTPException(status_code=500, detail=error_str)
 
 
 @router.post("/analyze-seo")
