@@ -113,35 +113,43 @@ class GeminiModule:
 
     def _get_sa_token(self) -> str:
         """
-        Return a valid SA bearer token, refreshing only when expired.
-        Caches the refreshed credentials object on self so we don't re-parse
-        the SA key JSON on every call, but still refreshes the token when
-        it's within 5 minutes of expiry.
+        Return a valid SA bearer token for Vertex AI.
+        Builds credentials directly from GCP_SA_KEY_JSON env var every time
+        (fast — just a JSON parse + conditional HTTPS token fetch).
+        Uses cloud-platform scope which covers all GCP APIs including Vertex AI.
         """
-        import datetime
+        import os, json, datetime
         import google.auth.transport.requests
-        from auth.credentials import get_credentials
+        from google.oauth2 import service_account
 
-        # Build or reuse the credentials object
+        VERTEX_SCOPE = "https://www.googleapis.com/auth/cloud-platform"
+
+        # Build or reuse — cache on self, keyed to this scope only
         if not getattr(self, '_sa_creds', None):
-            self._sa_creds = get_credentials()
+            key_json = os.getenv("GCP_SA_KEY_JSON", "")
+            if not key_json:
+                raise RuntimeError("GCP_SA_KEY_JSON env var not set — cannot authenticate with Vertex AI.")
+            info = json.loads(key_json)
+            self._sa_creds = service_account.Credentials.from_service_account_info(
+                info, scopes=[VERTEX_SCOPE]
+            )
+            logger.info("[gemini] Built SA credentials from GCP_SA_KEY_JSON.")
 
         creds = self._sa_creds
         now = datetime.datetime.utcnow()
         expiry = getattr(creds, 'expiry', None)
         needs_refresh = (
             not creds.token
-            or not expiry
-            or (expiry - now).total_seconds() < 300  # refresh 5 min before expiry
+            or expiry is None
+            or (expiry - now).total_seconds() < 300
         )
         if needs_refresh:
-            logger.info("[gemini] Refreshing SA token (expiry: %s)", expiry)
             req = google.auth.transport.requests.Request()
             creds.refresh(req)
-            logger.info("[gemini] SA token refreshed, expiry: %s", getattr(creds, 'expiry', '?'))
+            logger.info("[gemini] SA token refreshed — expiry: %s", getattr(creds, 'expiry', '?'))
 
         if not creds.token:
-            raise ValueError("SA token empty after refresh — check GCP_SA_KEY_JSON secret.")
+            raise RuntimeError("SA token still empty after refresh.")
         return creds.token
 
     def _generate_sa_rest(self, prompt: str, temperature: float, max_tokens: int) -> str:
