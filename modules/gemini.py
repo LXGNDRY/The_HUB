@@ -331,23 +331,23 @@ class GeminiModule:
             f"\n"
             f"Output the quote and nothing else."
         )
-        raw = self.generate(prompt, temperature=0.85, max_tokens=200)
+        # Use 512 tokens — gemini-2.5-flash is a thinking model; thinking tokens
+        # count against maxOutputTokens on Vertex AI. 512 gives ~400 thinking + ~100
+        # for the actual response, which is more than enough for a short brand quote.
+        raw = self.generate(prompt, temperature=0.85, max_tokens=512)
         import re
-        # Clean up: strip markdown, quotes, newlines
-        clean = re.sub(r'["\u201c\u201d\u2018\u2019*_]', '', raw).strip()
-        clean = re.sub(r'\n+', ' ', clean)
-        # Split on sentence-ending punctuation
-        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', clean) if s.strip()]
-        # Pick the longest sentence (gives best chance of a complete, meaningful quote)
-        if sentences:
-            quote = max(sentences, key=lambda s: len(s.split()))
-        else:
-            quote = clean
-        # Ensure terminal punctuation
-        quote = re.sub(r'[\s,;]+$', '', quote)
-        if quote and quote[-1] not in '.!?':
-            quote += '.'
-        return quote
+        # Strip markdown, smart quotes, asterisks
+        clean = re.sub(r'["\u201c\u201d\u2018\u2019*_`]', '', raw).strip()
+        # Collapse newlines to spaces
+        clean = re.sub(r'\s*\n\s*', ' ', clean).strip()
+        # Take the first sentence (model should output exactly one per the prompt)
+        first_sentence = re.split(r'(?<=[.!?])\s+', clean)[0].strip()
+        # Trim any trailing partial word or punctuation cruft
+        first_sentence = re.sub(r'[\s,;:]+$', '', first_sentence)
+        # Guarantee terminal punctuation
+        if first_sentence and first_sentence[-1] not in '.!?':
+            first_sentence += '.'
+        return first_sentence
 
     def analyze_seo_data(self, gsc_data: dict, ga4_data: dict) -> str:
         """
