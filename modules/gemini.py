@@ -138,7 +138,7 @@ class GeminiModule:
             "Content-Type": "application/json",
         }
         body = {
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,
@@ -161,7 +161,7 @@ class GeminiModule:
     def _generate_rest(self, prompt: str, temperature: float, max_tokens: int) -> str:
         url = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent?key={self.api_key}"
         body = {
-            "contents": [{"parts": [{"text": prompt}]}],
+            "contents": [{"role": "user", "parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": temperature,
                 "maxOutputTokens": max_tokens,

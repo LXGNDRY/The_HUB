@@ -248,7 +248,7 @@ def auth_test():
             resp = requests.post(
                 url,
                 headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={"contents": [{"parts": [{"text": "Say 'Legendary' in one word."}]}]},
+                json={"contents": [{"role": "user", "parts": [{"text": "Say 'Legendary' in one word."}]}]},
                 timeout=15,
             )
             result["vertex_status"] = resp.status_code
