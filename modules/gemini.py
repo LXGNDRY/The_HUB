@@ -97,23 +97,18 @@ class GeminiModule:
 
     def generate(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1024) -> str:
         """
-        Generate text from a prompt.
-        Auth priority:
-          1. SA credentials via generativelanguage.googleapis.com REST (no key restrictions)
-          2. google-generativeai SDK with API key
-          3. REST with API key
+        Generate text. Always tries Vertex AI first (SA bearer token), no gate.
+        Falls back to SDK or REST with API key only on genuine failure.
         """
-        if getattr(self, '_sa_ready', False) and self.credentials:
-            try:
-                return self._generate_sa_rest(prompt, temperature, max_tokens)
-            except Exception as e:
-                # Log the FULL error so we can diagnose it via /api/logs
-                logger.error(
-                    "[gemini] Vertex AI SA path failed — error: %s | type: %s",
-                    str(e), type(e).__name__
-                )
+        try:
+            return self._generate_sa_rest(prompt, temperature, max_tokens)
+        except Exception as e:
+            logger.error("[gemini] Vertex AI path failed (%s: %s) — falling back.", type(e).__name__, str(e)[:120])
         if self._sdk_client:
-            return self._generate_sdk(prompt, temperature, max_tokens)
+            try:
+                return self._generate_sdk(prompt, temperature, max_tokens)
+            except Exception as e:
+                logger.error("[gemini] SDK path failed (%s) — trying REST.", str(e)[:80])
         return self._generate_rest(prompt, temperature, max_tokens)
 
     def _get_sa_token(self) -> str:
