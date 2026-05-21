@@ -265,6 +265,22 @@ def auth_test():
         sa_creds = getattr(gem, '_sa_creds', None)
         result["module_generate"]["sa_creds_present"] = sa_creds is not None
         result["module_generate"]["sa_creds_token"] = bool(getattr(sa_creds, 'token', None)) if sa_creds else False
+        # Also expose the token prefix so we can see if it differs from low-level
+        try:
+            token_preview = gem._get_sa_token()[:20] + "..."
+            result["module_generate"]["sa_token_preview"] = token_preview
+        except Exception as te:
+            result["module_generate"]["sa_token_error"] = str(te)
+        # Test Vertex directly using module's token
+        try:
+            import requests as req_lib
+            tok = gem._get_sa_token()
+            vurl = f"https://us-central1-aiplatform.googleapis.com/v1/projects/idx-lngndny/locations/us-central1/publishers/google/models/gemini-2.5-flash:generateContent"
+            vr = req_lib.post(vurl, headers={"Authorization": f"Bearer {tok}", "Content-Type": "application/json"}, json={"contents": [{"role": "user", "parts": [{"text": "Say Legendary."}]}]}, timeout=15)
+            result["module_generate"]["module_vertex_status"] = vr.status_code
+            result["module_generate"]["module_vertex_text"] = vr.text[:300]
+        except Exception as ve:
+            result["module_generate"]["module_vertex_error"] = str(ve)
         text = gem.generate("Say 'Legendary' in one word.", max_tokens=10)
         result["module_generate"]["result"] = text
         result["module_generate"]["status"] = "ok"
