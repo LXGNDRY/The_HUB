@@ -209,3 +209,52 @@ def list_models():
     except Exception as e:
         logger.error("[gemini] list-models failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/auth-test")
+def auth_test():
+    """
+    Debug endpoint: directly tests the Vertex AI REST call and returns the raw result.
+    Useful for diagnosing IAM / API enable issues without fallback masking the error.
+    """
+    import os, requests
+    import google.auth.transport.requests
+
+    project = os.getenv("GCP_PROJECT_ID", "idx-lngndny")
+    region = "us-central1"
+    model = "gemini-2.0-flash"
+
+    result = {"sa_ready": False, "vertex_url": None, "vertex_status": None, "vertex_response": None, "error": None}
+
+    try:
+        from auth.credentials import get_credentials
+        creds = get_credentials()
+        result["sa_ready"] = creds is not None
+
+        if creds:
+            req = google.auth.transport.requests.Request()
+            if not creds.valid:
+                creds.refresh(req)
+            token = creds.token
+            result["token_obtained"] = bool(token)
+
+            url = (
+                f"https://{region}-aiplatform.googleapis.com/v1/"
+                f"projects/{project}/locations/{region}"
+                f"/publishers/google/models/{model}:generateContent"
+            )
+            result["vertex_url"] = url
+
+            resp = requests.post(
+                url,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"contents": [{"parts": [{"text": "Say 'Legendary' in one word."}]}]},
+                timeout=15,
+            )
+            result["vertex_status"] = resp.status_code
+            result["vertex_response"] = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text[:500]
+
+    except Exception as e:
+        result["error"] = f"{type(e).__name__}: {e}"
+
+    return result

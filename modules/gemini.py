@@ -99,8 +99,10 @@ class GeminiModule:
             try:
                 return self._generate_sa_rest(prompt, temperature, max_tokens)
             except Exception as e:
-                logger.warning(
-                    "[gemini] Vertex AI SA path failed (%s) — falling back to API key path.", e
+                # Log the FULL error so we can diagnose it via /api/logs
+                logger.error(
+                    "[gemini] Vertex AI SA path failed — error: %s | type: %s",
+                    str(e), type(e).__name__
                 )
         if self._sdk_client:
             return self._generate_sdk(prompt, temperature, max_tokens)
