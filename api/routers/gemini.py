@@ -222,7 +222,7 @@ def auth_test():
 
     project = os.getenv("GCP_PROJECT_ID", "idx-lngndny")
     region = "us-central1"
-    model = "gemini-2.0-flash"
+    model = "gemini-2.0-flash-001"
 
     result = {"sa_ready": False, "vertex_url": None, "vertex_status": None, "vertex_response": None, "error": None}
 
