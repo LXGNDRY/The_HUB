@@ -20,6 +20,12 @@ GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_VERTEX_PROJECT = os.getenv("GCP_PROJECT_ID", "idx-lngndny")
 GEMINI_VERTEX_REGION = os.getenv("GEMINI_VERTEX_REGION", "us-central1")
+# Vertex AI REST endpoint — uses SA bearer token, requires roles/aiplatform.user
+GEMINI_VERTEX_BASE = (
+    f"https://{GEMINI_VERTEX_REGION}-aiplatform.googleapis.com/v1/"
+    f"projects/{GEMINI_VERTEX_PROJECT}/locations/{GEMINI_VERTEX_REGION}"
+    f"/publishers/google/models"
+)
 
 
 class GeminiModule:
@@ -42,37 +48,24 @@ class GeminiModule:
 
     def _init_vertex(self):
         """
-        Try google-generativeai SDK authenticated via SA OAuth2 bearer token.
-        This uses generativelanguage.googleapis.com (not Vertex publisher model format),
-        authenticated with SA credentials instead of a restricted API key.
+        Verify SA credentials are present and refreshable.
+        Generation is done via Vertex AI REST (us-central1-aiplatform.googleapis.com)
+        which natively accepts SA bearer tokens.
+        Requires: roles/aiplatform.user granted to the SA in IAM.
         """
-        try:
-            import google.generativeai as genai
-            if self.credentials:
-                # Refresh SA credentials to get a valid bearer token
-                import google.auth.transport.requests
-                request = google.auth.transport.requests.Request()
-                if not self.credentials.valid:
-                    self.credentials.refresh(request)
-                # Configure genai with the SA bearer token directly
-                genai.configure(
-                    client_options={"api_endpoint": "generativelanguage.googleapis.com"},
-                    transport="rest",
-                )
-                # Use access token from SA credentials
-                import google.generativeai as genai
-                genai.configure(api_key=None)
-                # Build client with SA token via requests adapter
-                self._vertex_client = None  # will use _generate_sa_rest instead
-                self._sa_ready = True
-                logger.info("[gemini] SA credential path ready (generativelanguage REST).")
-            else:
-                self._sa_ready = False
-        except ImportError:
-            logger.info("[gemini] google-generativeai not installed.")
+        if not self.credentials:
             self._sa_ready = False
+            return
+        try:
+            import google.auth.transport.requests
+            request = google.auth.transport.requests.Request()
+            if not self.credentials.valid:
+                self.credentials.refresh(request)
+            self._sa_ready = bool(self.credentials.token)
+            if self._sa_ready:
+                logger.info("[gemini] SA credentials ready — using Vertex AI REST.")
         except Exception as e:
-            logger.warning("[gemini] SA init failed (%s).", e)
+            logger.warning("[gemini] SA credential refresh failed (%s) — falling back to API key.", e)
             self._sa_ready = False
 
     def _init_sdk(self):
@@ -109,7 +102,11 @@ class GeminiModule:
         return self._generate_rest(prompt, temperature, max_tokens)
 
     def _generate_sa_rest(self, prompt: str, temperature: float, max_tokens: int) -> str:
-        """Call generativelanguage.googleapis.com REST API authenticated via SA bearer token."""
+        """
+        Call Vertex AI REST API authenticated via SA bearer token.
+        Endpoint: {region}-aiplatform.googleapis.com/v1/projects/{project}/...
+        Requires: roles/aiplatform.user on the SA.
+        """
         import google.auth.transport.requests
         # Refresh token if needed
         request = google.auth.transport.requests.Request()
@@ -117,7 +114,15 @@ class GeminiModule:
             self.credentials.refresh(request)
         token = self.credentials.token
 
-        url = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent"
+        # Vertex AI uses a different model path format
+        vertex_model = GEMINI_MODEL  # e.g. gemini-2.0-flash
+        region = GEMINI_VERTEX_REGION
+        project = GEMINI_VERTEX_PROJECT
+        url = (
+            f"https://{region}-aiplatform.googleapis.com/v1/"
+            f"projects/{project}/locations/{region}"
+            f"/publishers/google/models/{vertex_model}:generateContent"
+        )
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",

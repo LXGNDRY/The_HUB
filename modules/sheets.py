@@ -82,11 +82,19 @@ class SheetsModule:
 
     def get_or_create_dashboard(self) -> str:
         """
-        Returns SHEETS_DASHBOARD_ID if set, otherwise creates a new dashboard.
+        Returns SHEETS_DASHBOARD_ID if set.
+        If not set, raises an error with setup instructions instead of attempting
+        to create a spreadsheet (which requires elevated Drive permissions).
         """
         if SHEETS_DASHBOARD_ID:
             return SHEETS_DASHBOARD_ID
-        return self.create_dashboard()
+        raise ValueError(
+            "SHEETS_DASHBOARD_ID is not configured. "
+            "Setup: 1) Create a Google Sheet manually at https://sheets.google.com, "
+            "2) Share it with the SA: 901935277314-compute@developer.gserviceaccount.com (Editor access), "
+            "3) Copy the spreadsheet ID from the URL (the long string between /d/ and /edit), "
+            "4) Set it as the SHEETS_DASHBOARD_ID GitHub secret and redeploy."
+        )
 
     def get_sheet_id(self, spreadsheet_id: str, sheet_name: str) -> int | None:
         """Return the numeric sheetId for a named sheet tab."""

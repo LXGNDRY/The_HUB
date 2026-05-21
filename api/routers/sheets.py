@@ -134,10 +134,27 @@ def _get_live_data():
 
 @router.get("/dashboard")
 def get_dashboard():
-    """Get the Sheets dashboard URL. Creates the dashboard if it doesn't exist yet."""
+    """
+    Get the Sheets dashboard URL.
+    Returns setup instructions if SHEETS_DASHBOARD_ID is not configured.
+    """
+    spreadsheet_id = os.getenv("SHEETS_DASHBOARD_ID", "")
+    if not spreadsheet_id:
+        return {
+            "status": "setup_required",
+            "note": (
+                "SHEETS_DASHBOARD_ID is not configured. "
+                "To activate the Sheets dashboard: "
+                "(1) Create a Google Sheet at https://sheets.google.com, "
+                "(2) Share it with 901935277314-compute@developer.gserviceaccount.com as Editor, "
+                "(3) Copy the spreadsheet ID from the URL (/d/<ID>/edit), "
+                "(4) Add SHEETS_DASHBOARD_ID as a GitHub secret and redeploy."
+            ),
+            "sa_email": "901935277314-compute@developer.gserviceaccount.com",
+            "create_sheet_url": "https://sheets.new",
+        }
     mod = _get_module()
     try:
-        spreadsheet_id = mod.get_or_create_dashboard()
         url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
         return {
             "spreadsheet_id": spreadsheet_id,

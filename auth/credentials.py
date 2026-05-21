@@ -31,6 +31,8 @@ SCOPES = [
     # Cloud Logging (cloud_logging.py)
     "https://www.googleapis.com/auth/logging.read",
     "https://www.googleapis.com/auth/logging.write",
+    # Generative Language / Gemini API (gemini.py)
+    "https://www.googleapis.com/auth/generative-language",
 ]
 
 

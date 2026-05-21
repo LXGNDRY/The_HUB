@@ -9,9 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       url:
-        description: "URL to audit (default: legendarybrandingco.com)"
+        description: "URL to audit (default: legendary-branding.com)"
         required: false
-        default: "https://www.legendarybrandingco.com"
+        default: "https://legendary-branding.com"
         type: string
   schedule:
     # Run every day at 8am CST (14:00 UTC)
@@ -40,7 +40,7 @@ jobs:
       - name: Run PageSpeed Audit — Mobile + Desktop
         env:
           PAGESPEED_API_KEY: ${{ secrets.PAGESPEED_API_KEY }}
-          PAGESPEED_URL: ${{ github.event.inputs.url || 'https://www.legendarybrandingco.com' }}
+          PAGESPEED_URL: ${{ github.event.inputs.url || 'https://legendary-branding.com' }}
         run: |
           python -c "
 import sys
@@ -83,7 +83,7 @@ if summary_path:
       - name: Export JSON artifact
         env:
           PAGESPEED_API_KEY: ${{ secrets.PAGESPEED_API_KEY }}
-          PAGESPEED_URL: ${{ github.event.inputs.url || 'https://www.legendarybrandingco.com' }}
+          PAGESPEED_URL: ${{ github.event.inputs.url || 'https://legendary-branding.com' }}
         run: |
           python -c "
 import json, sys
