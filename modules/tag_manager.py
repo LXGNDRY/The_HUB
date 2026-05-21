@@ -7,14 +7,27 @@ GTM actions without needing the GTM web UI.
 
 Container: GTM-58KH82X (account 6111521813)
 
+IMPORTANT — Auth note:
+GTM does NOT support service account users in its account/container
+user management UI. The API itself works with OAuth2 user credentials.
+In Cloud Run, the bot uses ADC/SA credentials which the API accepts
+for reading container data (scopes: tagmanager.readonly) but the SA
+need not be a named GTM user — it just needs the OAuth scope.
+
+The 404 "not found or permission denied" from the SA is because GTM
+container-level access requires the authenticated identity to have
+been granted access at the GTM account level. Since the SA cannot be
+added as a GTM user, the bot routes GTM read/write operations through
+the pre-authenticated Pipedream GTM connector (OAuth user token) for
+operations that require container access.
+
+For direct API use: provide user_credentials (OAuth2) at init time.
+
 Supported operations:
   - List containers, workspaces, tags, triggers, variables
   - Get workspace status (unpublished changes)
   - Create/update tags (Google Analytics, custom HTML, conversion tracking)
   - Publish a workspace as a new version
-  - Revert a workspace to the last published version
-
-Requires: Service account credentials with Tag Manager API enabled.
 """
 
 import os
