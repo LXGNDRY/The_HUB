@@ -31,7 +31,12 @@ class SheetsModule:
     """
 
     def __init__(self, credentials):
-        self.credentials = credentials
+        # Attach quota project so Drive/Sheets API calls are billed to the
+        # correct GCP project and the SA has permission to make the calls.
+        try:
+            self.credentials = credentials.with_quota_project("idx-lngndny")
+        except AttributeError:
+            self.credentials = credentials
         self._sheets_svc = None
         self._drive_svc = None
 

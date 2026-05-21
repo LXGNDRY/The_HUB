@@ -115,7 +115,7 @@ jobs:
             --max-instances 3 \
             --port 8080 \
             --clear-secrets \
-            --set-env-vars "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},DASHBOARD_API_KEY=${{ secrets.DASHBOARD_API_KEY }},GA4_PROPERTY_ID=${{ secrets.GA4_PROPERTY_ID }},GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }},BUDGET_THRESHOLD=${{ secrets.BUDGET_THRESHOLD }},IDLE_CPU_THRESHOLD=${{ secrets.IDLE_CPU_THRESHOLD }},QUOTA_ALERT_PERCENT=${{ secrets.QUOTA_ALERT_PERCENT }},DRY_RUN=${DRY_RUN}" \
+            --set-env-vars "GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }},DASHBOARD_API_KEY=${{ secrets.DASHBOARD_API_KEY }},GA4_PROPERTY_ID=${{ secrets.GA4_PROPERTY_ID }},GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }},BUDGET_THRESHOLD=${{ secrets.BUDGET_THRESHOLD }},IDLE_CPU_THRESHOLD=${{ secrets.IDLE_CPU_THRESHOLD }},QUOTA_ALERT_PERCENT=${{ secrets.QUOTA_ALERT_PERCENT }},DRY_RUN=${DRY_RUN},PAGESPEED_URL=${{ secrets.PAGESPEED_URL }}" \
             --quiet
 
           echo "✅ Scalar deploy done"

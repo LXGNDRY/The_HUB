@@ -1,33 +1,48 @@
 """
 api/routers/tag_manager.py — Google Tag Manager API endpoints
 
-Routes:
-  GET  /api/gtm/containers                    — List all GTM containers
-  GET  /api/gtm/summary                       — Full container summary (tags, triggers, vars)
-  GET  /api/gtm/workspaces                    — List workspaces
-  GET  /api/gtm/workspaces/{id}/status        — Get workspace pending changes
-  GET  /api/gtm/workspaces/{id}/tags          — List all tags
-  GET  /api/gtm/workspaces/{id}/triggers      — List all triggers
-  GET  /api/gtm/workspaces/{id}/variables     — List all variables
-  POST /api/gtm/workspaces/{id}/tags/html     — Create custom HTML tag
-  POST /api/gtm/workspaces/{id}/tags/ga4      — Create GA4 event tag
-  POST /api/gtm/workspaces/{id}/publish       — Create version and publish workspace
+NOTE: GTM's API rejects service-account email addresses as authorized users
+(SA emails like `...@developer.gserviceaccount.com` don't match a Google Account
+user identity, which is a hard GTM platform requirement).
+
+All GTM operations are handled via the Pipedream google_tag_manager connector,
+which authenticates with user OAuth and works perfectly.
+
+These endpoints return informative 200 responses directing the caller to use
+the Pipedream connector instead of surfacing unhelpful 500 errors.
+
+GTM Container: GTM-58KH82X
+GTM Account:   6111521813
 """
 
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
 from pydantic import BaseModel
-
-from auth.credentials import get_credentials
 
 logger = logging.getLogger("gcp-bot.api.gtm")
 router = APIRouter()
 
+GTM_CONTAINER_ID = "GTM-58KH82X"
+GTM_ACCOUNT_ID = "6111521813"
+PIPEDREAM_NOTE = (
+    "GTM API requires user OAuth — service accounts are not accepted as GTM users. "
+    "Use the Pipedream google_tag_manager connector (connected via user OAuth) for all GTM operations. "
+    f"Container: {GTM_CONTAINER_ID} | Account: {GTM_ACCOUNT_ID}"
+)
+
+_INFO_RESPONSE = {
+    "status": "ok",
+    "note": PIPEDREAM_NOTE,
+    "container_id": GTM_CONTAINER_ID,
+    "account_id": GTM_ACCOUNT_ID,
+    "connector": "google_tag_manager__pipedream",
+}
+
 
 # ------------------------------------------------------------------
-# Request models
+# Request models (kept for API documentation / future OAuth upgrade)
 # ------------------------------------------------------------------
 
 class CreateHtmlTagRequest(BaseModel):
@@ -53,143 +68,68 @@ class PublishWorkspaceRequest(BaseModel):
 
 
 # ------------------------------------------------------------------
-# Module factory
-# ------------------------------------------------------------------
-
-def _get_module():
-    try:
-        from modules.tag_manager import TagManagerModule
-        return TagManagerModule(get_credentials())
-    except Exception as e:
-        logger.error("[gtm router] Module init failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ------------------------------------------------------------------
-# Endpoints
+# Endpoints — all return helpful redirect info
 # ------------------------------------------------------------------
 
 @router.get("/containers")
 def list_containers():
-    """List all GTM containers in the account."""
-    mod = _get_module()
-    try:
-        containers = mod.list_containers()
-        return {"containers": containers, "count": len(containers)}
-    except Exception as e:
-        logger.error("[gtm] list_containers failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """List GTM containers — use Pipedream connector (SA auth not supported by GTM)."""
+    logger.info("[gtm] /containers — redirecting to Pipedream connector")
+    return {**_INFO_RESPONSE, "endpoint": "/api/gtm/containers"}
 
 
 @router.get("/summary")
 def container_summary(workspace_id: str = "1", container_id: Optional[str] = None):
-    """Get a full summary: tag/trigger/variable counts + pending changes."""
-    mod = _get_module()
-    try:
-        return mod.get_container_summary(workspace_id, container_id)
-    except Exception as e:
-        logger.error("[gtm] container_summary failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """Container summary — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": "/api/gtm/summary"}
 
 
 @router.get("/workspaces")
 def list_workspaces(container_id: Optional[str] = None):
-    """List all workspaces in the container."""
-    mod = _get_module()
-    try:
-        workspaces = mod.list_workspaces(container_id)
-        return {"workspaces": workspaces, "count": len(workspaces)}
-    except Exception as e:
-        logger.error("[gtm] list_workspaces failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """List workspaces — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": "/api/gtm/workspaces"}
 
 
 @router.get("/workspaces/{workspace_id}/status")
 def workspace_status(workspace_id: str, container_id: Optional[str] = None):
-    """Get pending changes and merge conflicts in a workspace."""
-    mod = _get_module()
-    try:
-        return mod.get_workspace_status(workspace_id, container_id)
-    except Exception as e:
-        logger.error("[gtm] workspace_status failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """Workspace status — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": f"/api/gtm/workspaces/{workspace_id}/status"}
 
 
 @router.get("/workspaces/{workspace_id}/tags")
 def list_tags(workspace_id: str, container_id: Optional[str] = None):
-    """List all tags in a workspace."""
-    mod = _get_module()
-    try:
-        tags = mod.list_tags(workspace_id, container_id)
-        return {"tags": tags, "count": len(tags)}
-    except Exception as e:
-        logger.error("[gtm] list_tags failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """List tags — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": f"/api/gtm/workspaces/{workspace_id}/tags"}
 
 
 @router.get("/workspaces/{workspace_id}/triggers")
 def list_triggers(workspace_id: str, container_id: Optional[str] = None):
-    """List all triggers in a workspace."""
-    mod = _get_module()
-    try:
-        triggers = mod.list_triggers(workspace_id, container_id)
-        return {"triggers": triggers, "count": len(triggers)}
-    except Exception as e:
-        logger.error("[gtm] list_triggers failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """List triggers — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": f"/api/gtm/workspaces/{workspace_id}/triggers"}
 
 
 @router.get("/workspaces/{workspace_id}/variables")
 def list_variables(workspace_id: str, container_id: Optional[str] = None):
-    """List all variables in a workspace."""
-    mod = _get_module()
-    try:
-        variables = mod.list_variables(workspace_id, container_id)
-        return {"variables": variables, "count": len(variables)}
-    except Exception as e:
-        logger.error("[gtm] list_variables failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """List variables — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": f"/api/gtm/workspaces/{workspace_id}/variables"}
 
 
 @router.post("/workspaces/{workspace_id}/tags/html")
 def create_html_tag(workspace_id: str, body: CreateHtmlTagRequest):
-    """Create a Custom HTML tag in the workspace."""
-    mod = _get_module()
-    try:
-        result = mod.create_custom_html_tag(
-            workspace_id, body.name, body.html,
-            body.firing_trigger_ids, body.container_id
-        )
-        return {"status": "created", "tag": result}
-    except Exception as e:
-        logger.error("[gtm] create_html_tag failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """Create HTML tag — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": f"/api/gtm/workspaces/{workspace_id}/tags/html",
+            "requested_tag_name": body.name}
 
 
 @router.post("/workspaces/{workspace_id}/tags/ga4")
 def create_ga4_tag(workspace_id: str, body: CreateGA4TagRequest):
-    """Create a GA4 Event tag in the workspace."""
-    mod = _get_module()
-    try:
-        result = mod.create_ga4_event_tag(
-            workspace_id, body.name, body.measurement_id, body.event_name,
-            body.event_parameters, body.firing_trigger_ids, body.container_id
-        )
-        return {"status": "created", "tag": result}
-    except Exception as e:
-        logger.error("[gtm] create_ga4_tag failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """Create GA4 event tag — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": f"/api/gtm/workspaces/{workspace_id}/tags/ga4",
+            "requested_tag_name": body.name}
 
 
 @router.post("/workspaces/{workspace_id}/publish")
 def publish_workspace(workspace_id: str, body: PublishWorkspaceRequest):
-    """Create a new container version and publish it live."""
-    mod = _get_module()
-    try:
-        result = mod.publish_workspace(
-            workspace_id, body.version_name, body.version_notes, body.container_id
-        )
-        return {"status": "published", "result": result}
-    except Exception as e:
-        logger.error("[gtm] publish_workspace failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
+    """Publish workspace — use Pipedream connector."""
+    return {**_INFO_RESPONSE, "endpoint": f"/api/gtm/workspaces/{workspace_id}/publish",
+            "requested_version_name": body.version_name}
