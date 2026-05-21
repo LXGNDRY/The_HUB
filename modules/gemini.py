@@ -41,21 +41,39 @@ class GeminiModule:
             self._init_sdk()
 
     def _init_vertex(self):
-        """Try Vertex AI SDK — uses SA credentials, no API key needed."""
+        """
+        Try google-generativeai SDK authenticated via SA OAuth2 bearer token.
+        This uses generativelanguage.googleapis.com (not Vertex publisher model format),
+        authenticated with SA credentials instead of a restricted API key.
+        """
         try:
-            import vertexai
-            from vertexai.generative_models import GenerativeModel
-            vertexai.init(
-                project=GEMINI_VERTEX_PROJECT,
-                location=GEMINI_VERTEX_REGION,
-                credentials=self.credentials,
-            )
-            self._vertex_client = GenerativeModel(GEMINI_MODEL)
-            logger.info("[gemini] Vertex AI client initialised (project=%s).", GEMINI_VERTEX_PROJECT)
+            import google.generativeai as genai
+            if self.credentials:
+                # Refresh SA credentials to get a valid bearer token
+                import google.auth.transport.requests
+                request = google.auth.transport.requests.Request()
+                if not self.credentials.valid:
+                    self.credentials.refresh(request)
+                # Configure genai with the SA bearer token directly
+                genai.configure(
+                    client_options={"api_endpoint": "generativelanguage.googleapis.com"},
+                    transport="rest",
+                )
+                # Use access token from SA credentials
+                import google.generativeai as genai
+                genai.configure(api_key=None)
+                # Build client with SA token via requests adapter
+                self._vertex_client = None  # will use _generate_sa_rest instead
+                self._sa_ready = True
+                logger.info("[gemini] SA credential path ready (generativelanguage REST).")
+            else:
+                self._sa_ready = False
         except ImportError:
-            logger.info("[gemini] vertexai SDK not installed — trying google-generativeai.")
+            logger.info("[gemini] google-generativeai not installed.")
+            self._sa_ready = False
         except Exception as e:
-            logger.warning("[gemini] Vertex AI init failed (%s) — trying API key fallback.", e)
+            logger.warning("[gemini] SA init failed (%s).", e)
+            self._sa_ready = False
 
     def _init_sdk(self):
         """Try google-generativeai SDK with API key."""
@@ -79,26 +97,42 @@ class GeminiModule:
     def generate(self, prompt: str, temperature: float = 0.7, max_tokens: int = 1024) -> str:
         """
         Generate text from a prompt.
-
-        Args:
-            prompt:       The user prompt / instruction.
-            temperature:  Creativity level 0.0–1.0 (default 0.7).
-            max_tokens:   Max output tokens (default 1024).
-
-        Returns:
-            Generated text string.
+        Auth priority:
+          1. SA credentials via generativelanguage.googleapis.com REST (no key restrictions)
+          2. google-generativeai SDK with API key
+          3. REST with API key
         """
-        if self._vertex_client:
-            return self._generate_vertex(prompt, temperature, max_tokens)
+        if getattr(self, '_sa_ready', False) and self.credentials:
+            return self._generate_sa_rest(prompt, temperature, max_tokens)
         if self._sdk_client:
             return self._generate_sdk(prompt, temperature, max_tokens)
         return self._generate_rest(prompt, temperature, max_tokens)
 
-    def _generate_vertex(self, prompt: str, temperature: float, max_tokens: int) -> str:
-        from vertexai.generative_models import GenerationConfig
-        config = GenerationConfig(temperature=temperature, max_output_tokens=max_tokens)
-        response = self._vertex_client.generate_content(prompt, generation_config=config)
-        return response.text.strip()
+    def _generate_sa_rest(self, prompt: str, temperature: float, max_tokens: int) -> str:
+        """Call generativelanguage.googleapis.com REST API authenticated via SA bearer token."""
+        import google.auth.transport.requests
+        # Refresh token if needed
+        request = google.auth.transport.requests.Request()
+        if not self.credentials.valid:
+            self.credentials.refresh(request)
+        token = self.credentials.token
+
+        url = f"{GEMINI_BASE_URL}/{GEMINI_MODEL}:generateContent"
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json",
+        }
+        body = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        resp = requests.post(url, json=body, headers=headers, timeout=30)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["candidates"][0]["content"]["parts"][0]["text"].strip()
 
     def _generate_sdk(self, prompt: str, temperature: float, max_tokens: int) -> str:
         import google.generativeai as genai
