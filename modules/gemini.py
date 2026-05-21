@@ -116,13 +116,20 @@ class GeminiModule:
         Call Vertex AI REST API authenticated via SA bearer token.
         Endpoint: {region}-aiplatform.googleapis.com/v1/projects/{project}/...
         Requires: roles/aiplatform.user on the SA.
+        Fresh credentials are built on every call to avoid stale token issues
+        (SA tokens expire after 1h; Cloud Run instances can live much longer).
         """
         import google.auth.transport.requests
-        # Refresh token if needed
+        from auth.credentials import get_credentials
+
+        # Always fetch a fresh credential object to avoid 1h token expiry
+        fresh_creds = get_credentials()
         request = google.auth.transport.requests.Request()
-        if not self.credentials.valid:
-            self.credentials.refresh(request)
-        token = self.credentials.token
+        if not fresh_creds.valid:
+            fresh_creds.refresh(request)
+        token = fresh_creds.token
+        if not token:
+            raise ValueError("SA token is empty after refresh — check GCP_SA_KEY_JSON secret.")
 
         # Vertex AI uses a different model path format
         vertex_model = GEMINI_MODEL  # e.g. gemini-2.0-flash
