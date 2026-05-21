@@ -331,7 +331,13 @@ class GeminiModule:
             f"\n"
             f"Output the quote and nothing else."
         )
-        return self.generate(prompt, temperature=0.85, max_tokens=200)
+        raw = self.generate(prompt, temperature=0.85, max_tokens=200)
+        # Extract first complete sentence — model sometimes returns multiple.
+        # Split on sentence-ending punctuation, keep the first non-empty chunk.
+        import re
+        sentences = re.split(r'(?<=[.!?])\s+', raw.strip())
+        first = next((s.strip() for s in sentences if len(s.split()) >= 4), None)
+        return first if first else raw.strip()
 
     def analyze_seo_data(self, gsc_data: dict, ga4_data: dict) -> str:
         """
