@@ -346,3 +346,150 @@ def quota_check_job():
     except Exception as e:
         logger.error("[quota_check_job] Failed: %s", e)
         send_alert(f"❌ quota_check_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 8 — Daily Indexing Submission  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def indexing_submission_job():
+    """
+    Parses the store sitemap and submits all URLs to Google's Indexing API.
+    Runs daily to ensure new products/pages are indexed quickly.
+    Quota: 200 URLs/day.
+    """
+    logger.info("[indexing_submission_job] Running...")
+    try:
+        from modules.indexing import IndexingModule
+        from auth.credentials import get_credentials
+        mod = IndexingModule(get_credentials())
+        result = mod.submit_sitemap_urls()
+        msg = (
+            f"🔍 *Indexing Submission Complete*\n"
+            f"Submitted : {len(result.get('submitted', []))}\n"
+            f"Skipped   : {len(result.get('skipped', []))} (quota)\n"
+            f"Errors    : {len(result.get('errors', []))}"
+        )
+        send_alert(msg)
+        logger.info("[indexing_submission_job] Done. %s submitted.", len(result.get('submitted', [])))
+    except Exception as e:
+        logger.error("[indexing_submission_job] Failed: %s", e)
+        send_alert(f"❌ indexing_submission_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 9 — Sheets Dashboard Refresh  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def sheets_refresh_job():
+    """
+    Refreshes the Google Sheets dashboard with the latest GA4, GSC,
+    PageSpeed, and billing data. Runs daily.
+    """
+    logger.info("[sheets_refresh_job] Running...")
+    try:
+        from modules.sheets import SheetsModule
+        from modules.billing import BillingModule
+        from auth.credentials import get_credentials
+        import os, json
+        from google.oauth2.credentials import Credentials
+        from googleapiclient.discovery import build
+
+        creds = get_credentials()
+        sm = SheetsModule(creds)
+        bm = BillingModule(creds)
+
+        # Fetch GA4
+        try:
+            from modules.analytics import AnalyticsModule
+            am = AnalyticsModule(creds)
+            ga4_traffic = am.get_traffic_summary()
+            ga4_pages = am.get_top_pages()
+        except Exception:
+            ga4_traffic, ga4_pages = {}, {}
+
+        # Fetch GSC
+        try:
+            token_json = os.getenv("GSC_TOKEN_JSON", "")
+            if token_json:
+                token_data = json.loads(token_json)
+                gsc_creds = Credentials(
+                    token=token_data.get("token"),
+                    refresh_token=token_data.get("refresh_token"),
+                    token_uri=token_data.get("token_uri", "https://oauth2.googleapis.com/token"),
+                    client_id=token_data.get("client_id"),
+                    client_secret=token_data.get("client_secret"),
+                    scopes=token_data.get("scopes"),
+                )
+                svc = build("searchconsole", "v1", credentials=gsc_creds, cache_discovery=False)
+                site_url = os.getenv("GSC_SITE_URL", "https://legendary-branding.com")
+                gsc_data = svc.searchanalytics().query(
+                    siteUrl=site_url,
+                    body={
+                        "startDate": "2026-04-22",
+                        "endDate": "2026-05-20",
+                        "dimensions": ["query"],
+                        "rowLimit": 50,
+                    }
+                ).execute()
+            else:
+                gsc_data = {}
+        except Exception:
+            gsc_data = {}
+
+        # Fetch PageSpeed
+        try:
+            from agents.pagespeed_agent import run_pagespeed
+            mobile_ps = run_pagespeed(strategy="mobile")
+            desktop_ps = run_pagespeed(strategy="desktop")
+        except Exception:
+            mobile_ps, desktop_ps = {}, {}
+
+        billing_data = bm.get_monthly_spend()
+
+        url = sm.refresh_full_dashboard(ga4_traffic, ga4_pages, gsc_data, mobile_ps, desktop_ps, billing_data)
+        send_alert(f"📊 *Sheets Dashboard Refreshed*\n{url}")
+        logger.info("[sheets_refresh_job] Done. URL: %s", url)
+
+    except Exception as e:
+        logger.error("[sheets_refresh_job] Failed: %s", e)
+        send_alert(f"❌ sheets_refresh_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 10 — Error Log Monitoring  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def error_log_monitor_job():
+    """
+    Checks Cloud Run error logs every 6 hours.
+    Sends an alert if error rate spikes above threshold.
+    """
+    ERROR_RATE_THRESHOLD = float(os.getenv("ERROR_RATE_THRESHOLD", "5.0"))  # errors/hour
+    logger.info("[error_log_monitor_job] Running...")
+    try:
+        from modules.cloud_logging import CloudLoggingModule
+        from auth.credentials import get_credentials
+        mod = CloudLoggingModule(get_credentials())
+        summary = mod.get_error_summary(hours_back=6)
+
+        error_rate = summary.get("error_rate_per_hour", 0)
+        error_count = summary.get("error_count", 0)
+
+        if error_rate >= ERROR_RATE_THRESHOLD:
+            top_errors = summary.get("top_errors", [])[:3]
+            error_lines = "\n".join([
+                f"  • [{e['count']}x] {e['message'][:80]}" for e in top_errors
+            ])
+            send_alert(
+                f"🚨 *Error Spike Detected* — {error_rate:.1f} errors/hour\n"
+                f"Last 6h count : {error_count}\n"
+                f"Top errors:\n{error_lines}"
+            )
+            logger.warning("[error_log_monitor_job] Spike detected: %.1f errors/hr", error_rate)
+        else:
+            logger.info("[error_log_monitor_job] OK. Error rate: %.2f/hr", error_rate)
+
+    except Exception as e:
+        logger.error("[error_log_monitor_job] Failed: %s", e)
+        send_alert(f"❌ error_log_monitor_job failed: {e}")

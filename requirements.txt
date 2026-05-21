@@ -24,5 +24,10 @@ google-api-python-client>=2.150.0
 # Environment
 python-dotenv>=1.0.0
 
+# New modules (Gemini, Sheets, Indexing, Tag Manager, Secret Manager, Cloud Logging)
+google-generativeai>=0.8.0
+google-cloud-secret-manager>=2.20.0
+google-cloud-logging>=3.10.0
+
 # Utilities
 requests>=2.32.0

@@ -24,6 +24,9 @@ from scheduler.jobs import (
     monthly_report_job,
     storage_audit_job,
     quota_check_job,
+    indexing_submission_job,
+    sheets_refresh_job,
+    error_log_monitor_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -49,7 +52,7 @@ class BotScheduler:
         self._register_jobs()
 
     def _register_jobs(self):
-        """Register all 7 automation jobs."""
+        """Register all 10 automation jobs."""
 
         # Daily 8:00 AM — Billing alert (always runs)
         self.scheduler.add_job(
@@ -111,6 +114,33 @@ class BotScheduler:
             IntervalTrigger(hours=6),
             id="quota_check",
             name="Quota Usage Check (80% alert)",
+            replace_existing=True,
+        )
+
+        # Daily 6:00 AM — Submit sitemap URLs to Google Indexing API
+        self.scheduler.add_job(
+            indexing_submission_job,
+            CronTrigger(hour=6, minute=0),
+            id="daily_indexing_submission",
+            name="Daily Sitemap Indexing Submission",
+            replace_existing=True,
+        )
+
+        # Daily 7:00 AM — Refresh Google Sheets dashboard with live data
+        self.scheduler.add_job(
+            sheets_refresh_job,
+            CronTrigger(hour=7, minute=0),
+            id="daily_sheets_refresh",
+            name="Daily Sheets Dashboard Refresh",
+            replace_existing=True,
+        )
+
+        # Every 6 hours — Monitor Cloud Run error logs
+        self.scheduler.add_job(
+            error_log_monitor_job,
+            IntervalTrigger(hours=6),
+            id="error_log_monitor",
+            name="Cloud Run Error Log Monitor",
             replace_existing=True,
         )
 
