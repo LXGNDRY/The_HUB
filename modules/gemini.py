@@ -332,12 +332,19 @@ class GeminiModule:
             f"Output the quote and nothing else."
         )
         raw = self.generate(prompt, temperature=0.85, max_tokens=200)
-        # Extract first complete sentence — model sometimes returns multiple.
-        # Split on sentence-ending punctuation, keep the first non-empty chunk.
+        # Extract first complete sentence — model sometimes returns multiple
+        # or omits terminal punctuation. Normalise to a single clean sentence.
         import re
+        # Split on sentence-ending punctuation followed by whitespace
         sentences = re.split(r'(?<=[.!?])\s+', raw.strip())
         first = next((s.strip() for s in sentences if len(s.split()) >= 4), None)
-        return first if first else raw.strip()
+        quote = first if first else raw.strip()
+        # Strip any trailing incomplete fragment after the last real sentence boundary
+        # e.g. "Grind hard, shine brighter" → keep as-is but ensure terminal punctuation
+        quote = re.sub(r'[\s,]+$', '', quote)  # strip trailing whitespace/commas
+        if quote and quote[-1] not in '.!?':
+            quote += '.'
+        return quote
 
     def analyze_seo_data(self, gsc_data: dict, ga4_data: dict) -> str:
         """
