@@ -96,7 +96,12 @@ class GeminiModule:
           3. REST with API key
         """
         if getattr(self, '_sa_ready', False) and self.credentials:
-            return self._generate_sa_rest(prompt, temperature, max_tokens)
+            try:
+                return self._generate_sa_rest(prompt, temperature, max_tokens)
+            except Exception as e:
+                logger.warning(
+                    "[gemini] Vertex AI SA path failed (%s) — falling back to API key path.", e
+                )
         if self._sdk_client:
             return self._generate_sdk(prompt, temperature, max_tokens)
         return self._generate_rest(prompt, temperature, max_tokens)
