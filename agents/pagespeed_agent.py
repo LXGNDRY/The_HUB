@@ -44,7 +44,15 @@ def run_pagespeed(url: str = TARGET_URL, strategy: str = "mobile") -> dict:
         params["key"] = PAGESPEED_API_KEY
 
     logger.info("[pagespeed] Fetching %s (%s)...", url, strategy)
-    resp = requests.get(PAGESPEED_API, params=params, timeout=30)
+    import time
+    for attempt in range(3):
+        resp = requests.get(PAGESPEED_API, params=params, timeout=60)
+        if resp.status_code == 429:
+            wait = 15 * (attempt + 1)  # 15s, 30s, 45s
+            logger.warning("[pagespeed] 429 rate-limited — retrying in %ds (attempt %d/3)", wait, attempt + 1)
+            time.sleep(wait)
+            continue
+        break
     resp.raise_for_status()
     data = resp.json()
 

@@ -43,10 +43,22 @@ jobs:
           PAGESPEED_URL: ${{ github.event.inputs.url || 'https://legendary-branding.com' }}
         run: |
           python -c "
-import sys
+import sys, os
 sys.path.insert(0, '.')
-from agents.pagespeed_agent import run
-results = run()
+
+# Warn if API key is missing — workflow still runs but may hit rate limits
+if not os.getenv('PAGESPEED_API_KEY'):
+    print('WARNING: PAGESPEED_API_KEY secret not set. Set it at:')
+    print('  https://github.com/LXGNDRY/The_HUB/settings/secrets/actions')
+    print('  Get a free key at: https://developers.google.com/speed/docs/insights/v5/get-started')
+    print()
+
+try:
+    from agents.pagespeed_agent import run
+    results = run()
+except Exception as e:
+    print(f'PageSpeed audit failed: {e}')
+    results = {}
 
 # GitHub Actions Step Summary
 import os, json
@@ -95,6 +107,7 @@ for s in ['mobile', 'desktop']:
         results[s] = run_pagespeed(strategy=s)
     except Exception as e:
         results[s] = {'error': str(e)}
+        print(f'WARNING: {s} audit failed: {e}')
 with open('pagespeed_results.json', 'w') as f:
     json.dump(results, f, indent=2)
 print('Results saved to pagespeed_results.json')
