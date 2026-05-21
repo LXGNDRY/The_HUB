@@ -241,7 +241,7 @@ class GeminiModule:
             f"Do not use generic filler phrases. Make it feel real and brand-aligned."
         )
         logger.info("[gemini] Generating %s caption for: %s", platform, product_name)
-        return self.generate(prompt, temperature=0.85)
+        return self.generate(prompt, temperature=0.85, max_tokens=512)
 
     def generate_blog_outline(self, topic: str, target_keywords: list[str] = None) -> str:
         """
@@ -268,16 +268,16 @@ class GeminiModule:
             brand_voice: Writing style context.
         """
         prompt = (
-            f"Write one short, punchy {theme} quote suitable for a {brand_voice} brand's daily social post.\n"
-            f"Brand: Legendary Branding.\n"
-            f"Requirements:\n"
-            f"- 1-2 lines max\n"
-            f"- No quotation marks around it\n"
-            f"- Bold, memorable, authentic to the brand\n"
-            f"- Do NOT include hashtags or attribution\n"
-            f"Return ONLY the quote text, nothing else."
+            f"Write one complete, punchy {theme} quote for Legendary Branding's daily social post.\n"
+            f"Brand voice: {brand_voice}, bold, authentic, premium streetwear.\n"
+            f"Rules:\n"
+            f"- MUST be a complete, finished sentence or phrase (never cut off mid-word)\n"
+            f"- 5-12 words max\n"
+            f"- No quotation marks\n"
+            f"- No hashtags, no attribution\n"
+            f"Return ONLY the quote text. Nothing else."
         )
-        return self.generate(prompt, temperature=0.9, max_tokens=100)
+        return self.generate(prompt, temperature=0.9, max_tokens=60)
 
     def analyze_seo_data(self, gsc_data: dict, ga4_data: dict) -> str:
         """
