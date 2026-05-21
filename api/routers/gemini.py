@@ -221,8 +221,7 @@ def list_models():
 @router.get("/auth-test")
 def auth_test():
     """
-    Debug endpoint: directly tests the Vertex AI REST call and returns the raw result.
-    Useful for diagnosing IAM / API enable issues without fallback masking the error.
+    Debug: tests both the low-level Vertex REST call AND the full module.generate() path.
     """
     import os, requests
     import google.auth.transport.requests
@@ -231,37 +230,46 @@ def auth_test():
     region = "us-central1"
     model = "gemini-2.5-flash"
 
-    result = {"sa_ready": False, "vertex_url": None, "vertex_status": None, "vertex_response": None, "error": None}
+    result = {"low_level": {}, "module_generate": {}, "module_singleton_id": None}
 
+    # --- Low-level test (same as before) ---
     try:
         from auth.credentials import get_credentials
         creds = get_credentials()
-        result["sa_ready"] = creds is not None
-
-        if creds:
-            req = google.auth.transport.requests.Request()
-            if not creds.valid:
-                creds.refresh(req)
-            token = creds.token
-            result["token_obtained"] = bool(token)
-
-            url = (
-                f"https://{region}-aiplatform.googleapis.com/v1/"
-                f"projects/{project}/locations/{region}"
-                f"/publishers/google/models/{model}:generateContent"
-            )
-            result["vertex_url"] = url
-
-            resp = requests.post(
-                url,
-                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-                json={"contents": [{"role": "user", "parts": [{"text": "Say 'Legendary' in one word."}]}]},
-                timeout=15,
-            )
-            result["vertex_status"] = resp.status_code
-            result["vertex_response"] = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else resp.text[:500]
-
+        req = google.auth.transport.requests.Request()
+        if not creds.valid:
+            creds.refresh(req)
+        token = creds.token
+        url = (
+            f"https://{region}-aiplatform.googleapis.com/v1/"
+            f"projects/{project}/locations/{region}"
+            f"/publishers/google/models/{model}:generateContent"
+        )
+        resp = requests.post(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"contents": [{"role": "user", "parts": [{"text": "Say 'Legendary' in one word."}]}]},
+            timeout=15,
+        )
+        result["low_level"] = {
+            "vertex_status": resp.status_code,
+            "text": resp.json().get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "") if resp.status_code == 200 else resp.text[:200],
+        }
     except Exception as e:
-        result["error"] = f"{type(e).__name__}: {e}"
+        result["low_level"] = {"error": f"{type(e).__name__}: {e}"}
+
+    # --- Module.generate() path (same path as daily-quote) ---
+    try:
+        gem = _get_module()
+        result["module_singleton_id"] = id(gem)
+        sa_creds = getattr(gem, '_sa_creds', None)
+        result["module_generate"]["sa_creds_present"] = sa_creds is not None
+        result["module_generate"]["sa_creds_token"] = bool(getattr(sa_creds, 'token', None)) if sa_creds else False
+        text = gem.generate("Say 'Legendary' in one word.", max_tokens=10)
+        result["module_generate"]["result"] = text
+        result["module_generate"]["status"] = "ok"
+    except Exception as e:
+        result["module_generate"]["error"] = f"{type(e).__name__}: {e}"
+        result["module_generate"]["status"] = "failed"
 
     return result
