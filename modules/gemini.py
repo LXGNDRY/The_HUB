@@ -16,11 +16,12 @@ import requests
 logger = logging.getLogger("gcp-bot.gemini")
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
-# gemini-2.0-flash-001 is the stable versioned ID required by Vertex AI.
-# The unversioned alias 'gemini-2.0-flash' only works on generativelanguage.googleapis.com.
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-001")
+# gemini-2.5-flash is the current stable model on Vertex AI (gemini-2.0-flash-001 retired June 2026).
+# Use GEMINI_MODEL env var to override without redeploying.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 GEMINI_VERTEX_PROJECT = os.getenv("GCP_PROJECT_ID", "idx-lngndny")
+# gemini-2.5-flash is available in us-central1
 GEMINI_VERTEX_REGION = os.getenv("GEMINI_VERTEX_REGION", "us-central1")
 # Vertex AI REST endpoint — uses SA bearer token, requires roles/aiplatform.user
 GEMINI_VERTEX_BASE = (
