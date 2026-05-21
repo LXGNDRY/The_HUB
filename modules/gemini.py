@@ -266,7 +266,8 @@ class GeminiModule:
             f"Tone: {tone}, premium, authentic.\n"
             f"Platform: {platform}. Max {char_limit} chars.\n"
             f"Include relevant hashtags at the end (8-12 for Instagram, 3-5 for others).\n"
-            f"Do not use generic filler phrases. Make it feel real and brand-aligned."
+            f"Do not use generic filler phrases. Make it feel real and brand-aligned.\n"
+            f"Return ONLY the caption text itself. No intro, no preamble, no 'Here is a caption:' prefix."
         )
         logger.info("[gemini] Generating %s caption for: %s", platform, product_name)
         return self.generate(prompt, temperature=0.85, max_tokens=512)
