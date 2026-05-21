@@ -60,14 +60,21 @@ class AnalyzeSeoRequest(BaseModel):
 
 
 # ------------------------------------------------------------------
-# Module factory
+# Module singleton — instantiated once per Cloud Run instance so the
+# SA credentials object and token cache persist across requests.
 # ------------------------------------------------------------------
 
+_gemini_module = None
+
 def _get_module():
+    global _gemini_module
+    if _gemini_module is not None:
+        return _gemini_module
     try:
         from modules.gemini import GeminiModule
         from auth.credentials import get_credentials
-        return GeminiModule(credentials=get_credentials())
+        _gemini_module = GeminiModule(credentials=get_credentials())
+        return _gemini_module
     except ValueError as e:
         raise HTTPException(status_code=503, detail=f"Gemini unavailable: {e}")
     except Exception as e:
