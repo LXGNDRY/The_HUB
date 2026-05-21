@@ -18,30 +18,57 @@ logger = logging.getLogger("gcp-bot.gemini")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_VERTEX_PROJECT = os.getenv("GCP_PROJECT_ID", "idx-lngndny")
+GEMINI_VERTEX_REGION = os.getenv("GEMINI_VERTEX_REGION", "us-central1")
 
 
 class GeminiModule:
     """
-    Wrapper around the Gemini REST API.
-    Uses google-generativeai SDK if available, falls back to REST.
+    Wrapper around the Gemini API.
+    Auth priority:
+      1. Vertex AI SDK with SA credentials (recommended for Cloud Run)
+      2. google-generativeai SDK with API key
+      3. REST API with API key
     """
 
-    def __init__(self, api_key: str = None):
+    def __init__(self, api_key: str = None, credentials=None):
         self.api_key = api_key or GOOGLE_API_KEY
-        if not self.api_key:
-            raise ValueError("GOOGLE_API_KEY is not set. Cannot use GeminiModule.")
+        self.credentials = credentials
         self._sdk_client = None
-        self._init_sdk()
+        self._vertex_client = None
+        self._init_vertex()
+        if not self._vertex_client:
+            self._init_sdk()
+
+    def _init_vertex(self):
+        """Try Vertex AI SDK — uses SA credentials, no API key needed."""
+        try:
+            import vertexai
+            from vertexai.generative_models import GenerativeModel
+            vertexai.init(
+                project=GEMINI_VERTEX_PROJECT,
+                location=GEMINI_VERTEX_REGION,
+                credentials=self.credentials,
+            )
+            self._vertex_client = GenerativeModel(GEMINI_MODEL)
+            logger.info("[gemini] Vertex AI client initialised (project=%s).", GEMINI_VERTEX_PROJECT)
+        except ImportError:
+            logger.info("[gemini] vertexai SDK not installed — trying google-generativeai.")
+        except Exception as e:
+            logger.warning("[gemini] Vertex AI init failed (%s) — trying API key fallback.", e)
 
     def _init_sdk(self):
-        """Try to initialise the google-generativeai SDK."""
+        """Try google-generativeai SDK with API key."""
+        if not self.api_key:
+            logger.warning("[gemini] No API key set and Vertex AI unavailable.")
+            return
         try:
             import google.generativeai as genai
             genai.configure(api_key=self.api_key)
             self._sdk_client = genai.GenerativeModel(GEMINI_MODEL)
             logger.info("[gemini] SDK client initialised with model=%s", GEMINI_MODEL)
         except ImportError:
-            logger.info("[gemini] SDK not installed — using REST fallback.")
+            logger.info("[gemini] google-generativeai SDK not installed — using REST fallback.")
         except Exception as e:
             logger.warning("[gemini] SDK init failed (%s) — using REST fallback.", e)
 
@@ -61,9 +88,17 @@ class GeminiModule:
         Returns:
             Generated text string.
         """
+        if self._vertex_client:
+            return self._generate_vertex(prompt, temperature, max_tokens)
         if self._sdk_client:
             return self._generate_sdk(prompt, temperature, max_tokens)
         return self._generate_rest(prompt, temperature, max_tokens)
+
+    def _generate_vertex(self, prompt: str, temperature: float, max_tokens: int) -> str:
+        from vertexai.generative_models import GenerationConfig
+        config = GenerationConfig(temperature=temperature, max_output_tokens=max_tokens)
+        response = self._vertex_client.generate_content(prompt, generation_config=config)
+        return response.text.strip()
 
     def _generate_sdk(self, prompt: str, temperature: float, max_tokens: int) -> str:
         import google.generativeai as genai

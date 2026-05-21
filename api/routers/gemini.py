@@ -66,7 +66,8 @@ class AnalyzeSeoRequest(BaseModel):
 def _get_module():
     try:
         from modules.gemini import GeminiModule
-        return GeminiModule()
+        from auth.credentials import get_credentials
+        return GeminiModule(credentials=get_credentials())
     except ValueError as e:
         raise HTTPException(status_code=503, detail=f"Gemini unavailable: {e}")
     except Exception as e:

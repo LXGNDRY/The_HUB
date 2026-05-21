@@ -13,11 +13,24 @@ from google.auth import default
 from google.oauth2 import service_account
 
 SCOPES = [
+    # Core GCP
     "https://www.googleapis.com/auth/cloud-platform",
     "https://www.googleapis.com/auth/compute",
     "https://www.googleapis.com/auth/devstorage.read_write",
     "https://www.googleapis.com/auth/monitoring",
     "https://www.googleapis.com/auth/cloud-billing.readonly",
+    # Google Sheets + Drive (sheets.py)
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+    # Google Tag Manager (tag_manager.py)
+    "https://www.googleapis.com/auth/tagmanager.readonly",
+    "https://www.googleapis.com/auth/tagmanager.edit.containers",
+    "https://www.googleapis.com/auth/tagmanager.publish",
+    # Web Search Indexing (indexing.py)
+    "https://www.googleapis.com/auth/indexing",
+    # Cloud Logging (cloud_logging.py)
+    "https://www.googleapis.com/auth/logging.read",
+    "https://www.googleapis.com/auth/logging.write",
 ]
 
 
