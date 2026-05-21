@@ -281,7 +281,7 @@ def auth_test():
             result["module_generate"]["module_vertex_text"] = vr.text[:300]
         except Exception as ve:
             result["module_generate"]["module_vertex_error"] = str(ve)
-        text = gem.generate("Say 'Legendary' in one word.", max_tokens=10)
+        text = gem.generate("Say 'Legendary' in one word.", max_tokens=50)
         result["module_generate"]["result"] = text
         result["module_generate"]["status"] = "ok"
     except Exception as e:

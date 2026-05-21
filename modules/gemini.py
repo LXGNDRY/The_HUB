@@ -331,7 +331,7 @@ class GeminiModule:
             f"\n"
             f"Output the quote and nothing else."
         )
-        return self.generate(prompt, temperature=0.85, max_tokens=40)
+        return self.generate(prompt, temperature=0.85, max_tokens=200)
 
     def analyze_seo_data(self, gsc_data: dict, ga4_data: dict) -> str:
         """
