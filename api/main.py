@@ -10,7 +10,7 @@ from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from api.middleware.auth import verify_api_key
 from api.routers import compute, storage, billing, monitoring, seo, analytics, pagespeed
-from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs, higgsfield, shopify
+from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs, higgsfield, shopify, klaviyo
 from scheduler.engine import BotScheduler
 
 logging.basicConfig(
@@ -69,6 +69,7 @@ app.include_router(secrets.router,    prefix="/api/secrets",    tags=["Secrets"]
 app.include_router(logs.router,        prefix="/api/logs",        tags=["Logs"],        **protected)
 app.include_router(higgsfield.router,  prefix="/api/higgsfield",  tags=["Higgsfield AI"], **protected)
 app.include_router(shopify.router,     prefix="/api/shopify",     tags=["Shopify"],        **protected)
+app.include_router(klaviyo.router,     prefix="/api/klaviyo",     tags=["Klaviyo"],        **protected)
 
 # -------------------------------------------------------------------------
 # Scheduler control routes
