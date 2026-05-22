@@ -2,31 +2,28 @@
 modules/klaviyo.py — Klaviyo Email & SMS Marketing Module
 
 Covers:
-  - Profiles (list, get, create, update)
-  - Lists (list all, get members, add/remove profiles)
-  - Campaigns (list, get metrics)
-  - Events / track (order placed, product viewed, etc.)
-  - Metrics (list, get aggregate stats)
-  - Flow summary
-  - Account overview
+  - Account info
+  - Profiles (list, get, search by email)
+  - Lists (list all, get members)
+  - Campaigns (list email + sms)
+  - Metrics (list all 57+)
+  - Events / track custom events
+  - Overview (full account summary)
 
 Requires: KLAVIYO_API_KEY env var (private API key starting with pk_)
+Uses Klaviyo Python SDK v10 — responses are Pydantic model objects.
 """
 
 import os
 import logging
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 logger = logging.getLogger("gcp-bot.klaviyo")
 
 KLAVIYO_API_KEY = os.getenv("KLAVIYO_API_KEY", "")
 
-# Klaviyo API revision — pin to stable release
-API_REVISION = "2024-10-15"
-
 
 def _client():
-    """Return a configured Klaviyo API client wrapper."""
     if not KLAVIYO_API_KEY:
         raise RuntimeError("KLAVIYO_API_KEY is not set")
     import klaviyo_api
@@ -38,10 +35,12 @@ def _client():
     )
 
 
+def _str(val):
+    """Safely convert any value (including datetime) to string."""
+    return str(val) if val is not None else None
+
+
 class KlaviyoModule:
-    """
-    High-level Klaviyo operations for the GCP Bot.
-    """
 
     def __init__(self):
         self._api = None
@@ -57,19 +56,19 @@ class KlaviyoModule:
     # ------------------------------------------------------------------
 
     def get_account(self) -> dict:
-        """Return basic account info."""
         resp = self.api.Accounts.get_accounts()
-        accounts = resp.get("data", [])
+        accounts = resp.data or []
         if not accounts:
             return {}
         a = accounts[0]
-        attrs = a.get("attributes", {})
+        ci = a.attributes.contact_information
         return {
-            "id": a.get("id"),
-            "name": attrs.get("contact_information", {}).get("organization_name", ""),
-            "email": attrs.get("contact_information", {}).get("email", ""),
-            "timezone": attrs.get("timezone", ""),
-            "currency": attrs.get("preferred_currency", ""),
+            "id": a.id,
+            "name": ci.organization_name,
+            "sender_email": ci.default_sender_email,
+            "sender_name": ci.default_sender_name,
+            "timezone": a.attributes.timezone,
+            "currency": getattr(a.attributes, "preferred_currency", None),
         }
 
     # ------------------------------------------------------------------
@@ -77,64 +76,55 @@ class KlaviyoModule:
     # ------------------------------------------------------------------
 
     def list_profiles(self, page_size: int = 50) -> dict:
-        """Return a page of profiles."""
-        resp = self.api.Profiles.get_profiles(
-            page_size=page_size,
-            sort="-created",
-        )
-        profiles = resp.get("data", [])
+        resp = self.api.Profiles.get_profiles(page_size=page_size, sort="-created")
+        profiles = resp.data or []
         return {
             "count": len(profiles),
             "profiles": [
                 {
-                    "id": p.get("id"),
-                    "email": p.get("attributes", {}).get("email", ""),
-                    "first_name": p.get("attributes", {}).get("first_name", ""),
-                    "last_name": p.get("attributes", {}).get("last_name", ""),
-                    "created": p.get("attributes", {}).get("created", ""),
-                    "subscriptions": p.get("attributes", {}).get("subscriptions", {}),
+                    "id": p.id,
+                    "email": p.attributes.email,
+                    "first_name": p.attributes.first_name,
+                    "last_name": p.attributes.last_name,
+                    "created": _str(p.attributes.created),
                 }
                 for p in profiles
             ],
         }
 
     def get_profile(self, profile_id: str) -> dict:
-        """Get a single profile by ID."""
         resp = self.api.Profiles.get_profile(profile_id)
-        p = resp.get("data", {})
-        attrs = p.get("attributes", {})
+        p = resp.data
+        a = p.attributes
         return {
-            "id": p.get("id"),
-            "email": attrs.get("email", ""),
-            "first_name": attrs.get("first_name", ""),
-            "last_name": attrs.get("last_name", ""),
-            "phone": attrs.get("phone_number", ""),
-            "location": attrs.get("location", {}),
-            "properties": attrs.get("properties", {}),
-            "created": attrs.get("created", ""),
-            "updated": attrs.get("updated", ""),
-            "subscriptions": attrs.get("subscriptions", {}),
+            "id": p.id,
+            "email": a.email,
+            "first_name": a.first_name,
+            "last_name": a.last_name,
+            "phone": a.phone_number,
+            "location": a.location.to_dict() if a.location else None,
+            "properties": a.properties,
+            "created": _str(a.created),
+            "updated": _str(a.updated),
         }
 
     def search_profile_by_email(self, email: str) -> dict:
-        """Find a profile by email address."""
         resp = self.api.Profiles.get_profiles(
             filter=f'equals(email,"{email}")',
             page_size=1,
         )
-        profiles = resp.get("data", [])
+        profiles = resp.data or []
         if not profiles:
             return {"found": False, "email": email}
         p = profiles[0]
-        attrs = p.get("attributes", {})
+        a = p.attributes
         return {
             "found": True,
-            "id": p.get("id"),
-            "email": attrs.get("email", ""),
-            "first_name": attrs.get("first_name", ""),
-            "last_name": attrs.get("last_name", ""),
-            "created": attrs.get("created", ""),
-            "subscriptions": attrs.get("subscriptions", {}),
+            "id": p.id,
+            "email": a.email,
+            "first_name": a.first_name,
+            "last_name": a.last_name,
+            "created": _str(a.created),
         }
 
     # ------------------------------------------------------------------
@@ -142,34 +132,32 @@ class KlaviyoModule:
     # ------------------------------------------------------------------
 
     def list_lists(self) -> dict:
-        """Return all lists in the account."""
         resp = self.api.Lists.get_lists()
-        lists = resp.get("data", [])
+        lists = resp.data or []
         return {
             "count": len(lists),
             "lists": [
                 {
-                    "id": l.get("id"),
-                    "name": l.get("attributes", {}).get("name", ""),
-                    "created": l.get("attributes", {}).get("created", ""),
-                    "updated": l.get("attributes", {}).get("updated", ""),
+                    "id": l.id,
+                    "name": l.attributes.name,
+                    "created": _str(l.attributes.created),
+                    "updated": _str(l.attributes.updated),
                 }
                 for l in lists
             ],
         }
 
     def get_list_profiles(self, list_id: str, page_size: int = 50) -> dict:
-        """Return profiles subscribed to a list."""
         resp = self.api.Lists.get_list_profiles(list_id, page_size=page_size)
-        profiles = resp.get("data", [])
+        profiles = resp.data or []
         return {
             "list_id": list_id,
             "count": len(profiles),
             "profiles": [
                 {
-                    "id": p.get("id"),
-                    "email": p.get("attributes", {}).get("email", ""),
-                    "first_name": p.get("attributes", {}).get("first_name", ""),
+                    "id": p.id,
+                    "email": p.attributes.email,
+                    "first_name": p.attributes.first_name,
                 }
                 for p in profiles
             ],
@@ -180,21 +168,22 @@ class KlaviyoModule:
     # ------------------------------------------------------------------
 
     def list_campaigns(self, channel: str = "email") -> dict:
-        """Return all campaigns for a given channel (email or sms)."""
         resp = self.api.Campaigns.get_campaigns(
             filter=f"equals(messages.channel,'{channel}')",
         )
-        campaigns = resp.get("data", [])
+        campaigns = resp.data or []
         return {
             "count": len(campaigns),
             "channel": channel,
             "campaigns": [
                 {
-                    "id": c.get("id"),
-                    "name": c.get("attributes", {}).get("name", ""),
-                    "status": c.get("attributes", {}).get("status", ""),
-                    "send_time": c.get("attributes", {}).get("scheduled_at", ""),
-                    "created": c.get("attributes", {}).get("created_at", ""),
+                    "id": c.id,
+                    "name": c.attributes.name,
+                    "status": c.attributes.status,
+                    "send_time": _str(getattr(c.attributes, "send_time", None)),
+                    "scheduled_at": _str(getattr(c.attributes, "scheduled_at", None)),
+                    "created_at": _str(getattr(c.attributes, "created_at", None)),
+                    "updated_at": _str(getattr(c.attributes, "updated_at", None)),
                 }
                 for c in campaigns
             ],
@@ -205,16 +194,15 @@ class KlaviyoModule:
     # ------------------------------------------------------------------
 
     def list_metrics(self) -> dict:
-        """Return all available metrics."""
         resp = self.api.Metrics.get_metrics()
-        metrics = resp.get("data", [])
+        metrics = resp.data or []
         return {
             "count": len(metrics),
             "metrics": [
                 {
-                    "id": m.get("id"),
-                    "name": m.get("attributes", {}).get("name", ""),
-                    "service": m.get("attributes", {}).get("service", ""),
+                    "id": m.id,
+                    "name": m.attributes.name,
+                    "integration": getattr(m.attributes, "integration", None),
                 }
                 for m in metrics
             ],
@@ -225,14 +213,6 @@ class KlaviyoModule:
     # ------------------------------------------------------------------
 
     def create_event(self, event_name: str, email: str, properties: dict = None) -> dict:
-        """
-        Track a custom event for a profile.
-
-        Args:
-            event_name:  e.g. "Placed Order", "Viewed Product"
-            email:       Profile email
-            properties:  Arbitrary event properties dict
-        """
         body = {
             "data": {
                 "type": "event",
@@ -252,7 +232,6 @@ class KlaviyoModule:
     # ------------------------------------------------------------------
 
     def get_overview(self) -> dict:
-        """High-level account summary: lists, campaigns, metrics counts."""
         try:
             account = self.get_account()
         except Exception as e:
@@ -260,21 +239,21 @@ class KlaviyoModule:
         try:
             lists = self.list_lists()
         except Exception as e:
-            lists = {"error": str(e)}
+            lists = {"error": str(e), "count": 0, "lists": []}
         try:
             campaigns = self.list_campaigns()
         except Exception as e:
-            campaigns = {"error": str(e)}
+            campaigns = {"error": str(e), "count": 0, "campaigns": []}
         try:
             metrics = self.list_metrics()
         except Exception as e:
-            metrics = {"error": str(e)}
+            metrics = {"error": str(e), "count": 0}
 
         return {
             "account": account,
             "lists_count": lists.get("count", 0),
             "lists": lists.get("lists", []),
-            "campaigns_count": campaigns.get("count", 0),
+            "email_campaigns_count": campaigns.get("count", 0),
             "recent_campaigns": campaigns.get("campaigns", [])[:5],
             "metrics_count": metrics.get("count", 0),
         }
