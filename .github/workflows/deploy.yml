@@ -191,6 +191,16 @@ jobs:
           sys.exit(r2.returncode)
           PYEOF
 
+      # ── Step 3: Ensure public invoker binding (survives 'services replace') ──
+      - name: Set public invoker IAM
+        run: |
+          gcloud beta run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --member=allUsers \
+            --role=roles/run.invoker \
+            --quiet
+          echo "✅ allUsers invoker binding set"
+
       # ── Get URL ──
       - name: Get service URL
         id: url
