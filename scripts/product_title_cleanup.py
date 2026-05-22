@@ -28,57 +28,63 @@ HEADERS = {
 # ─────────────────────────────────────────────────────────────
 # Brand-aligned rewrites
 # handle → { title, seo_title, seo_description }
+#
+# v2: Updated to actual Shopify handles (confirmed via handle dump).
+# 8 original SC handles were 404s (products deleted from store).
+# These 8 handles target the AliExpress-style products still active.
 # ─────────────────────────────────────────────────────────────
 REWRITES = {
-    "running-shoes-ultra-light-racing-shoes-for-marathon-training-high-energy-cushioning-men-women": {
-        "title": "LB Lightweight Performance Running Shoes",
-        "seo_title": "LB Lightweight Performance Running Shoes | Legendary Branding",
-        "seo_description": "Ultra-light, cushioned running shoes built for speed and endurance. High-energy foam sole for men and women. Shop Legendary Branding.",
-    },
-    "american-spider-pattern-embroidery-zip-up-hoodie-y2k-mens-womens-gothic-harajuku-jacket-fashion-hoodie-sweatshirt-casual-clothes": {
-        "title": "Spider Pattern Embroidered Zip-Up Hoodie",
-        "seo_title": "Spider Pattern Embroidered Zip-Up Hoodie | Legendary Branding",
-        "seo_description": "Bold spider embroidery zip-up hoodie with a streetwear edge. Y2K-inspired unisex fit. Shop the latest drops at Legendary Branding.",
-    },
-    "autumn-tan-leopard-jeans-men-denim-pants-male-oversize-wide-leg-trousers": {
-        "title": "LB Leopard Print Wide-Leg Denim Pants",
-        "seo_title": "LB Leopard Print Wide-Leg Denim Pants | Legendary Branding",
-        "seo_description": "Oversized wide-leg denim in a tan leopard print. Retro streetwear statement piece for men. Shop Legendary Branding.",
-    },
+    # Already updated in v1 run
     "womens-2-piece-stylish-outfits-long-sleeve-floral-embroidered-sweatshirt-solid-color-jogger-pants-sets": {
-        "title": "LB Floral Embroidered Sweatshirt & Jogger Set",
-        "seo_title": "LB Floral Embroidered Sweatshirt & Jogger Set | Legendary Branding",
-        "seo_description": "Women's 2-piece set featuring a long-sleeve floral embroidered sweatshirt with matching solid jogger pants. Shop Legendary Branding.",
-    },
-    "mens-business-casual-short-sleeved-solid-color-polo-shirt-fashion-breathable-comfortable-summer-versatile-top": {
-        "title": "LB Solid Breathable Polo Shirt",
-        "seo_title": "LB Solid Breathable Polo Shirt | Legendary Branding",
-        "seo_description": "Men's short-sleeve polo in a clean solid colorway. Breathable, versatile streetwear-meets-casual style. Shop Legendary Branding.",
-    },
-    "mens-modern-minimalist-pure-cotton-long-sleeved-lounge-set": {
-        "title": "LB Cotton Minimalist Long-Sleeve Lounge Set",
-        "seo_title": "LB Cotton Minimalist Long-Sleeve Lounge Set | Legendary Branding",
-        "seo_description": "Men's pure cotton long-sleeve lounge set with a clean minimalist aesthetic. Comfortable everyday wear from Legendary Branding.",
-    },
-    "2025-new-retro-y2k-casual-two-piece-american-street-harajuku-sweatshirt-straight-trousers-men-casual-fashion-hoodie-streetwear": {
-        "title": "LB Y2K Hoodie & Straight Trousers Set",
-        "seo_title": "LB Y2K Hoodie & Straight Trousers Set | Legendary Branding",
-        "seo_description": "Men's two-piece Y2K streetwear set — relaxed hoodie and straight-leg trousers. Retro American street style by Legendary Branding.",
-    },
-    "loose-straight-wide-leg-retro-casual-streetwear-three-stripes-jeans-high-stretch-denim-jeans-pant-for-women": {
-        "title": "LB Three-Stripe Wide-Leg Stretch Jeans",
-        "seo_title": "LB Three-Stripe Wide-Leg Stretch Jeans | Legendary Branding",
-        "seo_description": "Women's high-stretch wide-leg denim jeans with a signature three-stripe detail. Retro streetwear fit from Legendary Branding.",
+        "title": "LB Bow Embroidered Hoodie & Jogger Set",
+        "seo_title": "LB Bow Embroidered Hoodie & Jogger Set | Legendary Branding",
+        "seo_description": "Women's 2-piece set featuring a bow embroidered hoodie and matching jogger pants. Clean streetwear style from Legendary Branding.",
     },
     "men-denim-fashion-rhine-stone-straight-leg-men-stacked-denim-layered-jeans": {
         "title": "LB Rhinestone Stacked Straight Denim",
         "seo_title": "LB Rhinestone Stacked Straight Denim | Legendary Branding",
         "seo_description": "Men's straight-leg stacked denim with rhinestone detailing. Statement streetwear jeans from Legendary Branding.",
     },
-    "five-pointed-star-p-letter-embroidery-side-7-baseball-caps-spring-autumn-outdoor-adjustable-casual-hats-sunscreen-hat": {
-        "title": "LB Star P-Letter Embroidered Baseball Cap",
-        "seo_title": "LB Star P-Letter Embroidered Baseball Cap | Legendary Branding",
-        "seo_description": "Adjustable baseball cap with five-pointed star and P-letter embroidery. Clean streetwear accessory from Legendary Branding.",
+    # v2 additions — real handles confirmed from store
+    "2-pieces-classic-mens-sportswear-set-soft-breathable-full-zip-tracksuit": {
+        "title": "LB Full-Zip Tracksuit Set",
+        "seo_title": "LB Full-Zip Tracksuit Set | Legendary Branding",
+        "seo_description": "Men's soft, breathable full-zip tracksuit. Classic two-piece sportswear with a streetwear edge. Shop Legendary Branding.",
+    },
+    "cycling-sunglasses-uv-protect-glasses-outdoor-mtb-bike-shades-sports-fishing-glasses": {
+        "title": "LB UV Sport Sunglasses",
+        "seo_title": "LB UV Sport Sunglasses | Legendary Branding",
+        "seo_description": "UV-protective sport sunglasses. Lightweight, durable, and built for outdoor wear. Shop accessories at Legendary Branding.",
+    },
+    "2025-new-hip-hop-fashion-spliced-baggy-jeans-for-men-pleated-design-casual-straight-leg-denim-pants-y2k-vintage-streetwear-jean": {
+        "title": "LB Spliced Baggy Streetwear Jeans",
+        "seo_title": "LB Spliced Baggy Streetwear Jeans | Legendary Branding",
+        "seo_description": "Men's baggy spliced denim with a pleated design and straight-leg fit. Y2K-inspired streetwear denim from Legendary Branding.",
+    },
+    "jeans-men-new-streetwear-baggy-wide-leg-jeans-korean-fashion": {
+        "title": "LB Baggy Wide-Leg Denim",
+        "seo_title": "LB Baggy Wide-Leg Denim | Legendary Branding",
+        "seo_description": "Men's wide-leg baggy jeans with a relaxed streetwear fit. Clean, oversized denim from Legendary Branding.",
+    },
+    "jacket-mens-corduroy-korean-version-casual-fashion-loose-lapel-mens": {
+        "title": "LB Corduroy Lapel Jacket",
+        "seo_title": "LB Corduroy Lapel Jacket | Legendary Branding",
+        "seo_description": "Men's loose corduroy lapel jacket. Casual, textured outerwear with a streetwear-meets-classic style. Shop Legendary Branding.",
+    },
+    "men-s-solid-color-oversized-hoodie-jogger-set": {
+        "title": "LB Oversized Hoodie & Jogger Set",
+        "seo_title": "LB Oversized Hoodie & Jogger Set | Legendary Branding",
+        "seo_description": "Men's solid color oversized hoodie and jogger matching set. Clean, comfortable streetwear from Legendary Branding.",
+    },
+    "casual-pants-striped-flared-sweatpants-new-mens-slim-fit-pants": {
+        "title": "LB Striped Flare Sweatpants",
+        "seo_title": "LB Striped Flare Sweatpants | Legendary Branding",
+        "seo_description": "Men's striped flared sweatpants with a slim-to-flare silhouette. Bold streetwear bottoms from Legendary Branding.",
+    },
+    "belt-cropped-trench-spring-jacket-women-vintage-streetwear-double-breasted-long-sleeve-top-female-coat-outfits": {
+        "title": "LB Belted Cropped Trench Jacket",
+        "seo_title": "LB Belted Cropped Trench Jacket | Legendary Branding",
+        "seo_description": "Women's double-breasted belted cropped trench jacket. Vintage-inspired streetwear outerwear from Legendary Branding.",
     },
 }
 
