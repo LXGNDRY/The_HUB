@@ -1,0 +1,29 @@
+name: Pull GCP Error Logs
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pull-logs:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install google-cloud-logging
+
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Pull error logs
+        run: python scripts/pull_error_logs.py
