@@ -683,3 +683,26 @@ def store_overview() -> dict:
     except Exception as e:
         logger.error("store_overview error: %s", e)
         raise
+
+
+# ─────────────────────────────────────────────
+# Product Image Alt Text
+# ─────────────────────────────────────────────
+
+def update_product_image_alt(product_id: int, image_id: int, alt_text: str) -> dict:
+    """
+    Update the alt text for a specific product image.
+    Used by the vision agent to write NIM-generated alt text back to Shopify.
+    """
+    payload = {
+        "image": {
+            "id":  image_id,
+            "alt": alt_text,
+        }
+    }
+    return _put(f"/products/{product_id}/images/{image_id}.json", payload)
+
+
+def list_product_images(product_id: int) -> dict:
+    """List all images for a product, including alt text and src."""
+    return _get(f"/products/{product_id}/images.json")
