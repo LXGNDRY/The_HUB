@@ -191,15 +191,16 @@ jobs:
           sys.exit(r2.returncode)
           PYEOF
 
-      # ── Step 3: Ensure public invoker binding (survives 'services replace') ──
+      # ── Step 3: Ensure public invoker binding ──
+      # Requires roles/run.admin on the SA — non-fatal if permission is missing
       - name: Set public invoker IAM
+        continue-on-error: true
         run: |
           gcloud run services add-iam-policy-binding ${{ env.SERVICE_NAME }} \
             --region=${{ env.REGION }} \
             --member=allUsers \
             --role=roles/run.invoker \
-            --quiet
-          echo "✅ allUsers invoker binding set"
+            --quiet && echo "✅ allUsers invoker binding set" || echo "⚠️ IAM binding skipped — SA needs roles/run.admin"
 
       # ── Get URL ──
       - name: Get service URL
