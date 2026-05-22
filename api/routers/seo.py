@@ -78,6 +78,85 @@ def search_performance(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+# ---------------------------------------------------------------------------
+# Site Verification helpers
+# ---------------------------------------------------------------------------
+
+def _sa_credentials(scopes: list[str]):
+    """Return SA credentials from GCP_SA_KEY_JSON env var."""
+    import json as _json
+    from google.oauth2 import service_account
+    key_json = os.getenv("GCP_SA_KEY_JSON", "")
+    if not key_json:
+        raise RuntimeError("GCP_SA_KEY_JSON not set")
+    info = _json.loads(key_json)
+    return service_account.Credentials.from_service_account_info(info, scopes=scopes)
+
+
+@router.get("/verify-token", summary="Get DNS TXT verification token for the service account")
+def get_verify_token(
+    domain: str = "legendary-branding.com",
+):
+    """
+    Calls the Site Verification API to get a DNS TXT record the SA needs
+    added to the domain before verify-confirm can succeed.
+    Returns the exact TXT value to paste into Shopify DNS settings.
+    """
+    try:
+        from googleapiclient.discovery import build
+        creds = _sa_credentials(["https://www.googleapis.com/auth/siteverification"])
+        svc = build("siteVerification", "v1", credentials=creds, cache_discovery=False)
+        body = {
+            "verificationMethod": "DNS_TXT",
+            "site": {"type": "INET_DOMAIN", "identifier": domain},
+        }
+        resp = svc.webResource().getToken(body=body).execute()
+        token = resp.get("token", "")
+        return {
+            "domain": domain,
+            "dns_record_type": "TXT",
+            "dns_host": "@",
+            "dns_value": token,
+            "instruction": (
+                f"Add a TXT record to {domain} DNS: "
+                f'host=@ value=\"{token}\" — '
+                "then call POST /api/seo/verify-confirm"
+            ),
+        }
+    except Exception as exc:
+        logger.error("verify-token error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post("/verify-confirm", summary="Confirm SA site verification after DNS TXT is set")
+def confirm_verification(
+    domain: str = "legendary-branding.com",
+):
+    """
+    Verifies the SA as an owner of the domain using DNS_TXT method.
+    Must be called after the TXT record from /verify-token is live in DNS.
+    """
+    try:
+        from googleapiclient.discovery import build
+        creds = _sa_credentials(["https://www.googleapis.com/auth/siteverification"])
+        svc = build("siteVerification", "v1", credentials=creds, cache_discovery=False)
+        body = {
+            "verificationMethod": "DNS_TXT",
+            "site": {"type": "INET_DOMAIN", "identifier": domain},
+        }
+        resp = svc.webResource().insert(verificationMethod="DNS_TXT", body=body).execute()
+        return {
+            "status": "verified",
+            "domain": domain,
+            "id": resp.get("id"),
+            "owners": resp.get("owners", []),
+            "note": "SA is now a verified owner. Indexing API submissions will work.",
+        }
+    except Exception as exc:
+        logger.error("verify-confirm error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/crawl-errors", summary="GSC index coverage summary")
 def crawl_errors(site_url: str = "https://legendary-branding.com"):
     try:
