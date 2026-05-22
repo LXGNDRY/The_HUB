@@ -31,5 +31,8 @@ vertexai>=1.60.0
 google-cloud-secret-manager>=2.20.0
 google-cloud-logging>=3.10.0
 
+# Klaviyo
+klaviyo-api>=10.0.0
+
 # Utilities
 requests>=2.32.0
