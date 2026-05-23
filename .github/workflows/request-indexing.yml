@@ -1,0 +1,18 @@
+name: Request GSC Indexing
+
+on:
+  workflow_dispatch:
+
+jobs:
+  request-indexing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests google-auth
+      - name: Request indexing for non-indexed URLs
+        env:
+          GSC_TOKEN_JSON: ${{ secrets.GSC_TOKEN_JSON }}
+        run: python scripts/request_indexing.py
