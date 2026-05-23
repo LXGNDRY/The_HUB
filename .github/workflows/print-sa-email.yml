@@ -1,0 +1,14 @@
+name: Print SA Email
+
+on:
+  workflow_dispatch:
+
+jobs:
+  print-email:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print service account email
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          echo "$GCP_SA_KEY" | python3 -c "import json,sys; d=json.load(sys.stdin); print('SA EMAIL:', d.get('client_email','not found'))"
