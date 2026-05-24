@@ -1,0 +1,24 @@
+name: Add Paid Shipping Tiers
+
+on:
+  workflow_dispatch:
+
+jobs:
+  add-tiers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Add paid shipping tiers to General profile
+        env:
+          SHOPIFY_CLIENT_ID:     ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: python scripts/add_paid_shipping_tiers.py
