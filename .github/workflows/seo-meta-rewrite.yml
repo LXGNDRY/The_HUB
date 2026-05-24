@@ -27,8 +27,32 @@ jobs:
       - name: Install dependencies
         run: pip install requests
 
+      - name: Fetch fresh Shopify token via Client Credentials Grant
+        id: shopify_token
+        env:
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: |
+          TOKEN=$(python3 - <<'PYEOF'
+          import os, requests, sys
+          client_id = os.environ["SHOPIFY_CLIENT_ID"]
+          client_secret = os.environ["SHOPIFY_CLIENT_SECRET"]
+          domain = "lngndny.myshopify.com"
+          r = requests.post(
+              f"https://{domain}/admin/oauth/access_token",
+              json={"client_id": client_id, "client_secret": client_secret, "grant_type": "client_credentials"},
+              timeout=15
+          )
+          r.raise_for_status()
+          token = r.json()["access_token"]
+          print(token, end="")
+          PYEOF
+          )
+          echo "SHOPIFY_ADMIN_TOKEN=$TOKEN" >> $GITHUB_ENV
+          echo "Token fetched successfully"
+
       - name: Run SEO meta rewrite
         env:
-          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           SHOPIFY_STORE_DOMAIN: lngndny.myshopify.com
+          DRY_RUN: ${{ inputs.dry_run }}
         run: python scripts/seo_meta_rewrite.py
