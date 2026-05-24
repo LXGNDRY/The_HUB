@@ -5,7 +5,8 @@ Fix 1: Delete all non-active/non-Shopify products from GMC feed
 Fix 2: Patch brand = "Legendary Branding" on all remaining products
 Fix 3: Set identifier_exists = false where GTIN is missing (apparel exemption)
 Fix 4: Fix shipping — clean slate US shipping rule
-Uses GCP_SA_KEY + SHOPIFY_ADMIN_TOKEN
+Uses GCP_SA_KEY + SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET
+Fetches a fresh Shopify Admin API token at runtime (tokens expire every 24h)
 """
 import os, json, sys, time, requests
 from google.oauth2 import service_account
@@ -14,10 +15,25 @@ from googleapiclient.errors import HttpError
 
 # ── Auth ─────────────────────────────────────────────────────
 SA_KEY_JSON = os.environ["GCP_SA_KEY"]
-SHOPIFY_TOKEN = os.environ["SHOPIFY_ADMIN_TOKEN"]
+SHOPIFY_CLIENT_ID = os.environ["SHOPIFY_CLIENT_ID"]
+SHOPIFY_CLIENT_SECRET = os.environ["SHOPIFY_CLIENT_SECRET"]
 MERCHANT_ID = "582171114"
 SHOP = "lngndny.myshopify.com"
 API_VERSION = "2026-04"
+
+# Fetch a fresh token via client credentials grant (valid 24h)
+print("Fetching fresh Shopify Admin API token...")
+token_resp = requests.post(
+    f"https://{SHOP}/admin/oauth/access_token",
+    data={
+        "grant_type": "client_credentials",
+        "client_id": SHOPIFY_CLIENT_ID,
+        "client_secret": SHOPIFY_CLIENT_SECRET,
+    }
+)
+token_resp.raise_for_status()
+SHOPIFY_TOKEN = token_resp.json()["access_token"]
+print(f"  Token acquired (scopes: {token_resp.json().get('scope', 'unknown')})")
 SHOPIFY_HEADERS = {"X-Shopify-Access-Token": SHOPIFY_TOKEN}
 
 creds = service_account.Credentials.from_service_account_info(

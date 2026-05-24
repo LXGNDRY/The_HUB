@@ -22,5 +22,6 @@ jobs:
       - name: Run GMC feed fix
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         run: python scripts/gmc_feed_fix.py
