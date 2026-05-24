@@ -1,0 +1,24 @@
+name: Check Shopify Token
+
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Test token
+        env:
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+            -H "X-Shopify-Access-Token: $SHOPIFY_ADMIN_TOKEN" \
+            "https://lngndny.myshopify.com/admin/api/2026-04/shop.json")
+          echo "HTTP status: $STATUS"
+          if [ "$STATUS" == "200" ]; then
+            echo "Token is valid"
+          elif [ "$STATUS" == "401" ]; then
+            echo "Token is INVALID or expired"
+          elif [ "$STATUS" == "403" ]; then
+            echo "Token exists but missing scope"
+          fi
