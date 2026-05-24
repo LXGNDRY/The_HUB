@@ -181,18 +181,19 @@ shipping_body = {
     "accountId": MERCHANT_ID,
     "services": [
         {
-            "name": "Free Shipping US (Orders $100+)",
+            "name": "Standard US Shipping",
             "active": True,
-            "deliveryCountries": ["US"],
+            "deliveryCountry": "US",
             "currency": "USD",
             "deliveryTime": {
-                "minTransitTimeInDays": 3,
-                "maxTransitTimeInDays": 7,
                 "minHandlingTimeInDays": 1,
-                "maxHandlingTimeInDays": 2
+                "maxHandlingTimeInDays": 2,
+                "minTransitTimeInDays": 3,
+                "maxTransitTimeInDays": 7
             },
             "rateGroups": [
                 {
+                    "name": "US Standard",
                     "mainTable": {
                         "rowHeaders": {
                             "prices": [
@@ -203,8 +204,7 @@ shipping_body = {
                             {"cells": [{"flatRate": {"value": "5.99", "currency": "USD"}}]},
                             {"cells": [{"flatRate": {"value": "0.00", "currency": "USD"}}]}
                         ]
-                    },
-                    "name": "US Standard"
+                    }
                 }
             ]
         }
