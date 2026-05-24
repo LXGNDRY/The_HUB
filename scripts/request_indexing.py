@@ -14,7 +14,7 @@ import requests
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request as GoogleRequest
 
-SITE_URL = "sc-domain:legendary-branding.com"
+SITE_URL = "https://legendary-branding.com/"
 SCOPES   = ["https://www.googleapis.com/auth/webmasters"]
 
 URLS_TO_INDEX = [
