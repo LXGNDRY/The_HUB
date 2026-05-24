@@ -81,107 +81,75 @@ mutation updateProfile($id: ID!, $profile: DeliveryProfileInput!) {
 }
 """
 
-# ── Zone definitions ──────────────────────────────────────────────────────────
-# US domestic paid tier — applies to all 3 LGs
-US_PAID_ZONE = {
-    "name": "United States — Paid",
-    "countries": [{"code": "US", "includeAllProvinces": True}],
-    "methodDefinitionsToCreate": [
-        {
-            "name": "Standard Shipping",
-            "active": True,
-            "rateDefinition": {
-                "price": {"amount": "5.99", "currencyCode": "USD"}
-            },
-            "priceConditionsToCreate": [
-                {
-                    "operator": "GREATER_THAN_OR_EQUAL_TO",
-                    "criteria": {"amount": "0.00", "currencyCode": "USD"},
-                },
-                {
-                    "operator": "LESS_THAN_OR_EQUAL_TO",
-                    "criteria": {"amount": "99.99", "currencyCode": "USD"},
-                },
-            ],
-        }
+# ── Zone IDs from audit (existing zones to ADD rates to) ─────────────────────
+# Update existing zones by ID — adding paid method alongside the free one.
+# Same country region cannot exist in two zones; we must use the existing zone.
+
+# LG1 (Printful)
+LG1_DOM_ZONE_ID  = "gid://shopify/DeliveryZone/465268277401"   # US Domestic
+LG1_INTL_ZONE_ID = "gid://shopify/DeliveryZone/465268310169"   # Intl 12
+
+# LG2 (PODpluser)
+LG2_DOM_ZONE_ID  = "gid://shopify/DeliveryZone/465268342937"   # US Domestic
+LG2_INTL_ZONE_ID = "gid://shopify/DeliveryZone/465268375705"   # Intl 12
+
+# LG3 (duvre)
+LG3_DOM_ZONE_ID  = "gid://shopify/DeliveryZone/467488997529"   # US Domestic
+LG3_INTL_ZONE_ID = "gid://shopify/DeliveryZone/467489030297"   # Intl 236
+
+# ── Method definition payloads ────────────────────────────────────────────────
+US_PAID_METHOD = {
+    "name": "Standard Shipping",
+    "active": True,
+    "rateDefinition": {"price": {"amount": "5.99", "currencyCode": "USD"}},
+    "priceConditionsToCreate": [
+        {"operator": "GREATER_THAN_OR_EQUAL_TO", "criteria": {"amount": "0.00", "currencyCode": "USD"}},
+        {"operator": "LESS_THAN_OR_EQUAL_TO",    "criteria": {"amount": "99.99", "currencyCode": "USD"}},
     ],
 }
 
-# International 12-market paid tier — LG1 + LG2 only
-# Country codes matching existing "Intl 12" zone scope
-INTL_12_COUNTRIES = [
-    {"code": "CA", "includeAllProvinces": True},
-    {"code": "GB", "includeAllProvinces": True},
-    {"code": "AU", "includeAllProvinces": True},
-    {"code": "NZ", "includeAllProvinces": True},
-    {"code": "IE", "includeAllProvinces": True},
-    {"code": "DE", "includeAllProvinces": True},
-    {"code": "FR", "includeAllProvinces": True},
-    {"code": "NL", "includeAllProvinces": True},
-    {"code": "SE", "includeAllProvinces": True},
-    {"code": "AT", "includeAllProvinces": True},
-    {"code": "JP", "includeAllProvinces": True},
-    {"code": "SG", "includeAllProvinces": True},
-]
-
-INTL_12_PAID_ZONE = {
-    "name": "International 12 — Paid",
-    "countries": INTL_12_COUNTRIES,
-    "methodDefinitionsToCreate": [
-        {
-            "name": "Standard International Shipping",
-            "active": True,
-            "rateDefinition": {
-                "price": {"amount": "14.99", "currencyCode": "USD"}
-            },
-            "priceConditionsToCreate": [
-                {
-                    "operator": "GREATER_THAN_OR_EQUAL_TO",
-                    "criteria": {"amount": "0.00", "currencyCode": "USD"},
-                },
-                {
-                    "operator": "LESS_THAN_OR_EQUAL_TO",
-                    "criteria": {"amount": "149.99", "currencyCode": "USD"},
-                },
-            ],
-        }
+INTL_12_PAID_METHOD = {
+    "name": "Standard International Shipping",
+    "active": True,
+    "rateDefinition": {"price": {"amount": "14.99", "currencyCode": "USD"}},
+    "priceConditionsToCreate": [
+        {"operator": "GREATER_THAN_OR_EQUAL_TO", "criteria": {"amount": "0.00",   "currencyCode": "USD"}},
+        {"operator": "LESS_THAN_OR_EQUAL_TO",    "criteria": {"amount": "149.99", "currencyCode": "USD"}},
     ],
 }
 
-# International 236-country paid tier — LG3 (duvre) only
-# restOfWorld must be set at the DeliveryCountryInput level, not on the zone
-INTL_236_PAID_ZONE = {
-    "name": "International — Paid",
-    "countries": [{"restOfWorld": True}],
-    "methodDefinitionsToCreate": [
-        {
-            "name": "Standard International Shipping",
-            "active": True,
-            "rateDefinition": {
-                "price": {"amount": "24.99", "currencyCode": "USD"}
-            },
-            # No price condition — flat rate for all orders
-        }
-    ],
+INTL_236_PAID_METHOD = {
+    "name": "Standard International Shipping",
+    "active": True,
+    "rateDefinition": {"price": {"amount": "24.99", "currencyCode": "USD"}},
+    # No price conditions — flat rate
 }
 
 # ── Build update payload ──────────────────────────────────────────────────────
-# LG1 (Printful): US paid + Intl-12 paid
-# LG2 (PODpluser): US paid + Intl-12 paid
-# LG3 (duvre): US paid + Intl-236 paid (flat)
+# Update existing zones (by zone ID) to add paid methods alongside free ones.
+# zonesToUpdate uses the same DeliveryLocationGroupZoneInput with id= to target existing zones.
 profile_input = {
     "locationGroupsToUpdate": [
         {
             "id": LG1_ID,
-            "zonesToCreate": [US_PAID_ZONE, INTL_12_PAID_ZONE],
+            "zonesToUpdate": [
+                {"id": LG1_DOM_ZONE_ID,  "methodDefinitionsToCreate": [US_PAID_METHOD]},
+                {"id": LG1_INTL_ZONE_ID, "methodDefinitionsToCreate": [INTL_12_PAID_METHOD]},
+            ],
         },
         {
             "id": LG2_ID,
-            "zonesToCreate": [US_PAID_ZONE, INTL_12_PAID_ZONE],
+            "zonesToUpdate": [
+                {"id": LG2_DOM_ZONE_ID,  "methodDefinitionsToCreate": [US_PAID_METHOD]},
+                {"id": LG2_INTL_ZONE_ID, "methodDefinitionsToCreate": [INTL_12_PAID_METHOD]},
+            ],
         },
         {
             "id": LG3_ID,
-            "zonesToCreate": [US_PAID_ZONE, INTL_236_PAID_ZONE],
+            "zonesToUpdate": [
+                {"id": LG3_DOM_ZONE_ID,  "methodDefinitionsToCreate": [US_PAID_METHOD]},
+                {"id": LG3_INTL_ZONE_ID, "methodDefinitionsToCreate": [INTL_236_PAID_METHOD]},
+            ],
         },
     ]
 }

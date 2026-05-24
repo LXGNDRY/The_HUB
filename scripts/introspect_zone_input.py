@@ -43,3 +43,16 @@ for t in ["DeliveryLocationGroupZoneInput", "DeliveryCountryInput", "DeliveryMet
         print(f"  {f['name']}: {type_name}")
         if f.get("description"):
             print(f"    → {f['description']}")
+
+for t2 in ["DeliveryLocationGroupInput", "DeliveryProfileInput"]:
+    data = introspect(t2)
+    print(f"\n{'='*60}")
+    print(f"Type: {t2}")
+    print('='*60)
+    fields = data.get("data", {}).get("__type", {}).get("inputFields", [])
+    for f in fields:
+        type_info = f["type"]
+        type_name = type_info.get("name") or (type_info.get("ofType") or {}).get("name", "")
+        print(f"  {f['name']}: {type_name}")
+        if f.get("description"):
+            print(f"    → {f['description']}")
