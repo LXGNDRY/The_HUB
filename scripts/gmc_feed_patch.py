@@ -253,6 +253,9 @@ for gmc_product in all_gmc:
     mpn = sku if sku else f"LB-{vid}"
 
     patched = dict(gmc_product)
+    # Strip read-only fields GMC rejects on INSERT
+    for ro_field in ("source", "kind", "selfLink", "warnings"):
+        patched.pop(ro_field, None)
     patched.update({
         "googleProductCategory": str(cat_id),
         "sizes":                 [size],
