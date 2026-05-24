@@ -1,0 +1,24 @@
+name: GMC Ads Link
+
+on:
+  workflow_dispatch:
+
+jobs:
+  link-gmc-ads:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install google-auth google-api-python-client
+
+      - name: Check and create GMC <-> Google Ads link
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: python scripts/gmc_ads_link.py
