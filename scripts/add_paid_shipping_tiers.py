@@ -149,22 +149,10 @@ INTL_12_PAID_ZONE = {
 }
 
 # International 236-country paid tier — LG3 (duvre) only
-# "Rest of World" — use the RestOfWorld flag
+# Use restOfWorld flag to capture all remaining countries not already in a zone
 INTL_236_PAID_ZONE = {
     "name": "International — Paid",
-    "countries": [{"code": "CA", "includeAllProvinces": True},
-                  {"code": "GB", "includeAllProvinces": True},
-                  {"code": "AU", "includeAllProvinces": True},
-                  {"code": "NZ", "includeAllProvinces": True},
-                  {"code": "IE", "includeAllProvinces": True},
-                  {"code": "DE", "includeAllProvinces": True},
-                  {"code": "FR", "includeAllProvinces": True},
-                  {"code": "NL", "includeAllProvinces": True},
-                  {"code": "SE", "includeAllProvinces": True},
-                  {"code": "AT", "includeAllProvinces": True},
-                  {"code": "JP", "includeAllProvinces": True},
-                  {"code": "SG", "includeAllProvinces": True}],
-    "includeAllCountries": False,
+    "restOfWorld": True,
     "methodDefinitionsToCreate": [
         {
             "name": "Standard International Shipping",
