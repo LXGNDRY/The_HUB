@@ -1,0 +1,26 @@
+name: GMC Feed Populate
+
+on:
+  workflow_dispatch:
+
+jobs:
+  populate-feed:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install google-auth google-api-python-client requests
+
+      - name: Populate GMC feed from Shopify
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: python scripts/gmc_feed_populate.py
