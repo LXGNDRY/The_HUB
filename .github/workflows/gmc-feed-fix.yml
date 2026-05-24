@@ -1,0 +1,26 @@
+name: GMC Feed Fix
+
+on:
+  workflow_dispatch:
+
+jobs:
+  feed-fix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install google-auth google-api-python-client requests
+
+      - name: Run GMC feed fix
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+        run: python scripts/gmc_feed_fix.py
