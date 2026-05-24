@@ -172,54 +172,93 @@ for i in range(0, len(to_update), BATCH_SIZE):
 
 print(f"  Total patched: {patched} | Errors: {patch_errors}")
 
-# ── Step 6: Fix shipping — set clean US free shipping rule ────
+
+# ── Step 6: Fix shipping — global services ────────────────────
 print("\n" + "=" * 70)
-print("STEP 5: Fixing US shipping settings")
+print("STEP 5: Fixing shipping settings (US + International)")
 print("=" * 70)
+
+def make_service(name, country, currency, flat_rate, free_threshold=None,
+                 min_transit=7, max_transit=21, min_handle=1, max_handle=3):
+    """Build a GMC shipping service dict."""
+    svc = {
+        "name": name,
+        "active": True,
+        "deliveryCountry": country,
+        "currency": currency,
+        "deliveryTime": {
+            "minHandlingTimeInDays": min_handle,
+            "maxHandlingTimeInDays": max_handle,
+            "minTransitTimeInDays": min_transit,
+            "maxTransitTimeInDays": max_transit,
+        },
+        "rateGroups": [
+            {
+                "name": "Rate",
+                "singleValue": {"flatRate": {"value": str(flat_rate), "currency": currency}}
+            }
+        ]
+    }
+    if free_threshold is not None:
+        svc["minimumOrderValue"] = {"value": str(free_threshold), "currency": currency}
+        svc["rateGroups"][0]["singleValue"]["flatRate"]["value"] = "0.00"
+    return svc
+
+# ── Shipping strategy (profit-optimized) ─────────────────────
+# US:           $5.99 standard  | FREE on $100+   (3–7 days)
+# Tier 1 - English-speaking + EU core:
+#   CA/UK/AU/NZ: $14.99 standard | FREE on $150+  (7–14 days)
+#   DE/FR/NL/SE/AT/IE: $19.99   | FREE on $150+  (7–21 days)
+# Tier 2 - Asia/Pacific:
+#   JP/SG:       $19.99          | FREE on $175+  (7–21 days)
+# Rest of World: $24.99 flat, no free threshold   (10–30 days)
+#
+# Logic: free threshold slightly above typical AOV (~$85–95) to
+# incentivize add-to-cart upsell without giving away margin.
+# International rates baked in to protect contribution margin
+# (actual USPS/DHL First Class ~$12–18 for apparel weight).
+
+USD = "USD"
+
+services = [
+    # ── US ───────────────────────────────────────────────────
+    make_service("Standard US Shipping",      "US", USD, 5.99,  min_transit=3, max_transit=7),
+    make_service("Free Shipping US ($100+)",  "US", USD, 0.00,  free_threshold=100.00, min_transit=3, max_transit=7),
+
+    # ── Tier 1: English-speaking ────────────────────────────
+    make_service("Standard Shipping CA",      "CA", USD, 14.99),
+    make_service("Free Shipping CA ($150+)",  "CA", USD, 0.00,  free_threshold=150.00),
+    make_service("Standard Shipping GB",      "GB", USD, 14.99),
+    make_service("Free Shipping GB ($150+)",  "GB", USD, 0.00,  free_threshold=150.00),
+    make_service("Standard Shipping AU",      "AU", USD, 14.99),
+    make_service("Free Shipping AU ($150+)",  "AU", USD, 0.00,  free_threshold=150.00),
+    make_service("Standard Shipping NZ",      "NZ", USD, 14.99),
+    make_service("Free Shipping NZ ($150+)",  "NZ", USD, 0.00,  free_threshold=150.00),
+    make_service("Standard Shipping IE",      "IE", USD, 14.99),
+    make_service("Free Shipping IE ($150+)",  "IE", USD, 0.00,  free_threshold=150.00),
+
+    # ── Tier 1: Core EU ─────────────────────────────────────
+    make_service("Standard Shipping DE",      "DE", USD, 19.99),
+    make_service("Free Shipping DE ($150+)",  "DE", USD, 0.00,  free_threshold=150.00),
+    make_service("Standard Shipping FR",      "FR", USD, 19.99),
+    make_service("Free Shipping FR ($150+)",  "FR", USD, 0.00,  free_threshold=150.00),
+    make_service("Standard Shipping NL",      "NL", USD, 19.99),
+    make_service("Free Shipping NL ($150+)",  "NL", USD, 0.00,  free_threshold=150.00),
+    make_service("Standard Shipping SE",      "SE", USD, 19.99),
+    make_service("Free Shipping SE ($150+)",  "SE", USD, 0.00,  free_threshold=150.00),
+    make_service("Standard Shipping AT",      "AT", USD, 19.99),
+    make_service("Free Shipping AT ($150+)",  "AT", USD, 0.00,  free_threshold=150.00),
+
+    # ── Tier 2: Asia/Pacific ────────────────────────────────
+    make_service("Standard Shipping JP",      "JP", USD, 19.99),
+    make_service("Free Shipping JP ($175+)",  "JP", USD, 0.00,  free_threshold=175.00, max_transit=21),
+    make_service("Standard Shipping SG",      "SG", USD, 19.99),
+    make_service("Free Shipping SG ($175+)",  "SG", USD, 0.00,  free_threshold=175.00, max_transit=21),
+]
 
 shipping_body = {
     "accountId": MERCHANT_ID,
-    "services": [
-        {
-            # Free shipping on orders $100+
-            "name": "Free Shipping US ($100+)",
-            "active": True,
-            "deliveryCountry": "US",
-            "currency": "USD",
-            "minimumOrderValue": {"value": "100.00", "currency": "USD"},
-            "deliveryTime": {
-                "minHandlingTimeInDays": 1,
-                "maxHandlingTimeInDays": 2,
-                "minTransitTimeInDays": 3,
-                "maxTransitTimeInDays": 7
-            },
-            "rateGroups": [
-                {
-                    "name": "Free",
-                    "singleValue": {"flatRate": {"value": "0.00", "currency": "USD"}}
-                }
-            ]
-        },
-        {
-            # Standard $5.99 shipping under $100
-            "name": "Standard US Shipping",
-            "active": True,
-            "deliveryCountry": "US",
-            "currency": "USD",
-            "deliveryTime": {
-                "minHandlingTimeInDays": 1,
-                "maxHandlingTimeInDays": 2,
-                "minTransitTimeInDays": 3,
-                "maxTransitTimeInDays": 7
-            },
-            "rateGroups": [
-                {
-                    "name": "Standard",
-                    "singleValue": {"flatRate": {"value": "5.99", "currency": "USD"}}
-                }
-            ]
-        }
-    ]
+    "services": services
 }
 
 try:
@@ -230,6 +269,13 @@ try:
     ).execute()
     svc_count = len(resp.get("services", []))
     print(f"  Shipping updated — {svc_count} service(s) configured")
+    for svc in resp.get("services", []):
+        country = svc.get("deliveryCountry", "?")
+        name = svc.get("name", "?")
+        rate = svc.get("rateGroups", [{}])[0].get("singleValue", {}).get("flatRate", {}).get("value", "?")
+        mo = svc.get("minimumOrderValue", {}).get("value", "")
+        label = f"FREE (min ${mo})" if mo else f"${rate}"
+        print(f"    [{country}] {name}: {label}")
 except HttpError as e:
     print(f"  Shipping update error: {e}")
 
