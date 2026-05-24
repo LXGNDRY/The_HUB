@@ -182,7 +182,7 @@ for product in all_products:
             "brand":                 "Legendary Branding",
             "condition":             "new",
             "googleProductCategory": category_for(product_type, tags),
-            "productType":           product_type or "Apparel",
+            "productTypes":          [product_type] if product_type else ["Apparel"],
             "identifierExists":      False,   # apparel exemption — no GTIN
             "channel":               "online",
             "contentLanguage":       "en",
