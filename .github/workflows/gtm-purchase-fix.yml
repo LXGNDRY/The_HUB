@@ -1,0 +1,46 @@
+name: GTM Purchase Tracking Fix
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (preview only, no writes or publish)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
+      purchase_label:
+        description: 'Google Ads purchase conversion label (from Tools > Conversions > Purchase > Tag setup)'
+        required: false
+        default: ''
+        type: string
+
+jobs:
+  fix-gtm-purchase-tracking:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install \
+            google-auth \
+            google-auth-oauthlib \
+            google-auth-httplib2 \
+            google-api-python-client
+
+      - name: Run GTM purchase tracking fix
+        env:
+          GSC_CLIENT_SECRET_JSON: ${{ secrets.GSC_CLIENT_SECRET_JSON }}
+          GSC_TOKEN_JSON: ${{ secrets.GSC_TOKEN_JSON }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          GOOGLE_ADS_PURCHASE_LABEL: ${{ inputs.purchase_label }}
+        run: python scripts/gtm_purchase_fix.py
