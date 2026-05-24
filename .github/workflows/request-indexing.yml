@@ -14,5 +14,5 @@ jobs:
       - run: pip install requests google-auth
       - name: Request indexing for non-indexed URLs
         env:
-          GSC_TOKEN_JSON: ${{ secrets.GSC_TOKEN_JSON }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: python scripts/request_indexing.py
