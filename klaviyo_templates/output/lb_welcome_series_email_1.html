@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500&display=swap');
+body{margin:0;padding:0;background:#ffffff;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+table{border-collapse:collapse;}
+@media only screen and (max-width:620px){
+  .mob-pad{padding:28px 20px !important;}
+  .mob-heading{font-size:34px !important;}
+  .mob-btn{padding:14px 28px !important;}
+  .mob-hide{display:none !important;}
+}
+</style>
+</head>
+<body style="margin:0;padding:0;background:#ffffff;">
+<span style="display:none;max-height:0;overflow:hidden;">Welcome — here's 10% off your first order.&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;</span>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff;">
+  <tr><td align="center" style="padding:0;">
+    <table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;">
+      <!-- HEADER -->
+      <tr>
+        <td style="background:#000000;padding:26px 40px;text-align:center;">
+          <a href="https://legendary-branding.com" style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:30px;color:#ffffff;letter-spacing:4px;text-decoration:none;">LEGENDARY BRANDING</a>
+        </td>
+      </tr>
+      
+      <!-- HERO -->
+      <tr>
+        <td class="mob-pad" style="padding:48px 40px 32px;text-align:center;border-bottom:1px solid #ebebeb;">
+          <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:12px;letter-spacing:3px;color:#999999;text-transform:uppercase;margin-bottom:10px;">Welcome to the Family</div>
+          <div class="mob-heading" style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:52px;line-height:1.0;color:#000000;letter-spacing:2px;margin-bottom:16px;">YOU'RE<br>LEGENDARY NOW</div>
+          <div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.7;color:#444444;max-width:460px;margin:0 auto;">Welcome, {{ first_name|default:"" }}. You just joined a brand built on quality, culture, and identity. Here's your exclusive welcome offer.</div>
+        </td>
+      </tr>
+      <!-- DISCOUNT -->
+      <tr>
+        <td style="background:#000000;padding:28px 40px;text-align:center;">
+          <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:12px;letter-spacing:3px;color:#888888;text-transform:uppercase;margin-bottom:10px;">Your Welcome Discount</div>
+          <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:42px;letter-spacing:6px;color:#ffffff;">{{ coupon.code|default:"LEGENDARY10" }}</div>
+          <div style="font-family:Arial,sans-serif;font-size:12px;color:#666666;margin-top:8px;letter-spacing:1px;">10% OFF YOUR FIRST ORDER &bull; EXPIRES IN 48 HOURS</div>
+        </td>
+      </tr>
+      <!-- BODY -->
+      <tr>
+        <td class="mob-pad" style="padding:40px 40px;">
+          <p style="font-family:Arial,sans-serif;font-size:15px;line-height:1.7;color:#333333;margin:0 0 20px;">We don't do fast fashion. Every piece from Legendary Branding is designed to stand out, built to last, and made to represent the culture.</p>
+          <p style="font-family:Arial,sans-serif;font-size:15px;line-height:1.7;color:#333333;margin:0 0 32px;">Use your code above and start building your collection today.</p>
+          <div style="text-align:center;">
+            <a href="https://legendary-branding.com/collections/all" class="mob-btn" style="display:inline-block;background:#000000;color:#ffffff;font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:16px;letter-spacing:3px;text-decoration:none;padding:16px 48px;border:2px solid #000000;">SHOP THE COLLECTION</a>
+          </div>
+        </td>
+      </tr>
+      <!-- DIVIDER -->
+      <tr><td style="height:1px;background:#ebebeb;"></td></tr>
+    
+      
+    <tr>
+      <td style="background-color:#000000; padding:32px 40px; text-align:center;">
+        <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif; font-size:20px; letter-spacing:4px; color:#ffffff; margin-bottom:16px;">LEGENDARY BRANDING</div>
+        <div style="margin-bottom:14px;">
+          <a href="https://legendary-branding.com/collections/all" style="font-family:Arial,sans-serif; font-size:11px; color:#888888; text-decoration:none; letter-spacing:1px; text-transform:uppercase; margin:0 10px;">SHOP</a>
+          <a href="https://legendary-branding.com/pages/contact" style="font-family:Arial,sans-serif; font-size:11px; color:#888888; text-decoration:none; letter-spacing:1px; text-transform:uppercase; margin:0 10px;">CONTACT</a>
+          <a href="{{ unsubscribe_url }}" style="font-family:Arial,sans-serif; font-size:11px; color:#888888; text-decoration:none; letter-spacing:1px; text-transform:uppercase; margin:0 10px;">UNSUBSCRIBE</a>
+        </div>
+        <div style="font-family:Arial,sans-serif; font-size:11px; color:#555555; line-height:1.6; margin-bottom:12px;">Legendary Branding &bull; Lake Forest, IL</div>
+        <div><a href="{{ unsubscribe_url }}" style="font-family:Arial,sans-serif; font-size:11px; color:#555555; text-decoration:underline;">Unsubscribe from all marketing emails</a></div>
+      </td>
+    </tr>
+
+    </table>
+  </td></tr>
+</table>
+</body>
+</html>
