@@ -1,58 +1,14 @@
-name: Push robots txt asset
+name: Deploy robots txt
 
 on:
   workflow_dispatch:
 
 jobs:
-  push:
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Deploy asset
+      - name: Run deploy script
         env:
           SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
-        run: |
-          python3 - << 'PYEOF'
-import os, json
-import urllib.request
-
-token = os.environ['SHOPIFY_ADMIN_TOKEN']
-domain = 'lngndny.myshopify.com'
-api = '2026-04'
-base = f'https://{domain}/admin/api/{api}'
-headers = {
-    'X-Shopify-Access-Token': token,
-    'Content-Type': 'application/json'
-}
-
-def api_get(path):
-    req = urllib.request.Request(f'{base}{path}', headers=headers)
-    with urllib.request.urlopen(req, timeout=15) as r:
-        return json.loads(r.read())
-
-def api_put(path, body):
-    data = json.dumps(body).encode()
-    req = urllib.request.Request(f'{base}{path}', data=data, headers=headers, method='PUT')
-    try:
-        with urllib.request.urlopen(req, timeout=30) as r:
-            return r.status, json.loads(r.read())
-    except urllib.error.HTTPError as e:
-        return e.code, e.read().decode()
-
-themes = api_get('/themes.json')['themes']
-active = next((t for t in themes if t['role'] == 'main'), None)
-print(f"Active theme: {active['name']} ({active['id']})")
-
-value = open('scripts/robots_v2.liquid').read()
-status, resp = api_put(
-    f"/themes/{active['id']}/assets.json",
-    {'asset': {'key': 'templates/robots.txt.liquid', 'value': value}}
-)
-print(f"HTTP {status}")
-if status in (200, 201):
-    asset = resp.get('asset', {})
-    print(f"SUCCESS: {asset.get('key')} updated at {asset.get('updated_at')}")
-else:
-    print(f"FAILED: {resp}")
-    exit(1)
-PYEOF
+        run: python3 scripts/push_robots_txt.py
