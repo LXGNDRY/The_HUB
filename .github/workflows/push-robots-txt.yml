@@ -2,10 +2,6 @@ name: Push robots.txt v2.0.0 to live Shopify theme
 
 on:
   workflow_dispatch:
-  push:
-    paths:
-      - 'scripts/robots_v2.liquid'
-      - 'scripts/push_robots_txt.py'
 
 jobs:
   push-robots-txt:
@@ -13,12 +9,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - run: pip install requests --quiet
       - name: Push robots.txt.liquid to Shopify
         env:
           SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
-          SHOPIFY_STORE_DOMAIN: lngndny.myshopify.com
-        run: python scripts/push_robots_txt.py
+        run: bash scripts/push_robots_txt.sh
