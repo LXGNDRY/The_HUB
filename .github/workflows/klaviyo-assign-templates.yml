@@ -1,0 +1,43 @@
+name: Klaviyo — Assign LB Templates to Flows
+
+on:
+  workflow_dispatch:
+
+jobs:
+  assign-templates:
+    name: Wire LB templates to flow messages
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests klaviyo-api
+
+      - name: Assign LB templates to flows
+        env:
+          KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
+        run: |
+          python3 - <<'PYEOF'
+          import sys
+          sys.path.insert(0, ".")
+          from modules.klaviyo import KlaviyoModule
+          import json
+
+          print("Starting LB template assignment...")
+          result = KlaviyoModule().assign_lb_templates()
+
+          print(json.dumps(result, indent=2))
+
+          if result["errors"] > 0:
+              print(f"\n⚠️  {result['errors']} flow(s) had errors — see error_details above.")
+          print(f"\n✅ Assigned templates to {result['assigned']} flow(s).")
+
+          # Exit 1 if ALL assignments failed, otherwise 0
+          if result["assigned"] == 0 and result["errors"] > 0:
+              sys.exit(1)
+          PYEOF
