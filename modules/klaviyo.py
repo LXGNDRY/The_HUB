@@ -414,31 +414,45 @@ class KlaviyoModule:
     # Assign template to flow message
     # ------------------------------------------------------------------
 
-    def assign_template_to_flow_message(self, message_id: str, template_id: str) -> dict:
+    def get_template_id_for_flow_message(self, message_id: str) -> str | None:
         """
-        Assign a template to a flow message via PATCH.
-        This updates the template relationship on the flow message.
+        Returns the template ID currently linked to a flow message.
+        Uses the relationships/template endpoint.
+        """
+        try:
+            data = _get(f"flow-messages/{message_id}/relationships/template")
+            return data.get("data", {}).get("id")
+        except Exception:
+            # Fallback: include template in the message fetch
+            data = _get(f"flow-messages/{message_id}", params={"include": "template"})
+            return (
+                data.get("data", {})
+                    .get("relationships", {})
+                    .get("template", {})
+                    .get("data", {})
+                    .get("id")
+            )
+
+    def update_template_html(self, template_id: str, name: str, html: str) -> dict:
+        """
+        Update an existing template's HTML via PATCH /api/templates/{id}.
+        This is the supported way to change the content of a flow message's template.
         """
         body = {
             "data": {
-                "type": "flow-message",
-                "id": message_id,
-                "relationships": {
-                    "template": {
-                        "data": {
-                            "type": "template",
-                            "id": template_id,
-                        }
-                    }
-                },
+                "type": "template",
+                "id": template_id,
+                "attributes": {
+                    "name": name,
+                    "html": html,
+                }
             }
         }
-        result = _patch(f"flow-messages/{message_id}", body)
+        result = _patch(f"templates/{template_id}", body)
         return {
-            "status": "assigned",
-            "message_id": message_id,
+            "status": "updated",
             "template_id": template_id,
-            "response": result,
+            "name": name,
         }
 
     # ------------------------------------------------------------------
@@ -447,95 +461,87 @@ class KlaviyoModule:
 
     def assign_lb_templates(self) -> dict:
         """
-        Wire all Legendary Branding branded templates to their corresponding
-        flow email messages.
+        Update the HTML of each flow message's existing linked template with
+        the new Legendary Branding branded design.
 
-        Flow → Template mapping (all IDs from May 2026 setup):
-          RgxHfC  Email Welcome Series       → X9stJD  LB — Welcome Series Email 1
-          RJEsWE  Customer Thank You         → XDPfRm  LB — Customer Thank You
-          UL3cRZ  Abandoned Cart Reminder    → SpM7Sb  LB — Abandoned Cart
-          Uujc9V  Browse Abandonment         → W7Sprq  LB — Browse Abandonment
-          WL8kad  LB — Shipping Confirmation → RjAMn5  LB — Shipping Confirmation
-          W97hxA  LB — Out for Delivery      → SZnqnD  LB — Out for Delivery
-          Vw6eUX  LB — Delivered + Review    → Vib5ZQ  LB — Delivered + Review
+        Strategy (correct Klaviyo API approach):
+          1. For each flow message ID (discovered from the flow action traversal)
+          2. GET the template ID linked to that message via relationships/template
+          3. PATCH /api/templates/{template_id} with the new branded HTML
+
+        Flow → Message → New HTML mapping (message IDs discovered May 2026):
+          RgxHfC (Welcome Series)      msg: UjfrVL → LB — Welcome Series Email 1
+          RJEsWE (Thank You)           msg: VjwdXC → LB — Customer Thank You
+          UL3cRZ (Abandoned Cart)      msg: YkSXSX → LB — Abandoned Cart
+          Uujc9V (Browse Abandonment)  msg: Y5aXaT → LB — Browse Abandonment
+          WL8kad (Shipping Conf)       msg: YyydEG → LB — Shipping Confirmation
+          W97hxA (Out for Delivery)    msg: XVxb45 → LB — Out for Delivery
+          Vw6eUX (Delivered+Review)    msg: Ridrhn → LB — Delivered + Review
         """
-        FLOW_TEMPLATE_MAP = {
-            "RgxHfC": ("X9stJD", "Email Welcome Series"),
-            "RJEsWE": ("XDPfRm", "Customer Thank You"),
-            "UL3cRZ": ("SpM7Sb", "Abandoned Cart Reminder"),
-            "Uujc9V": ("W7Sprq", "Browse Abandonment"),
-            "WL8kad": ("RjAMn5", "LB — Shipping Confirmation"),
-            "W97hxA": ("SZnqnD", "LB — Out for Delivery"),
-            "Vw6eUX": ("Vib5ZQ", "LB — Delivered + Review Request"),
+        import os
+
+        TEMPLATE_DIR = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "klaviyo_templates", "output"
+        )
+
+        # message_id → (flow_name, html_filename, lb_template_name)
+        MESSAGE_MAP = {
+            "UjfrVL": ("Email Welcome Series",      "lb_welcome_series_email_1.html", "LB — Welcome Series Email 1"),
+            "VjwdXC": ("Customer Thank You",          "lb_customer_thank_you.html",     "LB — Customer Thank You"),
+            "YkSXSX": ("Abandoned Cart Reminder",    "lb_abandoned_cart.html",         "LB — Abandoned Cart"),
+            "Y5aXaT": ("Browse Abandonment",         "lb_browse_abandonment.html",     "LB — Browse Abandonment"),
+            "YyydEG": ("LB — Shipping Confirmation", "lb_shipping_confirmation.html",  "LB — Shipping Confirmation"),
+            "XVxb45": ("LB — Out for Delivery",      "lb_out_for_delivery.html",       "LB — Out for Delivery"),
+            "Ridrhn": ("LB — Delivered + Review",    "lb_delivered_+_review.html",     "LB — Delivered + Review"),
         }
 
         results = []
         errors  = []
 
-        for flow_id, (template_id, flow_name) in FLOW_TEMPLATE_MAP.items():
+        for message_id, (flow_name, html_file, lb_name) in MESSAGE_MAP.items():
             try:
-                # 1. Get flow actions
-                actions_resp = self.get_flow_actions(flow_id)
-                actions = actions_resp.get("actions", [])
+                # 1. Load branded HTML
+                html_path = os.path.join(TEMPLATE_DIR, html_file)
+                with open(html_path) as f:
+                    branded_html = f.read()
 
-                if not actions:
+                # 2. Get the existing template ID linked to this flow message
+                existing_template_id = self.get_template_id_for_flow_message(message_id)
+                if not existing_template_id:
                     errors.append({
-                        "flow_id": flow_id,
+                        "message_id": message_id,
                         "flow_name": flow_name,
-                        "error": "No actions found in flow",
+                        "error": "Could not resolve existing template ID for flow message",
                     })
                     continue
 
-                # 2. Find email actions only
-                email_actions = [
-                    a for a in actions
-                    if a.get("action_type") in ("send_email", "EMAIL", None)
-                ]
-                if not email_actions:
-                    email_actions = actions  # fallback: try all
-
-                assigned_messages = []
-                for action in email_actions:
-                    action_id = action["id"]
-
-                    # 3. Get messages for this action
-                    msgs_resp = self.get_flow_messages(action_id)
-                    messages = msgs_resp.get("messages", [])
-
-                    for msg in messages:
-                        msg_id = msg["id"]
-                        channel = msg.get("channel", "")
-                        # Only target email messages
-                        if channel and channel.lower() not in ("email", ""):
-                            continue
-
-                        # 4. Assign template
-                        assign_result = self.assign_template_to_flow_message(msg_id, template_id)
-                        assigned_messages.append({
-                            "action_id": action_id,
-                            "message_id": msg_id,
-                            "template_id": template_id,
-                            "status": assign_result.get("status"),
-                        })
+                # 3. Update the existing template's HTML with branded design
+                update_result = self.update_template_html(
+                    template_id=existing_template_id,
+                    name=lb_name,
+                    html=branded_html,
+                )
 
                 results.append({
-                    "flow_id": flow_id,
                     "flow_name": flow_name,
-                    "template_id": template_id,
-                    "messages_assigned": len(assigned_messages),
-                    "details": assigned_messages,
+                    "message_id": message_id,
+                    "existing_template_id": existing_template_id,
+                    "new_name": lb_name,
+                    "status": update_result.get("status"),
                 })
+                logger.info("Updated template %s for flow '%s'", existing_template_id, flow_name)
 
             except Exception as e:
-                logger.error("assign_lb_templates error for flow %s: %s", flow_id, e)
+                logger.error("assign_lb_templates error for message %s (%s): %s", message_id, flow_name, e)
                 errors.append({
-                    "flow_id": flow_id,
+                    "message_id": message_id,
                     "flow_name": flow_name,
                     "error": str(e),
                 })
 
         return {
-            "assigned": len(results),
+            "updated": len(results),
             "errors": len(errors),
             "results": results,
             "error_details": errors,
