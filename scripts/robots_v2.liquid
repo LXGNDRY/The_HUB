@@ -1,0 +1,86 @@
+{%- comment -%}
+  robots.txt.liquid
+  Version:      2.0.0
+  Last updated: 2026-05-25
+  Author:       Legendary Branding / Perplexity Computer audit
+
+  Changes from v1.1.0:
+    — Added explicit Allow for AI agent crawlers (GPTBot, ClaudeBot,
+      PerplexityBot, Googlebot-Image) to support Agentic/Shopping discovery.
+    — Expanded parameter Disallow to cover utm_*, country=, currency=
+      variants that were generating crawl-budget-wasting parameterized
+      URLs being indexed as unique pages (confirmed via GSC audit May 2026).
+    — Blocked /cdn/shop/files/ CDN asset paths that appeared in GSC as
+      indexed .png/.webp URLs — not crawlable content.
+    — Blocked /*/pages/html-sitemap — phantom locale page confirmed indexed.
+    — Blocked /*/collections/all-products — locale-prefixed dupe collection.
+    — Extended locale blocks from /de/ /fr/ /es/ to cover full subtrees
+      including /de /fr /es without trailing slash edge case.
+    — Kept Disallow: /*?*stkn= and /*?*com_cvv= — already in robots.txt
+      but Google has cached copies; these prevent new crawls while
+      GSC URL Removal clears the existing indexed set.
+    — NOTE: Disallow alone does NOT remove already-indexed locale pages
+      (/de/* /fr/* /es/*). Submit GSC URL Removal requests in parallel.
+
+  Agentic Commerce note:
+    GPTBot, ClaudeBot, PerplexityBot are explicitly allowed via named
+    user-agent blocks (they inherit * rules by default, but explicit Allow
+    groups signal cooperative intent and may improve AI discovery ranking).
+{%- endcomment -%}
+
+{%- comment -%} ─── SHOPIFY DEFAULT GROUPS ────────────────────────────────── {%- endcomment -%}
+{%- for group in robots.default_groups -%}
+  {{- group.user_agent -}}
+
+  {%- for rule in group.rules -%}
+    {{- rule -}}
+  {%- endfor -%}
+
+  {%- comment -%} Inject custom rules for the wildcard (*) user-agent only {%- endcomment -%}
+  {%- if group.user_agent.value == '*' -%}
+
+    {%- comment -%} ── PARAMETERIZED URL BLOCKING ──────────────────────────── {%- endcomment -%}
+{{ 'Disallow: /*?*stkn=' }}
+{{ 'Disallow: /*?*com_cvv=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*utm_content=' }}
+{{ 'Disallow: /*?*utm_term=' }}
+
+    {%- comment -%} ── PHANTOM LOCALE PATHS (not published, already indexed) ─ {%- endcomment -%}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*/collections/all-products' }}
+{{ 'Disallow: /*/pages/html-sitemap' }}
+
+    {%- comment -%} ── CDN ASSET PATHS ─────────────────────────────────────── {%- endcomment -%}
+{{ 'Disallow: /cdn/shop/files/' }}
+
+  {%- endif -%}
+
+  {{- group.sitemap -}}
+{%- endfor -%}
+
+{%- comment -%} ─── AI AGENT CRAWLERS (explicit allow for Agentic discovery) ─ {%- endcomment -%}
+{{ 'User-agent: GPTBot' }}
+{{ 'Allow: /' }}
+{{ '' }}
+{{ 'User-agent: ClaudeBot' }}
+{{ 'Allow: /' }}
+{{ '' }}
+{{ 'User-agent: PerplexityBot' }}
+{{ 'Allow: /' }}
+{{ '' }}
+{{ 'User-agent: Google-Extended' }}
+{{ 'Allow: /' }}
+{{ '' }}
+{{ 'User-agent: Googlebot-Image' }}
+{{ 'Allow: /cdn/shop/products/' }}
+{{ 'Disallow: /cdn/shop/files/' }}
