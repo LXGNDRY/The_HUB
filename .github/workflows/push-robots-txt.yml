@@ -2,107 +2,23 @@ name: Push robots.txt v2.0.0 to live Shopify theme
 
 on:
   workflow_dispatch:
+  push:
+    paths:
+      - 'scripts/robots_v2.liquid'
+      - 'scripts/push_robots_txt.py'
 
 jobs:
   push-robots-txt:
-    name: Push robots.txt asset to active theme
+    name: Deploy robots.txt to active Shopify theme
     runs-on: ubuntu-latest
     steps:
-      - name: Push robots.txt.liquid to active Shopify theme
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests --quiet
+      - name: Push robots.txt.liquid to Shopify
         env:
           SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           SHOPIFY_STORE_DOMAIN: lngndny.myshopify.com
-        run: |
-          python3 - <<'PYEOF'
-          import os, requests, json, sys
-
-          TOKEN  = os.environ['SHOPIFY_ADMIN_TOKEN']
-          DOMAIN = os.environ['SHOPIFY_STORE_DOMAIN']
-          API    = "2026-04"
-          BASE   = f"https://{DOMAIN}/admin/api/{API}"
-          HEADERS = {
-              "X-Shopify-Access-Token": TOKEN,
-              "Content-Type": "application/json"
-          }
-
-          r = requests.get(f"{BASE}/themes.json", headers=HEADERS, timeout=15)
-          r.raise_for_status()
-          themes = r.json()["themes"]
-          active = next((t for t in themes if t["role"] == "main"), None)
-          if not active:
-              print("ERROR: No active theme found")
-              sys.exit(1)
-          theme_id = active["id"]
-          print(f"Active theme: {active['name']} (ID: {theme_id})")
-
-          ROBOTS_CONTENT = """{%- comment -%}
-  robots.txt.liquid
-  Version:      2.0.0
-  Last updated: 2026-05-25
-  Author:       Legendary Branding / Perplexity Computer audit
-{%- endcomment -%}
-{%- for group in robots.default_groups -%}
-  {{- group.user_agent -}}
-  {%- for rule in group.rules -%}
-    {{- rule -}}
-  {%- endfor -%}
-  {%- if group.user_agent.value == '*' -%}
-{{ 'Disallow: /*?*stkn=' }}
-{{ 'Disallow: /*?*com_cvv=' }}
-{{ 'Disallow: /*?*currency=' }}
-{{ 'Disallow: /*?*country=' }}
-{{ 'Disallow: /*?*utm_source=' }}
-{{ 'Disallow: /*?*utm_medium=' }}
-{{ 'Disallow: /*?*utm_campaign=' }}
-{{ 'Disallow: /*?*utm_content=' }}
-{{ 'Disallow: /*?*utm_term=' }}
-{{ 'Disallow: /de/' }}
-{{ 'Disallow: /de' }}
-{{ 'Disallow: /fr/' }}
-{{ 'Disallow: /fr' }}
-{{ 'Disallow: /es/' }}
-{{ 'Disallow: /es' }}
-{{ 'Disallow: /*/collections/all-products' }}
-{{ 'Disallow: /*/pages/html-sitemap' }}
-{{ 'Disallow: /cdn/shop/files/' }}
-  {%- endif -%}
-  {{- group.sitemap -}}
-{%- endfor -%}
-{{ 'User-agent: GPTBot' }}
-{{ 'Allow: /' }}
-{{ '' }}
-{{ 'User-agent: ClaudeBot' }}
-{{ 'Allow: /' }}
-{{ '' }}
-{{ 'User-agent: PerplexityBot' }}
-{{ 'Allow: /' }}
-{{ '' }}
-{{ 'User-agent: Google-Extended' }}
-{{ 'Allow: /' }}
-{{ '' }}
-{{ 'User-agent: Googlebot-Image' }}
-{{ 'Allow: /cdn/shop/products/' }}
-{{ 'Disallow: /cdn/shop/files/' }}"""
-
-          payload = {
-              "asset": {
-                  "key": "templates/robots.txt.liquid",
-                  "value": ROBOTS_CONTENT
-              }
-          }
-          r2 = requests.put(
-              f"{BASE}/themes/{theme_id}/assets.json",
-              headers=HEADERS,
-              json=payload,
-              timeout=30
-          )
-          if r2.status_code in (200, 201):
-              asset = r2.json().get("asset", {})
-              print(f"SUCCESS: robots.txt.liquid pushed")
-              print(f"  Theme: {active['name']} ({theme_id})")
-              print(f"  Key:   {asset.get('key')}")
-              print(f"  Updated: {asset.get('updated_at')}")
-          else:
-              print(f"ERROR {r2.status_code}: {r2.text}")
-              sys.exit(1)
-          PYEOF
+        run: python scripts/push_robots_txt.py
