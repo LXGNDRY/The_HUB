@@ -1,15 +1,44 @@
-name: Push robots.txt v2.0.0 to live Shopify theme
+name: Deploy robots-txt to Shopify
 
 on:
   workflow_dispatch:
 
 jobs:
-  push-robots-txt:
-    name: Deploy robots.txt to active Shopify theme
+  deploy:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Push robots.txt.liquid to Shopify
+
+      - name: Get active theme ID
+        id: theme
         env:
-          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
-        run: bash scripts/push_robots_txt.sh
+          TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+        run: |
+          RESP=$(curl -s -H "X-Shopify-Access-Token: $TOKEN" \
+            "https://lngndny.myshopify.com/admin/api/2026-04/themes.json")
+          ID=$(echo "$RESP" | python3 -c "import json,sys; themes=json.load(sys.stdin)['themes']; active=next((t for t in themes if t['role']=='main'),None); print(active['id'])")
+          NAME=$(echo "$RESP" | python3 -c "import json,sys; themes=json.load(sys.stdin)['themes']; active=next((t for t in themes if t['role']=='main'),None); print(active['name'])")
+          echo "id=$ID" >> $GITHUB_OUTPUT
+          echo "Active theme: $NAME ($ID)"
+
+      - name: Push robots.txt.liquid
+        env:
+          TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          THEME_ID: ${{ steps.theme.outputs.id }}
+        run: |
+          VALUE=$(python3 -c "import json; print(json.dumps(open('scripts/robots_v2.liquid').read()))")
+          PAYLOAD="{\"asset\":{\"key\":\"templates/robots.txt.liquid\",\"value\":$VALUE}}"
+          RESP=$(curl -s -w "\n%{http_code}" -X PUT \
+            -H "X-Shopify-Access-Token: $TOKEN" \
+            -H "Content-Type: application/json" \
+            "https://lngndny.myshopify.com/admin/api/2026-04/themes/$THEME_ID/assets.json" \
+            -d "$PAYLOAD")
+          STATUS=$(echo "$RESP" | tail -1)
+          BODY=$(echo "$RESP" | head -1)
+          echo "HTTP $STATUS"
+          if [[ "$STATUS" == "200" || "$STATUS" == "201" ]]; then
+            echo "SUCCESS: robots.txt.liquid deployed to live theme"
+            echo "$BODY" | python3 -c "import json,sys; a=json.load(sys.stdin).get('asset',{}); print(f'Key: {a.get(\"key\")} | Updated: {a.get(\"updated_at\")}')"
+          else
+            echo "FAILED: $BODY"; exit 1
+          fi
