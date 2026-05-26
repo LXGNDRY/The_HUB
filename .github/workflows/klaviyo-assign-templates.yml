@@ -35,9 +35,9 @@ jobs:
 
           if result["errors"] > 0:
               print(f"\n⚠️  {result['errors']} flow(s) had errors — see error_details above.")
-          print(f"\n✅ Assigned templates to {result['assigned']} flow(s).")
+          print(f"\n✅ Updated templates for {result['updated']} flow(s).")
 
-          # Exit 1 if ALL assignments failed, otherwise 0
-          if result["assigned"] == 0 and result["errors"] > 0:
+          # Exit 1 if ALL updates failed, otherwise 0
+          if result["updated"] == 0 and result["errors"] > 0:
               sys.exit(1)
           PYEOF
