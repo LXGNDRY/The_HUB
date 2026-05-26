@@ -18,6 +18,55 @@ jobs:
       - name: Install dependencies
         run: pip install requests klaviyo-api
 
+      - name: Diagnose — check template scopes and test PATCH
+        env:
+          KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, requests, json
+
+          key = os.environ["KLAVIYO_API_KEY"]
+          headers = {
+              "Authorization": f"Klaviyo-API-Key {key}",
+              "revision": "2024-10-15",
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+          }
+
+          # 1. Check account scopes
+          print("=== Account Info ===")
+          r = requests.get("https://a.klaviyo.com/api/accounts", headers=headers)
+          print(f"Status: {r.status_code}")
+          if r.ok:
+              print(json.dumps(r.json(), indent=2)[:500])
+
+          # 2. Test PATCH on one of our own created templates (X9stJD)
+          print("\n=== Test PATCH on our own template X9stJD ===")
+          body = {
+              "data": {
+                  "type": "template",
+                  "id": "X9stJD",
+                  "attributes": {"name": "LB — Welcome Series Email 1"}
+              }
+          }
+          r2 = requests.patch("https://a.klaviyo.com/api/templates/X9stJD", headers=headers, json=body)
+          print(f"Status: {r2.status_code}")
+          print(r2.text[:500])
+
+          # 3. Test PATCH on the flow-linked template (TGepj9)
+          print("\n=== Test PATCH on flow-linked template TGepj9 ===")
+          body2 = {
+              "data": {
+                  "type": "template",
+                  "id": "TGepj9",
+                  "attributes": {"name": "LB — Welcome Series Email 1"}
+              }
+          }
+          r3 = requests.patch("https://a.klaviyo.com/api/templates/TGepj9", headers=headers, json=body2)
+          print(f"Status: {r3.status_code}")
+          print(r3.text[:500])
+          PYEOF
+
       - name: Assign LB templates to flows
         env:
           KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
@@ -34,10 +83,9 @@ jobs:
           print(json.dumps(result, indent=2))
 
           if result["errors"] > 0:
-              print(f"\n⚠️  {result['errors']} flow(s) had errors — see error_details above.")
-          print(f"\n✅ Updated templates for {result['updated']} flow(s).")
+              print(f"\n\u26a0\ufe0f  {result['errors']} flow(s) had errors \u2014 see error_details above.")
+          print(f"\n\u2705 Updated templates for {result['updated']} flow(s).")
 
-          # Exit 1 if ALL updates failed, otherwise 0
           if result["updated"] == 0 and result["errors"] > 0:
               sys.exit(1)
           PYEOF
