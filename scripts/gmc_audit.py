@@ -3,12 +3,27 @@
 gmc_audit.py — Full Merchant Center feed audit
 Checks: products, GTINs, disapprovals, feed status, shipping, images
 """
-import os, json, sys
+import os, json, sys, socket
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
+# httplib2 (used by google-api-python-client) has no default socket timeout,
+# so a single slow products.list page can hang until the OS kills it (the
+# TimeoutError that broke run 26842043566). Bound every socket read.
+socket.setdefaulttimeout(60)
+
+# Per-call automatic retries with exponential backoff on transient errors
+# (timeouts, 5xx). Keeps this read-only audit resilient to flaky responses.
+API_RETRIES = 5
+
 SA_KEY_JSON = os.environ.get("GCP_SA_KEY")
-sa_info = json.loads(SA_KEY_JSON)
+if not SA_KEY_JSON:
+    sys.exit("ERROR: GCP_SA_KEY environment variable is not set.")
+try:
+    sa_info = json.loads(SA_KEY_JSON)
+except json.JSONDecodeError as e:
+    sys.exit(f"ERROR: GCP_SA_KEY is not valid JSON: {e}")
+
 creds = service_account.Credentials.from_service_account_info(
     sa_info, scopes=["https://www.googleapis.com/auth/content"]
 )
@@ -19,7 +34,9 @@ MERCHANT_ID = "582171114"
 print("=" * 70)
 print("ACCOUNT")
 print("=" * 70)
-acct = service.accounts().get(merchantId=MERCHANT_ID, accountId=MERCHANT_ID).execute()
+acct = service.accounts().get(
+    merchantId=MERCHANT_ID, accountId=MERCHANT_ID
+).execute(num_retries=API_RETRIES)
 print(f"  Name:        {acct.get('name')}")
 print(f"  Website:     {acct.get('websiteUrl')}")
 print(f"  Adult:       {acct.get('adultContent', False)}")
@@ -28,7 +45,7 @@ print(f"  Adult:       {acct.get('adultContent', False)}")
 print("\n" + "=" * 70)
 print("DATAFEEDS")
 print("=" * 70)
-feeds = service.datafeeds().list(merchantId=MERCHANT_ID).execute()
+feeds = service.datafeeds().list(merchantId=MERCHANT_ID).execute(num_retries=API_RETRIES)
 feed_list = feeds.get("resources", [])
 if not feed_list:
     print("  No datafeeds found (using Merchant Center auto-sync or manual upload)")
@@ -44,7 +61,7 @@ print("=" * 70)
 all_products = []
 request = service.products().list(merchantId=MERCHANT_ID, maxResults=250)
 while request is not None:
-    result = request.execute()
+    result = request.execute(num_retries=API_RETRIES)
     batch = result.get("resources", [])
     all_products.extend(batch)
     request = service.products().list_next(request, result)
@@ -79,10 +96,12 @@ if missing_gtin:
 print("\n" + "=" * 70)
 print("PRODUCT STATUS / DISAPPROVALS")
 print("=" * 70)
-statuses = service.productstatuses().list(
-    merchantId=MERCHANT_ID, maxResults=250
-).execute()
-status_list = statuses.get("resources", [])
+status_list = []
+status_req = service.productstatuses().list(merchantId=MERCHANT_ID, maxResults=250)
+while status_req is not None:
+    status_result = status_req.execute(num_retries=API_RETRIES)
+    status_list.extend(status_result.get("resources", []))
+    status_req = service.productstatuses().list_next(status_req, status_result)
 
 approved = []
 disapproved = []
@@ -154,7 +173,7 @@ print("=" * 70)
 try:
     shipping = service.shippingsettings().get(
         merchantId=MERCHANT_ID, accountId=MERCHANT_ID
-    ).execute()
+    ).execute(num_retries=API_RETRIES)
     services_list = shipping.get("services", [])
     print(f"  Shipping services configured: {len(services_list)}")
     for svc in services_list:
