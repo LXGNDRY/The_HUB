@@ -12,6 +12,7 @@ Merchant ID            : 582171114
 """
 import os, json, requests
 from google.oauth2 import service_account
+from google.auth.transport.requests import Request as GoogleRequest
 
 SA_KEY_JSON  = os.environ["GCP_SA_KEY"]
 MERCHANT_ID  = "582171114"
@@ -21,7 +22,7 @@ creds = service_account.Credentials.from_service_account_info(
     json.loads(SA_KEY_JSON),
     scopes=["https://www.googleapis.com/auth/content"],
 )
-creds.refresh(requests.Request())
+creds.refresh(GoogleRequest())
 token = creds.token
 
 HEADERS = {
