@@ -2,6 +2,8 @@ name: GMC Supplemental Feed — Title Overrides
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *'   # 1:00 AM CST (UTC-5) daily
 
 jobs:
   install-supplemental-feed:
@@ -24,3 +26,4 @@ jobs:
           SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         run: python scripts/gmc_supplemental_feed.py
+
