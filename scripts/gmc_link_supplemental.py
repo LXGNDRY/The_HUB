@@ -1,23 +1,21 @@
 #!/usr/bin/env python3
 """
 gmc_link_supplemental.py — Legendary Branding
-Links the supplemental data source (ID: 10655362673) to the primary
-Shopify product feed using the Merchant Data Sources API (v1beta).
+Links supplemental source (ID: 10655362673) to the primary Shopify feed
+by patching it with feedLabel + contentLanguage via Merchant API v1beta.
 
-GMC Next requires this to be done via API — the UI does not expose
-the linking option for API-type supplemental sources.
-
-Supplemental Source ID : 10655362673  (name: "Perplexed")
+Supplemental Source ID : 10655362673
 Merchant ID            : 582171114
 """
 import os, json, requests
 from google.oauth2 import service_account
 from google.auth.transport.requests import Request as GoogleRequest
 
-SA_KEY_JSON  = os.environ["GCP_SA_KEY"]
-MERCHANT_ID  = "582171114"
-SUPPLEMENTAL_SOURCE_ID = "10655362673"
+SA_KEY_JSON           = os.environ["GCP_SA_KEY"]
+MERCHANT_ID           = "582171114"
+SUPPLEMENTAL_ID       = "10655362673"
 
+# ── Auth ──────────────────────────────────────────────────────────────────────
 creds = service_account.Credentials.from_service_account_info(
     json.loads(SA_KEY_JSON),
     scopes=["https://www.googleapis.com/auth/content"],
@@ -29,109 +27,92 @@ HEADERS = {
     "Authorization": f"Bearer {token}",
     "Content-Type":  "application/json",
 }
-BASE = f"https://merchantapi.googleapis.com/datasources/v1beta/accounts/{MERCHANT_ID}/dataSources"
 
-# ── Step 1: List all data sources to find the primary Shopify feed ────────────
+BASE_V1BETA = f"https://merchantapi.googleapis.com/datasources/v1beta/accounts/{MERCHANT_ID}/dataSources"
+BASE_V21    = f"https://shoppingcontent.googleapis.com/content/v2.1/{MERCHANT_ID}"
+
+# ── Step 1: List data sources to identify primary feed ───────────────────────
 print("=" * 70)
-print("STEP 1: Listing all GMC data sources")
+print("STEP 1: Listing GMC data sources (Merchant API v1beta)")
 print("=" * 70)
 
-resp = requests.get(BASE, headers=HEADERS)
-resp.raise_for_status()
-sources = resp.json().get("dataSources", [])
+resp = requests.get(
+    BASE_V1BETA,
+    headers=HEADERS,
+    params={"pageSize": 50},
+)
+print(f"  Status: {resp.status_code}")
 
-print(f"  Total sources found: {len(sources)}")
-print()
+if resp.status_code != 200:
+    print(f"  v1beta list failed: {resp.text}")
+    print()
+    print("  Falling back to Content API v2.1 datasources...")
+    # Try Content API v2.1 datafeeds endpoint instead
+    feeds_resp = requests.get(
+        f"{BASE_V21}/datafeeds",
+        headers=HEADERS,
+    )
+    print(f"  Content API status: {feeds_resp.status_code}")
+    print(f"  Response: {feeds_resp.text[:2000]}")
+else:
+    sources = resp.json().get("dataSources", [])
+    print(f"  Sources found: {len(sources)}")
+    primary_name = None
+    for s in sources:
+        name      = s.get("name", "")
+        disp_name = s.get("displayName", "")
+        source_id = name.split("/")[-1] if "/" in name else ""
+        kind      = "PRIMARY" if "primaryProductDataSource" in s else \
+                    "SUPPLEMENTAL" if "supplementalProductDataSource" in s else "OTHER"
+        print(f"  [{kind}] '{disp_name}' | ID: {source_id}")
+        if kind == "PRIMARY" and primary_name is None:
+            primary_name = name
+            primary_id   = source_id
 
-primary_name = None
-for s in sources:
-    src_type  = list(s.keys())
-    name      = s.get("name", "")
-    disp_name = s.get("displayName", "")
-    source_id = name.split("/")[-1] if "/" in name else name
-
-    # Identify type
-    if "primaryProductDataSource" in s:
-        kind = "PRIMARY"
-    elif "supplementalProductDataSource" in s:
-        kind = "SUPPLEMENTAL"
-    elif "merchantReviewDataSource" in s:
-        kind = "MERCHANT REVIEW"
-    else:
-        kind = "OTHER"
-
-    print(f"  [{kind}] {disp_name} | ID: {source_id}")
-
-    if kind == "PRIMARY" and primary_name is None:
-        primary_name = name
-        primary_id   = source_id
-        print(f"    *** Selected as primary source ***")
-
-print()
-
-if not primary_name:
-    print("ERROR: No primary product data source found.")
-    print("Full response:")
-    print(json.dumps(sources, indent=2))
-    exit(1)
-
-print(f"  Primary source name : {primary_name}")
-print(f"  Primary source ID   : {primary_id}")
-
-# ── Step 2: Patch supplemental source to link to primary ──────────────────────
+# ── Step 2: Patch supplemental source — set feedLabel to match primary ────────
 print()
 print("=" * 70)
-print("STEP 2: Linking supplemental source to primary feed")
+print("STEP 2: Patching supplemental source feedLabel")
 print("=" * 70)
 
-supplemental_full_name = f"accounts/{MERCHANT_ID}/dataSources/{SUPPLEMENTAL_SOURCE_ID}"
-
+# In Merchant API v1beta, supplemental sources are linked to primary sources
+# by matching on feedLabel + contentLanguage. Setting these on the supplemental
+# source causes GMC to apply it to all primary sources with the same feedLabel.
+patch_url  = f"{BASE_V1BETA}/{SUPPLEMENTAL_ID}"
 patch_body = {
-    "supplementalProductDataSource": {
-        "defaultFeedLabel":          "US",
-        "contentLanguage":           "en",
-    },
+    "name":        f"accounts/{MERCHANT_ID}/dataSources/{SUPPLEMENTAL_ID}",
     "displayName": "Title Overrides — Supplemental Feed",
+    "supplementalProductDataSource": {
+        "feedLabel":         "US",
+        "contentLanguage":   "en",
+    },
 }
 
-# Use PATCH with updateMask to only touch the displayName and link fields
-patch_url = f"{BASE}/{SUPPLEMENTAL_SOURCE_ID}"
 patch_resp = requests.patch(
     patch_url,
     headers=HEADERS,
-    params={"updateMask": "displayName,supplementalProductDataSource.defaultFeedLabel"},
+    params={"updateMask": "displayName,supplementalProductDataSource"},
     json=patch_body,
 )
 
-print(f"  PATCH status: {patch_resp.status_code}")
-print(f"  Response: {json.dumps(patch_resp.json(), indent=2)}")
+print(f"  PATCH status : {patch_resp.status_code}")
+print(f"  Response     : {json.dumps(patch_resp.json(), indent=2)}")
 
-# ── Step 3: Link via supplementalProductDataSource.feedLabel on primary ───────
-# The correct way in Merchant API v1beta is to update the primary source
-# to reference this supplemental source.
-print()
-print("=" * 70)
-print("STEP 3: Registering supplemental source on primary feed")
-print("=" * 70)
-
-# Fetch current primary source data
-primary_url  = f"{BASE}/{primary_id}"
-primary_resp = requests.get(primary_url, headers=HEADERS)
-primary_resp.raise_for_status()
-primary_data = primary_resp.json()
-print(f"  Current primary source data:")
-print(f"  {json.dumps(primary_data, indent=2)}")
-
-print()
-print("=" * 70)
-print("LINK COMPLETE — SUMMARY")
-print("=" * 70)
-print(f"  Supplemental ID  : {SUPPLEMENTAL_SOURCE_ID}")
-print(f"  Primary ID       : {primary_id}")
-print(f"  Primary name     : {primary_name}")
-print()
-print("  NOTE: GMC Merchant API v1beta links supplemental sources")
-print("  by matching on feedLabel + contentLanguage between primary")
-print("  and supplemental sources. Both are now set to 'US' / 'en'.")
-print("  Google will automatically apply title overrides within 24-48h.")
-print("  Verify in GMC > Data sources > Supplemental sources > 'Used in'.")
+if patch_resp.status_code in (200, 204):
+    print()
+    print("=" * 70)
+    print("SUCCESS — Supplemental feed linked")
+    print("=" * 70)
+    print(f"  Source ID    : {SUPPLEMENTAL_ID}")
+    print(f"  Feed label   : US")
+    print(f"  Language     : en")
+    print()
+    print("  GMC will now apply title overrides from this supplemental")
+    print("  source to all matching primary feed products.")
+    print("  'Used in' column will update in GMC UI within a few hours.")
+    print("  Title changes propagate to Shopping ads within 24-48 hours.")
+else:
+    print()
+    print("  PATCH failed — see response above for details.")
+    print("  Manual fallback: In GMC > Data sources > Supplemental sources")
+    print("  > click 'Perplexed' > edit and set Feed label to 'US'.")
