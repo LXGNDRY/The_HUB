@@ -24,7 +24,7 @@ Organic impact:
   - Resolves GTIN-suppression (identifier_exists: false signals intentional)
   - Upgrades free listing Merchant Listing rich results
 """
-import os, json, time, re, requests
+import os, json, time, re, html, requests
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -102,6 +102,88 @@ def get_gsm(tags_list):
         if "GSM" in tag:
             return tag.strip()
     return ""
+
+# ── Description optimisation ────────────────────────────────────────────────
+
+def strip_html(raw_html):
+    """Strip all HTML tags, remove size tables, decode entities to plain text."""
+    if not raw_html:
+        return ""
+    text = re.sub(r'<table[\s\S]*?</table>', '', raw_html, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = html.unescape(text)
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+
+def build_optimised_description(body_html, material=None, fit=None, color=None):
+    """
+    Build a keyword-rich plain-text GMC description from Shopify bodyHtml.
+
+    Extracts the intro pitch, Features, and Fabric & Construction sections,
+    then appends variant-level signals (material weight, fit, color).
+    Target: 500-800 chars. Hard limit: 5,000 chars (GMC max).
+    """
+    plain = strip_html(body_html)
+    parts = []
+
+    # Intro / pitch paragraph
+    intro_match = re.search(
+        r'(?:Premium Streetwear|Streetwear)[,.]?\s+(.+?)(?=Features|Fabric)',
+        plain, re.IGNORECASE | re.DOTALL
+    )
+    if intro_match:
+        intro = re.sub(r'\s+', ' ', intro_match.group(0)).strip()
+        intro = re.sub(r'^.*?(?:Premium Streetwear[,.]?\s*)', '', intro, flags=re.IGNORECASE).strip()
+        if intro:
+            parts.append(intro[:250])
+
+    # Features section
+    features_match = re.search(
+        r'Features\s+([\s\S]+?)(?=Fabric|Construction|Care Instructions|Size Guide|Shipping)',
+        plain, re.IGNORECASE
+    )
+    if features_match:
+        features = re.sub(r'\s+', ' ', features_match.group(1)).strip()
+        if features:
+            parts.append(f"Features: {features[:200]}")
+
+    # Fabric & Construction section
+    fabric_match = re.search(
+        r'Fabric\s*&?\s*Construction\s+([\s\S]+?)(?=Care Instructions|Size Guide|Shipping)',
+        plain, re.IGNORECASE
+    )
+    if fabric_match:
+        fabric = re.sub(r'\s+', ' ', fabric_match.group(1)).strip()
+        if fabric:
+            parts.append(f"Construction: {fabric[:200]}")
+
+    # Material/weight signal from enrichment
+    if material:
+        parts.append(f"Fabric: {material}.")
+
+    # Variant-level signals
+    attr_parts = []
+    if fit:
+        attr_parts.append(fit)
+    if color:
+        attr_parts.append(f"available in {color}")
+    if attr_parts:
+        parts.append("Offered in " + ", ".join(attr_parts) + ".")
+
+    # Fallback for products with no bodyHtml
+    if not parts:
+        base = "Premium streetwear apparel by Legendary Branding."
+        if material:
+            base += f" {material}."
+        if fit:
+            base += f" {fit}."
+        parts.append(base)
+
+    description = re.sub(r'\s+', ' ', " ".join(parts)).strip()
+    description = html.unescape(description)
+    return description[:5000]
+
 
 PREFIX_MAP = {
     "hoodie":     "Heavyweight Oversized Streetwear Hoodie",
@@ -303,7 +385,7 @@ url    = f"https://{SHOP}/admin/api/{API_VERSION}/products.json"
 params = {
     "limit":  250,
     "status": "active",
-    "fields": "id,title,handle,product_type,tags,variants,images",
+    "fields": "id,title,handle,product_type,tags,body_html,variants,images",
 }
 while url:
     r = requests.get(url, headers=SHOPIFY_HEADERS, params=params, timeout=30)
@@ -341,6 +423,8 @@ for product in all_products:
     opt_title    = build_optimised_title(title, tags_list)
     material     = get_material(tags_list)
     google_cat   = get_google_category_id(product_type)
+    fit          = get_fit(tags_list)
+    body_html    = product.get("body_html", "") or ""
 
     for variant in product.get("variants", []):
         vid       = variant["id"]
@@ -383,11 +467,19 @@ for product in all_products:
                     var_image = img["src"]
                     break
 
+        description = build_optimised_description(
+            body_html,
+            material=material,
+            fit=fit,
+            color=color if color else None,
+        )
+
         record = {
             # ── Core required fields ─────────────────────────────────────
             "id":               f"online:en:US:{vid}",
             "offerId":          str(vid),
             "title":            display_title,
+            "description":      description,
             "link":             f"{STORE_URL}/products/{handle}",
             "imageLink":        var_image,
             "availability":     avail,
@@ -430,7 +522,10 @@ print(f"  Variant records built: {len(records)}")
 has_color    = sum(1 for r in records if r.get("color"))
 has_size     = sum(1 for r in records if r.get("sizes"))
 has_material = sum(1 for r in records if r.get("material"))
+has_desc     = sum(1 for r in records if r.get("description"))
+avg_desc_len = int(sum(len(r.get("description", "")) for r in records) / max(len(records), 1))
 print(f"\n  ATTRIBUTE COVERAGE:")
+print(f"    description: {has_desc}/{len(records)} variants ({has_desc*100//len(records)}%) — avg {avg_desc_len} chars")
 print(f"    color    : {has_color}/{len(records)} variants ({has_color*100//len(records)}%)")
 print(f"    size     : {has_size}/{len(records)} variants ({has_size*100//len(records)}%)")
 print(f"    material : {has_material}/{len(records)} variants ({has_material*100//len(records)}%)")
