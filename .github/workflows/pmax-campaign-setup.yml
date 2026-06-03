@@ -30,12 +30,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install google-ads
+        run: pip install requests google-auth google-auth-httplib2
 
       - name: Create PMax campaign + asset groups + search themes
         env:
+          # Option A: GCP SA key (if SA has been added to Google Ads as a user)
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          # Required regardless of auth method
           GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
-          GOOGLE_ADS_CLIENT_ID:       ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
-          GOOGLE_ADS_CLIENT_SECRET:   ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
-          GOOGLE_ADS_REFRESH_TOKEN:   ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
-        run: python scripts/pmax_campaign_setup.py
+          # Option B: Pass a direct OAuth2 access token (if SA auth doesn't work)
+          # GOOGLE_ADS_ACCESS_TOKEN: ${{ secrets.GOOGLE_ADS_ACCESS_TOKEN }}
+        run: python scripts/pmax_rest_setup.py
