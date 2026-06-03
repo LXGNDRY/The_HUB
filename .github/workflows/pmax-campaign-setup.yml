@@ -1,0 +1,41 @@
+name: PMax Campaign Setup — LB Streetwear
+
+on:
+  workflow_dispatch:
+    inputs:
+      daily_budget_usd:
+        description: "Daily budget in USD (default: 30)"
+        required: false
+        default: "30"
+      confirm:
+        description: "Type CONFIRM to create the campaign"
+        required: true
+
+jobs:
+  create-pmax-campaign:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Guard — require explicit confirmation
+        if: ${{ github.event.inputs.confirm != 'CONFIRM' }}
+        run: |
+          echo "❌ You must type CONFIRM in the confirm field to run this workflow."
+          exit 1
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install google-ads
+
+      - name: Create PMax campaign + asset groups + search themes
+        env:
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GOOGLE_ADS_CLIENT_ID:       ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET:   ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_ADS_REFRESH_TOKEN:   ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+        run: python scripts/pmax_campaign_setup.py
