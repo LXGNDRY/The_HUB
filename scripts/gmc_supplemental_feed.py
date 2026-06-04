@@ -6,13 +6,18 @@ to all GMC product variants via Content API custombatch insert.
 
 Strategy:
   - Pulls all active Shopify products (live source of truth)
-  - Builds optimised titles: [Keyword Prefix GSM] | [Original Title] — [Fit]
+  - Builds optimised titles via rotation engine:
+      * 5 keyword prefix variants per category, cycles every 7 days
+      * Locks titles with sustained CTR >= 4% for 7+ days (high performers)
+      * Unlocks if locked title drops below 2% CTR
+      * Rotation state persisted in GCS (lb-feed-state/title_rotation_state.json)
   - Enriches every variant with apparel attributes:
       color, size, gender, age_group, material, size_type, size_system,
       google_product_category, brand, identifier_exists
-  - Adds shippingDetails (free shipping, 3–7 day US delivery)
-  - Adds return policy signal via feed-level attribute
-  - Upserts every variant in GMC using custombatch insert
+  - Adds description from Shopify bodyHtml (keyword-rich, plain text)
+  - Adds shippingDetails (free shipping per country)
+  - Generates records for 5 markets: US, CA, GB, AU, IE
+  - Upserts every variant × every market in GMC using custombatch insert
   - Safe, non-destructive — only touches feed-level product records
 
 Auth:     GCP service account (GCP_SA_KEY secret)
@@ -23,11 +28,18 @@ Organic impact:
   - Qualifies for AI Mode Shopping Graph constrained-query matching
   - Resolves GTIN-suppression (identifier_exists: false signals intentional)
   - Upgrades free listing Merchant Listing rich results
+  - Title rotation surfaces fresh keyword variants to Google's relevance model
 """
 import os, json, time, re, html, requests
+from datetime import date
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from title_rotation_module import (
+    load_state, save_state,
+    fetch_free_listing_performance,
+    get_rotated_prefix,
+)
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 SA_KEY_JSON           = os.environ["GCP_SA_KEY"]
@@ -363,16 +375,26 @@ def get_google_category_id(product_type):
     return CATEGORY_MAP.get(product_type, "1604")  # default: Apparel & Accessories > Clothing
 
 
-# ── Shipping + return policy attributes ──────────────────────────────────────
-# Free US shipping, 3–7 business days
-# Matches what is configured in GMC account settings
-SHIPPING = [
-    {
-        "country": "US",
+# ── Target markets ───────────────────────────────────────────────────────────
+# Each entry generates a full set of feed records in GMC for that country.
+# All ship from the same Shopify store (Printful fulfillment, worldwide).
+# Shopify Markets handles local currency presentation at checkout.
+# Content API product ID format: online:{lang}:{country}:{variant_id}
+TARGET_MARKETS = [
+    {"country": "US", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "CA", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "GB", "lang": "en", "currency": "USD", "size_system": "UK"},
+    {"country": "AU", "lang": "en", "currency": "USD", "size_system": "AU"},
+    {"country": "IE", "lang": "en", "currency": "USD", "size_system": "EU"},
+]
+
+def build_shipping(country: str) -> list:
+    """Return free shipping entry for a given country code."""
+    return [{
+        "country": country,
         "service": "Standard Shipping",
         "price": {"value": "0.00", "currency": "USD"},
-    }
-]
+    }]
 
 
 # ── Step 1: Pull all active Shopify products ──────────────────────────────────
@@ -406,6 +428,18 @@ print(f"  Active products: {len(all_products)}")
 
 # ── Step 2: Build enriched records per variant ───────────────────────────────
 print("\n" + "=" * 70)
+print("STEP 1b: Loading rotation state + GMC performance data")
+print("=" * 70)
+
+TODAY = date.today().isoformat()
+rotation_state = load_state(SA_KEY_JSON)
+perf_data      = fetch_free_listing_performance(SA_KEY_JSON)
+
+print(f"  Today          : {TODAY}")
+print(f"  Products tracked in state: {len(rotation_state.get('products', {}))}")
+print(f"  Offer IDs with performance data: {len(perf_data)}")
+
+print("\n" + "=" * 70)
 print("STEP 2: Building enriched variant records")
 print("=" * 70)
 
@@ -420,11 +454,25 @@ for product in all_products:
     primary_image = images[0]["src"] if images else ""
     product_type  = product.get("product_type", "") or ""
 
-    opt_title    = build_optimised_title(title, tags_list)
+    cat          = categorize(title, tags_list)
+    gsm          = get_gsm(tags_list)
+    fit          = get_fit(tags_list)
     material     = get_material(tags_list)
     google_cat   = get_google_category_id(product_type)
-    fit          = get_fit(tags_list)
     body_html    = product.get("body_html", "") or ""
+    variants_raw = product.get("variants", [])
+
+    # ── Rotation-aware prefix selection ───────────────────────────────────────
+    rot_prefix, rot_reason = get_rotated_prefix(
+        handle, cat, variants_raw, perf_data, rotation_state, TODAY, gsm=gsm
+    )
+
+    # Build optimised title using rotation prefix
+    def build_rotated_title(product_title, tags_list):
+        opt = f"{rot_prefix} | {product_title} — {fit}"
+        return opt[:150] if len(opt) <= 150 else opt[:147].rstrip() + "..."
+
+    opt_title    = build_rotated_title(title, tags_list)
 
     for variant in product.get("variants", []):
         vid       = variant["id"]
@@ -474,47 +522,75 @@ for product in all_products:
             color=color if color else None,
         )
 
-        record = {
-            # ── Core required fields ─────────────────────────────────────
-            "id":               f"online:en:US:{vid}",
-            "offerId":          str(vid),
-            "title":            display_title,
-            "description":      description,
-            "link":             f"{STORE_URL}/products/{handle}",
-            "imageLink":        var_image,
-            "availability":     avail,
-            "price":            {"value": price, "currency": "USD"},
-            "condition":        "new",
-            "channel":          "online",
-            "contentLanguage":  "en",
-            "targetCountry":    "US",
+        # ── Generate one record per target market ────────────────────────
+        for market in TARGET_MARKETS:
+            mcc  = market["country"]
+            lang = market["lang"]
+            cur  = market["currency"]
+            ss   = market["size_system"]
 
-            # ── Brand & identifier ────────────────────────────────────────
-            "brand":            "Legendary Branding",
-            "identifierExists": False,   # Prevents GTIN-missing suppression
+            record = {
+                # ── Core required fields ──────────────────────────────────
+                "id":               f"online:{lang}:{mcc}:{vid}",
+                "offerId":          str(vid),
+                "title":            display_title,
+                "description":      description,
+                "link":             f"{STORE_URL}/products/{handle}",
+                "imageLink":        var_image,
+                "availability":     avail,
+                "price":            {"value": price, "currency": cur},
+                "condition":        "new",
+                "channel":          "online",
+                "contentLanguage":  lang,
+                "targetCountry":    mcc,
 
-            # ── Google category ───────────────────────────────────────────
-            "googleProductCategory": google_cat,
+                # ── Brand & identifier ─────────────────────────────────────
+                "brand":            "Legendary Branding",
+                "identifierExists": False,
 
-            # ── Apparel attributes (Popular Products + AI Mode eligibility)
-            "gender":           gender,
-            "ageGroup":         "adult",
-            "sizeSystem":       "US",
-            "sizeType":         size_type,
+                # ── Google category ────────────────────────────────────────
+                "googleProductCategory": google_cat,
 
-            # ── Shipping (free US, matches GMC account setting) ───────────
-            "shipping":         SHIPPING,
-        }
+                # ── Apparel attributes ─────────────────────────────────────
+                "gender":           gender,
+                "ageGroup":         "adult",
+                "sizeSystem":       ss,
+                "sizeType":         size_type,
 
-        # Only add color/size/material if we have valid values
-        if color:
-            record["color"]    = color
-        if size:
-            record["sizes"]    = [size]
-        if material:
-            record["material"] = material
+                # ── Shipping (free, per country) ───────────────────────────
+                "shipping":         build_shipping(mcc),
+            }
 
-        records.append(record)
+            # Only add color/size/material if we have valid values
+            if color:
+                record["color"]    = color
+            if size:
+                record["sizes"]    = [size]
+            if material:
+                record["material"] = material
+
+            records.append(record)
+
+# Save updated rotation state back to GCS
+print("\n" + "=" * 70)
+print("STEP 2b: Saving rotation state")
+print("=" * 70)
+rotation_state["last_run"] = TODAY
+try:
+    save_state(rotation_state, SA_KEY_JSON)
+except Exception as e:
+    print(f"  WARNING: Could not save rotation state: {e}")
+    print("  Feed will continue — state will be recalculated next run")
+
+# Rotation summary log
+locked_count  = sum(1 for p in rotation_state["products"].values() if p.get("locked"))
+rotated_today = sum(
+    1 for p in rotation_state["products"].values()
+    if p.get("last_rotated") == TODAY
+)
+print(f"  Products locked (high performers) : {locked_count}")
+print(f"  Products rotated today            : {rotated_today}")
+print(f"  Products in cooling period        : {len(rotation_state['products']) - locked_count - rotated_today}")
 
 print(f"  Variant records built: {len(records)}")
 
@@ -524,8 +600,10 @@ has_size     = sum(1 for r in records if r.get("sizes"))
 has_material = sum(1 for r in records if r.get("material"))
 has_desc     = sum(1 for r in records if r.get("description"))
 avg_desc_len = int(sum(len(r.get("description", "")) for r in records) / max(len(records), 1))
-print(f"\n  ATTRIBUTE COVERAGE:")
-print(f"    description: {has_desc}/{len(records)} variants ({has_desc*100//len(records)}%) — avg {avg_desc_len} chars")
+markets_covered = len(TARGET_MARKETS)
+print(f"\n  MARKETS: {markets_covered} ({', '.join(m['country'] for m in TARGET_MARKETS)})")
+print(f"  ATTRIBUTE COVERAGE (across all markets):")
+print(f"    description: {has_desc}/{len(records)} records ({has_desc*100//len(records)}%) — avg {avg_desc_len} chars")
 print(f"    color    : {has_color}/{len(records)} variants ({has_color*100//len(records)}%)")
 print(f"    size     : {has_size}/{len(records)} variants ({has_size*100//len(records)}%)")
 print(f"    material : {has_material}/{len(records)} variants ({has_material*100//len(records)}%)")
