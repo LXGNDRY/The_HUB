@@ -382,11 +382,59 @@ def get_google_category_id(product_type):
 # Shopify Markets handles local currency presentation at checkout.
 # Content API product ID format: online:{lang}:{country}:{variant_id}
 TARGET_MARKETS = [
+    # ── English-speaking core ─────────────────────────────────────────────
     {"country": "US", "lang": "en", "currency": "USD", "size_system": "US"},
     {"country": "CA", "lang": "en", "currency": "USD", "size_system": "US"},
     {"country": "GB", "lang": "en", "currency": "USD", "size_system": "UK"},
     {"country": "AU", "lang": "en", "currency": "USD", "size_system": "AU"},
     {"country": "IE", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "NZ", "lang": "en", "currency": "USD", "size_system": "AU"},
+    {"country": "SG", "lang": "en", "currency": "USD", "size_system": "US"},
+    # ── Western Europe ────────────────────────────────────────────────────
+    {"country": "DE", "lang": "de", "currency": "USD", "size_system": "EU"},
+    {"country": "FR", "lang": "fr", "currency": "USD", "size_system": "EU"},
+    {"country": "NL", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "IT", "lang": "it", "currency": "USD", "size_system": "EU"},
+    {"country": "ES", "lang": "es", "currency": "USD", "size_system": "EU"},
+    {"country": "SE", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "NO", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "DK", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "FI", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "BE", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "AT", "lang": "de", "currency": "USD", "size_system": "EU"},
+    {"country": "CH", "lang": "de", "currency": "USD", "size_system": "EU"},
+    {"country": "PT", "lang": "pt", "currency": "USD", "size_system": "EU"},
+    {"country": "GR", "lang": "en", "currency": "USD", "size_system": "EU"},
+    # ── Asia-Pacific ──────────────────────────────────────────────────────
+    {"country": "JP", "lang": "ja", "currency": "USD", "size_system": "JP"},
+    {"country": "KR", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "IN", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "PH", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "MY", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "TH", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "TW", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "HK", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "ID", "lang": "en", "currency": "USD", "size_system": "US"},
+    # ── Middle East ───────────────────────────────────────────────────────
+    {"country": "AE", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "SA", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "IL", "lang": "en", "currency": "USD", "size_system": "US"},
+    # ── Latin America ─────────────────────────────────────────────────────
+    {"country": "MX", "lang": "es", "currency": "USD", "size_system": "US"},
+    {"country": "BR", "lang": "pt", "currency": "USD", "size_system": "US"},
+    {"country": "AR", "lang": "es", "currency": "USD", "size_system": "US"},
+    {"country": "CL", "lang": "es", "currency": "USD", "size_system": "US"},
+    {"country": "CO", "lang": "es", "currency": "USD", "size_system": "US"},
+    # ── Africa ───────────────────────────────────────────────────────────
+    {"country": "ZA", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "NG", "lang": "en", "currency": "USD", "size_system": "US"},
+    {"country": "KE", "lang": "en", "currency": "USD", "size_system": "US"},
+    # ── Eastern Europe ────────────────────────────────────────────────────
+    {"country": "PL", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "CZ", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "RO", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "HU", "lang": "en", "currency": "USD", "size_system": "EU"},
+    {"country": "SK", "lang": "en", "currency": "USD", "size_system": "EU"},
 ]
 
 def build_shipping(country: str) -> list:
