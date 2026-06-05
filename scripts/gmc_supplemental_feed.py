@@ -30,7 +30,8 @@ Organic impact:
   - Upgrades free listing Merchant Listing rich results
   - Title rotation surfaces fresh keyword variants to Google's relevance model
 """
-import os, json, time, re, html, requests
+import os, json, time, re, html, requests, httplib2
+import google_auth_httplib2
 from datetime import date
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -654,23 +655,39 @@ for i in range(0, len(records), BATCH_SIZE):
         }
         for idx, record in enumerate(batch)
     ]
-    try:
-        resp = service.products().custombatch(body={"entries": entries}).execute()
-        for entry in resp.get("entries", []):
-            errs = entry.get("errors", {}).get("errors", [])
-            if errs:
-                errors += 1
-                if len(error_sample) < 5:
-                    error_sample.append({
-                        "batchId": entry.get("batchId"),
-                        "errors":  [e.get("message") for e in errs[:2]],
-                    })
+    batch_num = i // BATCH_SIZE + 1
+    max_retries = 4
+    for attempt in range(1, max_retries + 1):
+        try:
+            http = google_auth_httplib2.AuthorizedHttp(
+                creds, http=httplib2.Http(timeout=120)
+            )
+            resp = service.products().custombatch(body={"entries": entries}).execute(num_retries=2, http=http)
+            for entry in resp.get("entries", []):
+                errs = entry.get("errors", {}).get("errors", [])
+                if errs:
+                    errors += 1
+                    if len(error_sample) < 5:
+                        error_sample.append({
+                            "batchId": entry.get("batchId"),
+                            "errors":  [e.get("message") for e in errs[:2]],
+                        })
+                else:
+                    inserted += 1
+            print(f"  Batch {batch_num}: {len(batch)} records | {inserted} ok / {errors} err")
+            break  # success — exit retry loop
+        except HttpError as e:
+            print(f"  Batch {batch_num} HTTP error (attempt {attempt}/{max_retries}): {e}")
+            if attempt == max_retries:
+                errors += len(batch)
             else:
-                inserted += 1
-        print(f"  Batch {i // BATCH_SIZE + 1}: {len(batch)} records | {inserted} ok / {errors} err")
-    except HttpError as e:
-        print(f"  Batch {i // BATCH_SIZE + 1} HTTP error: {e}")
-        errors += len(batch)
+                time.sleep(2 ** attempt)  # 2s, 4s, 8s backoff
+        except Exception as e:
+            print(f"  Batch {batch_num} error (attempt {attempt}/{max_retries}): {e}")
+            if attempt == max_retries:
+                errors += len(batch)
+            else:
+                time.sleep(2 ** attempt)
     time.sleep(1)
 
 
