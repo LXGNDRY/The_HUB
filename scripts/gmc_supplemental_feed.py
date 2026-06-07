@@ -474,7 +474,7 @@ def build_shipping(country: str) -> list:
             {
                 "country": country,
                 "service": "Standard International Shipping",
-                "price": {"value": "15.00", "currency": "USD"},
+                "price": {"value": "10.00", "currency": "USD"},
             },
             {
                 "country": country,
