@@ -437,13 +437,55 @@ TARGET_MARKETS = [
     {"country": "SK", "lang": "en", "currency": "USD", "size_system": "EU"},
 ]
 
+# Countries with explicit $15 flat rate + free on $100+
+_INTL_ZONE = {
+    "AU", "AT", "CA", "FR", "DE", "IE", "JP",
+    "NL", "NZ", "SG", "SE", "GB",
+}
+
 def build_shipping(country: str) -> list:
-    """Return free shipping entry for a given country code."""
-    return [{
-        "country": country,
-        "service": "Standard Shipping",
-        "price": {"value": "0.00", "currency": "USD"},
-    }]
+    """
+    Return shipping entries matching Shopify General Profile zones:
+      US        : $5.00 standard  + free on orders >= $100
+      _INTL_ZONE: $15.00 standard + free on orders >= $100
+      Rest of world: $15.00 standard + free on orders >= $100
+    GMC uses the lowest applicable rate for Shopping annotations.
+    """
+    if country == "US":
+        return [
+            {
+                "country": "US",
+                "service": "Standard Shipping",
+                "price": {"value": "5.00", "currency": "USD"},
+            },
+            {
+                "country": "US",
+                "service": "Free Shipping",
+                "price": {"value": "0.00", "currency": "USD"},
+                "minHandlingTime": 0,
+                "maxHandlingTime": 3,
+                "minTransitTime": 3,
+                "maxTransitTime": 7,
+            },
+        ]
+    else:
+        # Both named intl zone and rest-of-world have same rate structure
+        return [
+            {
+                "country": country,
+                "service": "Standard International Shipping",
+                "price": {"value": "15.00", "currency": "USD"},
+            },
+            {
+                "country": country,
+                "service": "Free International Shipping",
+                "price": {"value": "0.00", "currency": "USD"},
+                "minHandlingTime": 0,
+                "maxHandlingTime": 3,
+                "minTransitTime": 7,
+                "maxTransitTime": 21,
+            },
+        ]
 
 
 # ── Step 1: Pull all active Shopify products ──────────────────────────────────
