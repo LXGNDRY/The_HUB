@@ -32,7 +32,6 @@ jobs:
               "Accept": "application/json",
           }
 
-          # Flow IDs to inspect
           FLOWS = {
               "RgxHfC": "Email Welcome Series",
               "RJEsWE": "Customer Thank You",
@@ -44,21 +43,24 @@ jobs:
           }
 
           for flow_id, flow_name in FLOWS.items():
-              # Get all actions in the flow (includes email messages)
-              url = f"https://a.klaviyo.com/api/flows/{flow_id}/flow-actions/?fields[flow-action]=id,action_type&page[size]=50"
-              r = requests.get(url, headers=headers, timeout=30)
               print(f"\n=== {flow_name} ({flow_id}) ===")
+
+              # Step 1: get all actions
+              url = f"https://a.klaviyo.com/api/flows/{flow_id}/flow-actions/?page[size]=50"
+              r = requests.get(url, headers=headers, timeout=30)
               if not r.ok:
                   print(f"  flow-actions ERROR {r.status_code}: {r.text[:300]}")
                   continue
 
               actions = r.json().get("data", [])
+              print(f"  Found {len(actions)} actions")
               for action in actions:
                   action_id = action["id"]
-                  action_type = action["attributes"].get("action_type", "")
-                  if action_type != "EMAIL":
-                      continue
-                  # Get the messages for this action
+                  attrs = action.get("attributes", {})
+                  action_type = attrs.get("action_type", "unknown")
+                  print(f"  action_id={action_id} type={action_type}")
+
+                  # Step 2: get messages for every action (not just EMAIL)
                   msg_url = f"https://a.klaviyo.com/api/flow-actions/{action_id}/flow-messages/?fields[flow-message]=id,name&fields[template]=id,name&include=template&page[size]=50"
                   mr = requests.get(msg_url, headers=headers, timeout=30)
                   if mr.ok:
@@ -70,10 +72,10 @@ jobs:
                           msg_name = msg["attributes"].get("name", "")
                           tmpl_rel = msg.get("relationships", {}).get("template", {}).get("data")
                           tmpl_id = tmpl_rel.get("id", "NO TEMPLATE") if tmpl_rel else "NO TEMPLATE"
-                          tmpl_name = included.get(tmpl_id, {}).get("attributes", {}).get("name", "unknown") if tmpl_id != "NO TEMPLATE" else "none"
-                          print(f"  action={action_id} | msg_id={msg_id} | msg_name={msg_name}")
-                          print(f"  template_id={tmpl_id} | template_name={tmpl_name}")
+                          tmpl_name = included.get(tmpl_id, {}).get("attributes", {}).get("name", "?") if tmpl_id != "NO TEMPLATE" else "none"
+                          print(f"    -> msg_id={msg_id} name={msg_name}")
+                          print(f"    -> template_id={tmpl_id} template_name={tmpl_name}")
                   else:
-                      print(f"  messages ERROR {mr.status_code}: {mr.text[:200]}")
+                      print(f"    messages ERROR {mr.status_code}: {mr.text[:200]}")
 
           PYEOF
