@@ -5,7 +5,7 @@ on:
 
 jobs:
   assign-templates:
-    name: Wire LB templates to flow messages
+    name: Wire v2 templates to flow messages
     runs-on: ubuntu-latest
 
     steps:
@@ -18,12 +18,12 @@ jobs:
       - name: Install dependencies
         run: pip install requests klaviyo-api
 
-      - name: Diagnose — check template scopes and test PATCH
+      - name: Assign v2 templates to flow messages
         env:
           KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
         run: |
           python3 - <<'PYEOF'
-          import os, requests, json
+          import sys, os, requests, json
 
           key = os.environ["KLAVIYO_API_KEY"]
           headers = {
@@ -33,59 +33,38 @@ jobs:
               "Accept": "application/json",
           }
 
-          # 1. Check account scopes
-          print("=== Account Info ===")
-          r = requests.get("https://a.klaviyo.com/api/accounts", headers=headers)
-          print(f"Status: {r.status_code}")
-          if r.ok:
-              print(json.dumps(r.json(), indent=2)[:500])
-
-          # 2. Test PATCH on one of our own created templates (X9stJD)
-          print("\n=== Test PATCH on our own template X9stJD ===")
-          body = {
-              "data": {
-                  "type": "template",
-                  "id": "X9stJD",
-                  "attributes": {"name": "LB — Welcome Series Email 1"}
-              }
+          # v2 template IDs → flow message IDs
+          V2_MAP = {
+              "UjfrVL": ("Email Welcome Series",      "QNn86Y"),
+              "VjwdXC": ("Customer Thank You",         "UmcSXr"),
+              "YkSXSX": ("Abandoned Bag (Email 1)",    "WgSh2b"),
+              "Y5aXaT": ("Browse Abandonment",         "U5TmP6"),
+              "YyydEG": ("Shipping Confirmation",      "RaETBC"),
+              "XVxb45": ("Out for Delivery",           "YnYFQr"),
+              "Ridrhn": ("Delivered + Review",         "XNzTqF"),
           }
-          r2 = requests.patch("https://a.klaviyo.com/api/templates/X9stJD", headers=headers, json=body)
-          print(f"Status: {r2.status_code}")
-          print(r2.text[:500])
 
-          # 3. Test PATCH on the flow-linked template (TGepj9)
-          print("\n=== Test PATCH on flow-linked template TGepj9 ===")
-          body2 = {
-              "data": {
-                  "type": "template",
-                  "id": "TGepj9",
-                  "attributes": {"name": "LB — Welcome Series Email 1"}
+          results = []
+          errors  = []
+
+          for message_id, (flow_name, template_id) in V2_MAP.items():
+              body = {
+                  "data": {
+                      "type": "template",
+                      "id": template_id,
+                  }
               }
-          }
-          r3 = requests.patch("https://a.klaviyo.com/api/templates/TGepj9", headers=headers, json=body2)
-          print(f"Status: {r3.status_code}")
-          print(r3.text[:500])
-          PYEOF
+              url = f"https://a.klaviyo.com/api/flow-messages/{message_id}/relationships/template"
+              r = requests.patch(url, headers=headers, json=body, timeout=30)
+              if r.ok or r.status_code == 204:
+                  results.append({"flow_name": flow_name, "message_id": message_id, "template_id": template_id, "status": "assigned"})
+                  print(f"✅  {flow_name} ({message_id}) → {template_id}")
+              else:
+                  errors.append({"flow_name": flow_name, "message_id": message_id, "template_id": template_id, "status": r.status_code, "error": r.text[:300]})
+                  print(f"❌  {flow_name} ({message_id}) → {r.status_code}: {r.text[:200]}")
 
-      - name: Assign LB templates to flows
-        env:
-          KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
-        run: |
-          python3 - <<'PYEOF'
-          import sys
-          sys.path.insert(0, ".")
-          from modules.klaviyo import KlaviyoModule
-          import json
-
-          print("Starting LB template assignment...")
-          result = KlaviyoModule().assign_lb_templates()
-
-          print(json.dumps(result, indent=2))
-
-          if result["errors"] > 0:
-              print(f"\n\u26a0\ufe0f  {result['errors']} flow(s) had errors \u2014 see error_details above.")
-          print(f"\n\u2705 Updated templates for {result['updated']} flow(s).")
-
-          if result["updated"] == 0 and result["errors"] > 0:
+          print(f"\nDone. ✅ {len(results)} assigned, ❌ {len(errors)} errors.")
+          if errors:
+              print(json.dumps(errors, indent=2))
               sys.exit(1)
           PYEOF

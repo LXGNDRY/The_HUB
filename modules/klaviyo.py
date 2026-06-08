@@ -546,3 +546,66 @@ class KlaviyoModule:
             "results": results,
             "error_details": errors,
         }
+
+    def assign_v2_templates(self) -> dict:
+        """
+        Assign pre-built v2 Klaviyo template IDs to flow messages via
+        PATCH /api/flow-messages/{id}/relationships/template.
+
+        v2 template IDs (created June 2026):
+          QNn86Y → Welcome Series         msg: UjfrVL
+          UmcSXr → Customer Thank You     msg: VjwdXC
+          WgSh2b → Abandoned Bag 1        msg: YkSXSX
+          WeRgRE → Abandoned Bag 2        msg: (new step needed in flow)
+          U5TmP6 → Browse Abandonment     msg: Y5aXaT
+          RaETBC → Shipping Confirmation  msg: YyydEG
+          YnYFQr → Out for Delivery       msg: XVxb45
+          XNzTqF → Delivered + Review     msg: Ridrhn
+        """
+        V2_MAP = {
+            "UjfrVL": ("Email Welcome Series",      "QNn86Y"),
+            "VjwdXC": ("Customer Thank You",         "UmcSXr"),
+            "YkSXSX": ("Abandoned Bag (Email 1)",    "WgSh2b"),
+            "Y5aXaT": ("Browse Abandonment",         "U5TmP6"),
+            "YyydEG": ("Shipping Confirmation",      "RaETBC"),
+            "XVxb45": ("Out for Delivery",           "YnYFQr"),
+            "Ridrhn": ("Delivered + Review",         "XNzTqF"),
+        }
+
+        results = []
+        errors  = []
+
+        for message_id, (flow_name, template_id) in V2_MAP.items():
+            try:
+                body = {
+                    "data": {
+                        "type": "template",
+                        "id": template_id,
+                    }
+                }
+                result = _patch(
+                    f"flow-messages/{message_id}/relationships/template",
+                    body,
+                )
+                results.append({
+                    "flow_name": flow_name,
+                    "message_id": message_id,
+                    "template_id": template_id,
+                    "status": "assigned",
+                })
+                logger.info("Assigned template %s to flow message %s (%s)", template_id, message_id, flow_name)
+            except Exception as e:
+                logger.error("assign_v2_templates error for message %s (%s): %s", message_id, flow_name, e)
+                errors.append({
+                    "message_id": message_id,
+                    "flow_name": flow_name,
+                    "template_id": template_id,
+                    "error": str(e),
+                })
+
+        return {
+            "updated": len(results),
+            "errors": len(errors),
+            "results": results,
+            "error_details": errors,
+        }

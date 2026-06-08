@@ -1,0 +1,51 @@
+{
+  "welcome_series": {
+    "name": "LB v2 — Welcome Series",
+    "template_id": "QNn86Y",
+    "flow_id": "RgxHfC",
+    "flow_message_id": "UjfrVL"
+  },
+  "customer_thank_you": {
+    "name": "LB v2 — Customer Thank You",
+    "template_id": "UmcSXr",
+    "flow_id": "RJEsWE",
+    "flow_message_id": "VjwdXC"
+  },
+  "abandoned_bag_1": {
+    "name": "LB v2 — Abandoned Bag (Email 1)",
+    "template_id": "WgSh2b",
+    "flow_id": "UL3cRZ",
+    "flow_message_id": "YkSXSX"
+  },
+  "abandoned_bag_2": {
+    "name": "LB v2 — Abandoned Bag (Email 2 — COMEBACK10)",
+    "template_id": "WeRgRE",
+    "flow_id": "UL3cRZ",
+    "flow_message_id": null,
+    "note": "Second message in Abandoned Cart flow — add a new flow message step in Klaviyo UI and assign this template"
+  },
+  "browse_abandonment": {
+    "name": "LB v2 — Browse Abandonment",
+    "template_id": "U5TmP6",
+    "flow_id": "Uujc9V",
+    "flow_message_id": "Y5aXaT"
+  },
+  "shipping_confirmation": {
+    "name": "LB v2 — Shipping Confirmation",
+    "template_id": "RaETBC",
+    "flow_id": "WL8kad",
+    "flow_message_id": "YyydEG"
+  },
+  "out_for_delivery": {
+    "name": "LB v2 — Out for Delivery",
+    "template_id": "YnYFQr",
+    "flow_id": "W97hxA",
+    "flow_message_id": "XVxb45"
+  },
+  "delivered_review": {
+    "name": "LB v2 — Delivered + Review Request",
+    "template_id": "XNzTqF",
+    "flow_id": "Vw6eUX",
+    "flow_message_id": "Ridrhn"
+  }
+}

@@ -237,3 +237,20 @@ def klaviyo_assign_lb_templates():
     except Exception as exc:
         logger.error("klaviyo assign_lb_templates error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.post(
+    "/assign-v2-templates",
+    summary="Assign v2 LB branded templates (June 2026) to flow messages",
+)
+def klaviyo_assign_v2_templates():
+    """
+    Reassign flow messages to the newly created v2 template IDs.
+    Uses PATCH /flow-messages/{id}/relationships/template.
+    Safe to re-run (idempotent).
+    """
+    try:
+        return _module().assign_v2_templates()
+    except Exception as exc:
+        logger.error("klaviyo assign_v2_templates error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))

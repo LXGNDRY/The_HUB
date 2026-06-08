@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<!--[if mso]><noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500&display=swap');
+body{margin:0;padding:0;background:#ffffff;-webkit-text-size-adjust:100%;-ms-text-size-adjust:100%;}
+table{border-collapse:collapse;}
+img{-ms-interpolation-mode:bicubic;}
+@media only screen and (max-width:620px){
+  .mob-pad{padding:28px 20px !important;}
+  .mob-h{font-size:36px !important;line-height:1.05 !important;}
+  .mob-btn{padding:14px 28px !important;font-size:14px !important;}
+  .mob-col{display:block !important;width:100% !important;}
+}
+</style>
+</head>
+<body style="margin:0;padding:0;background:#f0f0f0;">
+<span style="display:none;max-height:0;overflow:hidden;">It's packed. It's moving. It's yours.&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;&#847;&zwnj;</span>
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#f0f0f0;">
+<tr><td align="center" style="padding:0;">
+<table width="600" cellpadding="0" cellspacing="0" border="0" style="max-width:600px;width:100%;background:#ffffff;">
+
+      <!-- HEADER -->
+      <tr>
+        <td style="background:#000000;padding:0 40px;height:72px;">
+          <table width="100%" cellpadding="0" cellspacing="0" border="0">
+            <tr>
+              <td style="vertical-align:middle;">
+                <a href="https://legendary-branding.com" style="text-decoration:none;display:inline-block;">
+                  <img src="https://legendary-branding.com/cdn/shop/files/Official_Logo_Black_1.png" alt="Legendary Branding" width="40" height="40"
+                    style="display:block;object-fit:contain;filter:invert(1);width:40px;height:40px;">
+                </a>
+              </td>
+              <td style="vertical-align:middle;text-align:right;">
+                <a href="https://legendary-branding.com/collections/all"
+                  style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:13px;letter-spacing:2px;color:#888888;text-decoration:none;text-transform:uppercase;margin-left:24px;">SHOP</a>
+                <a href="https://legendary-branding.com/pages/contact"
+                  style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:13px;letter-spacing:2px;color:#888888;text-decoration:none;text-transform:uppercase;margin-left:24px;">CONTACT</a>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+
+      <!-- HERO -->
+      <tr>
+        <td class="mob-pad" style="padding:52px 40px 36px;text-align:center;border-bottom:1px solid #ebebeb;">
+          <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:11px;letter-spacing:4px;color:#aaaaaa;text-transform:uppercase;margin-bottom:14px;">Your Order Is Moving</div>
+          <div class="mob-h" style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:56px;line-height:1.0;color:#000000;letter-spacing:2px;margin-bottom:20px;">IT'S ON<br>ITS WAY</div>
+          <div style="font-family:Arial,sans-serif;font-size:15px;line-height:1.75;color:#555555;max-width:440px;margin:0 auto;">Your gear is packed and heading your way. Hit the button below to follow every step.</div>
+        </td>
+      </tr>
+      <!-- SHIPPING DETAILS -->
+      <tr>
+        <td class="mob-pad" style="padding:36px 40px;">
+          <div style="border:1px solid #000000;padding:24px;margin-bottom:28px;">
+            <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:11px;letter-spacing:3px;color:#aaaaaa;text-transform:uppercase;margin-bottom:16px;">Shipment Details</div>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0">
+              <tr>
+                <td style="padding-bottom:12px;border-bottom:1px solid #f0f0f0;">
+                  <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:11px;letter-spacing:2px;color:#aaaaaa;text-transform:uppercase;margin-bottom:4px;">Order</div>
+                  <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:18px;color:#000000;">#{{ event.extra.order_number|default:"——" }}</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding:12px 0;border-bottom:1px solid #f0f0f0;">
+                  <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:11px;letter-spacing:2px;color:#aaaaaa;text-transform:uppercase;margin-bottom:4px;">Tracking</div>
+                  <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:18px;color:#000000;">{{ event.extra.tracking_number|default:"——" }}</div>
+                  <div style="font-family:Arial,sans-serif;font-size:12px;color:#888888;margin-top:2px;">via {{ event.extra.shipping_service|default:"Carrier" }}</div>
+                </td>
+              </tr>
+              <tr>
+                <td style="padding-top:12px;">
+                  <div style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:11px;letter-spacing:2px;color:#aaaaaa;text-transform:uppercase;margin-bottom:4px;">Shipping To</div>
+                  <div style="font-family:Arial,sans-serif;font-size:14px;color:#333333;line-height:1.6;">{{ event.extra.shipping_address.first_name|default:"" }} {{ event.extra.shipping_address.last_name|default:"" }}<br>{{ event.extra.shipping_address.city|default:"" }}, {{ event.extra.shipping_address.province_code|default:"" }} {{ event.extra.shipping_address.zip|default:"" }}</div>
+                </td>
+              </tr>
+            </table>
+          </div>
+          <div style="text-align:center;">
+            <a href="{{ event.extra.tracking_url|default:'https://legendary-branding.com' }}" style="display:inline-block;background:#000000;color:#ffffff;font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:15px;letter-spacing:3px;text-decoration:none;padding:16px 52px;border:2px solid #000000;">TRACK MY ORDER</a>
+          </div>
+          <div style="text-align:center;margin-top:20px;">
+            <a href="https://legendary-branding.com/collections/all" style="display:inline-block;background:#ffffff;color:#000000;font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:13px;letter-spacing:2px;text-decoration:none;padding:12px 36px;border:1px solid #000000;">WHILE YOU WAIT — SEE WHAT JUST DROPPED</a>
+          </div>
+        </td>
+      </tr>
+      <tr><td style="height:1px;background:#ebebeb;"></td></tr>
+
+      <!-- FOOTER -->
+      <tr>
+        <td style="background:#000000;padding:36px 40px;text-align:center;">
+          <div style="margin-bottom:20px;">
+            <a href="https://legendary-branding.com" style="text-decoration:none;display:inline-block;">
+              <img src="https://legendary-branding.com/cdn/shop/files/Official_Logo_Black_1.png" alt="Legendary Branding" width="40" height="40"
+                style="display:block;object-fit:contain;filter:invert(1);opacity:0.75;width:40px;height:40px;margin:0 auto;">
+            </a>
+          </div>
+          <div style="margin-bottom:16px;">
+            <a href="https://legendary-branding.com/collections/all"
+              style="font-family:Arial,sans-serif;font-size:11px;color:#555555;text-decoration:none;letter-spacing:1px;text-transform:uppercase;margin:0 12px;">SHOP</a>
+            <a href="https://legendary-branding.com/collections/all"
+              style="font-family:Arial,sans-serif;font-size:11px;color:#555555;text-decoration:none;letter-spacing:1px;text-transform:uppercase;margin:0 12px;">NEW ARRIVALS</a>
+            <a href="https://legendary-branding.com/pages/contact"
+              style="font-family:Arial,sans-serif;font-size:11px;color:#555555;text-decoration:none;letter-spacing:1px;text-transform:uppercase;margin:0 12px;">CONTACT</a>
+          </div>
+          <div style="margin-bottom:16px;">
+            <a href="https://www.instagram.com/legendary_branding"
+              style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:11px;letter-spacing:2px;color:#444444;text-decoration:none;margin:0 8px;">INSTAGRAM</a>
+            <a href="https://twitter.com/legendarybranding"
+              style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:11px;letter-spacing:2px;color:#444444;text-decoration:none;margin:0 8px;">TWITTER</a>
+            <a href="https://facebook.com/legendarybranding"
+              style="font-family:'Bebas Neue','Arial Black',Impact,sans-serif;font-size:11px;letter-spacing:2px;color:#444444;text-decoration:none;margin:0 8px;">FACEBOOK</a>
+          </div>
+          <div style="font-family:Arial,sans-serif;font-size:10px;color:#3a3a3a;line-height:1.7;">
+            Legendary Branding &bull; Lake Forest, IL<br>
+            <a href="{{ unsubscribe_url }}" style="color:#555555;text-decoration:underline;">Unsubscribe</a>
+            &nbsp;&bull;&nbsp;
+            <a href="https://legendary-branding.com/policies/privacy-policy" style="color:#555555;text-decoration:underline;">Privacy Policy</a>
+          </div>
+        </td>
+      </tr>
+</table>
+</td></tr>
+</table>
+</body>
+</html>
