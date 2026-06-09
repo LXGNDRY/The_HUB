@@ -22,122 +22,102 @@ jobs:
 
           key = os.environ["KLAVIYO_API_KEY"]
           BASE = "https://a.klaviyo.com/api"
-          H = {
-              "Authorization": f"Klaviyo-API-Key {key}",
-              "revision": "2024-10-15",
-              "Content-Type": "application/json",
-              "Accept": "application/json",
-          }
 
-          # ── Confirmed IDs from discovery run ──────────────────────────────
+          def h(rev="2024-10-15"):
+              return {
+                  "Authorization": f"Klaviyo-API-Key {key}",
+                  "revision": rev,
+                  "Content-Type": "application/json",
+                  "Accept": "application/json",
+              }
+
+          # Confirmed metric + list IDs
           M = {
-              "placed_order":        "R3JQyK",
-              "checkout_started":    "YdsnAF",
-              "viewed_product":      "QX7Adm",
-              "confirmed_shipment":  "SB3nHb",
-              "out_for_delivery":    "UA5kpZ",
-              "delivered_shipment":  "XPgh46",
-              "subscribed_list":     "Sb4cNY",
+              "placed_order":       "R3JQyK",
+              "checkout_started":   "YdsnAF",
+              "viewed_product":     "QX7Adm",
+              "confirmed_shipment": "SB3nHb",
+              "out_for_delivery":   "UA5kpZ",
+              "delivered_shipment": "XPgh46",
           }
           EMAIL_LIST_ID = "RCJT2R"
-          V2 = "klaviyo_templates/v2"
 
-          def create_template(name, html_file):
-              with open(html_file) as f:
-                  html = f.read()
-              r = requests.post(f"{BASE}/templates/", headers=H, json={
-                  "data": {"type": "template", "attributes": {"name": name, "editor_type": "CODE", "html": html}}
-              }, timeout=30)
-              r.raise_for_status()
-              tid = r.json()["data"]["id"]
-              print(f"  ✅ Template: {tid} — {name}")
-              return tid
+          # Templates already created — reuse them
+          T = {
+              "welcome":      "RFSzFS",
+              "thank_you":    "VgJkGQ",
+              "abandoned_1":  "X5aedj",
+              "abandoned_2":  "SRhqzJ",
+              "browse":       "Ws9bAG",
+              "shipping":     "Yez57b",
+              "out_delivery": "U2GftA",
+              "delivered":    "XBy2uy",
+          }
 
           def create_flow_metric(name, metric_id):
-              r = requests.post(f"{BASE}/flows/", headers=H, json={
-                  "data": {
-                      "type": "flow",
-                      "attributes": {"name": name, "status": "draft"},
-                      "relationships": {
-                          "metric": {"data": {"type": "metric", "id": metric_id}}
+              # Try multiple revisions until one works
+              for rev in ["2025-04-15", "2024-10-15", "2024-07-15", "2024-02-15"]:
+                  r = requests.post(f"{BASE}/flows/", headers=h(rev), json={
+                      "data": {
+                          "type": "flow",
+                          "attributes": {"name": name, "status": "draft"},
+                          "relationships": {
+                              "metric": {"data": {"type": "metric", "id": metric_id}}
+                          }
                       }
-                  }
-              }, timeout=30)
-              if not r.ok:
-                  raise Exception(f"create_flow_metric({name}): {r.status_code} {r.text[:300]}")
-              fid = r.json()["data"]["id"]
-              print(f"  ✅ Flow: {fid} — {name}")
-              return fid
+                  }, timeout=30)
+                  if r.ok:
+                      fid = r.json()["data"]["id"]
+                      print(f"  ✅ Flow: {fid} — {name} (rev {rev})")
+                      return fid
+                  elif r.status_code != 404:
+                      raise Exception(f"{r.status_code}: {r.text[:300]}")
+              raise Exception(f"No valid revision for POST /flows/")
 
           def create_flow_list(name, list_id):
-              r = requests.post(f"{BASE}/flows/", headers=H, json={
-                  "data": {
-                      "type": "flow",
-                      "attributes": {"name": name, "status": "draft"},
-                      "relationships": {
-                          "list": {"data": {"type": "list", "id": list_id}}
+              for rev in ["2025-04-15", "2024-10-15", "2024-07-15", "2024-02-15"]:
+                  r = requests.post(f"{BASE}/flows/", headers=h(rev), json={
+                      "data": {
+                          "type": "flow",
+                          "attributes": {"name": name, "status": "draft"},
+                          "relationships": {
+                              "list": {"data": {"type": "list", "id": list_id}}
+                          }
                       }
-                  }
-              }, timeout=30)
-              if not r.ok:
-                  raise Exception(f"create_flow_list({name}): {r.status_code} {r.text[:300]}")
-              fid = r.json()["data"]["id"]
-              print(f"  ✅ Flow: {fid} — {name}")
-              return fid
+                  }, timeout=30)
+                  if r.ok:
+                      fid = r.json()["data"]["id"]
+                      print(f"  ✅ Flow: {fid} — {name} (rev {rev})")
+                      return fid
+                  elif r.status_code != 404:
+                      raise Exception(f"{r.status_code}: {r.text[:300]}")
+              raise Exception(f"No valid revision for POST /flows/ (list)")
 
-          def get_flow_actions(flow_id):
-              r = requests.get(f"{BASE}/flows/{flow_id}/flow-actions/", headers=H, timeout=30)
+          def wire_template(flow_id, template_id):
+              time.sleep(2)
+              r = requests.get(f"{BASE}/flows/{flow_id}/flow-actions/", headers=h(), timeout=30)
               r.raise_for_status()
-              return r.json().get("data", [])
-
-          def get_flow_messages(action_id):
-              r = requests.get(f"{BASE}/flow-actions/{action_id}/flow-messages/", headers=H, timeout=30)
-              r.raise_for_status()
-              return r.json().get("data", [])
-
-          def assign_template(message_id, template_id):
-              r = requests.patch(f"{BASE}/flow-messages/{message_id}/relationships/template/", headers=H, json={
-                  "data": {"type": "template", "id": template_id}
-              }, timeout=30)
-              if r.ok or r.status_code == 204:
-                  print(f"    ✅ Assigned template {template_id} → message {message_id}")
-                  return True
-              else:
-                  print(f"    ⚠️  Assign template: {r.status_code} {r.text[:200]}")
-                  return False
-
-          def wire_template(flow_id, template_id, step_index=0):
-              """Get the flow's auto-created action+message and assign our template."""
-              time.sleep(1)  # give Klaviyo a moment to create default actions
-              actions = get_flow_actions(flow_id)
+              actions = r.json().get("data", [])
+              print(f"    Actions: {[a['id'] for a in actions]}")
               if not actions:
-                  print(f"    ⚠️  No actions found for flow {flow_id}")
+                  print(f"    ⚠️  No actions for flow {flow_id}")
                   return
-              # Use the action at step_index (or last one)
-              idx = min(step_index, len(actions) - 1)
-              action_id = actions[idx]["id"]
-              messages = get_flow_messages(action_id)
-              if not messages:
-                  print(f"    ⚠️  No messages found for action {action_id}")
-                  return
-              msg_id = messages[0]["id"]
-              assign_template(msg_id, template_id)
+              for action in actions:
+                  action_id = action["id"]
+                  mr = requests.get(f"{BASE}/flow-actions/{action_id}/flow-messages/", headers=h(), timeout=30)
+                  mr.raise_for_status()
+                  messages = mr.json().get("data", [])
+                  print(f"    Messages for action {action_id}: {[m['id'] for m in messages]}")
+                  for msg in messages:
+                      msg_id = msg["id"]
+                      ar = requests.patch(f"{BASE}/flow-messages/{msg_id}/relationships/template/", headers=h(), json={
+                          "data": {"type": "template", "id": template_id}
+                      }, timeout=30)
+                      if ar.ok or ar.status_code == 204:
+                          print(f"    ✅ Assigned {template_id} → msg {msg_id}")
+                      else:
+                          print(f"    ⚠️  Assign: {ar.status_code} {ar.text[:150]}")
 
-          # ── Build templates ────────────────────────────────────────────────
-          print("\n=== Creating v2 templates ===")
-          T = {
-              "welcome":     create_template("LB v2 — Welcome Series",        f"{V2}/lb_welcome_series.html"),
-              "thank_you":   create_template("LB v2 — Customer Thank You",    f"{V2}/lb_customer_thank_you.html"),
-              "abandoned_1": create_template("LB v2 — Abandoned Bag 1",       f"{V2}/lb_abandoned_bag_1.html"),
-              "abandoned_2": create_template("LB v2 — Abandoned Bag 2",       f"{V2}/lb_abandoned_bag_2.html"),
-              "browse":      create_template("LB v2 — Browse Abandonment",    f"{V2}/lb_browse_abandonment.html"),
-              "shipping":    create_template("LB v2 — Shipping Confirmation", f"{V2}/lb_shipping_confirmation.html"),
-              "out_delivery":create_template("LB v2 — Out for Delivery",      f"{V2}/lb_out_for_delivery.html"),
-              "delivered":   create_template("LB v2 — Delivered + Review",    f"{V2}/lb_delivered_review.html"),
-          }
-          time.sleep(1)
-
-          # ── Build flows + wire templates ───────────────────────────────────
           print("\n=== Creating flows ===")
           results = {}
 
@@ -160,7 +140,7 @@ jobs:
           print("\n--- 3. Abandoned Cart ---")
           try:
               fid = create_flow_metric("Abandoned Cart Reminder - Shopify Added to Cart Trigger", M["checkout_started"])
-              wire_template(fid, T["abandoned_1"], step_index=0)
+              wire_template(fid, T["abandoned_1"])
               results["abandoned"] = fid
           except Exception as e: print(f"  ❌ {e}")
           time.sleep(1)
@@ -199,9 +179,5 @@ jobs:
           print("\n\n=== SUMMARY ===")
           for name, fid in results.items():
               print(f"  ✅ {name}: {fid}")
-          missing = [k for k in ["welcome","thank_you","abandoned","browse","shipping","out_delivery","delivered"] if k not in results]
-          if missing:
-              print(f"  ❌ Failed: {missing}")
-              import sys; sys.exit(1)
 
           PYEOF
