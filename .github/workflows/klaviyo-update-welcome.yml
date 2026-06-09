@@ -8,71 +8,108 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install requests
-      - name: Update all flow templates with v2 HTML
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Update all flow templates via hub Klaviyo module
         env:
           KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
         run: |
           python3 - <<'PYEOF'
-          import os, requests, time
+          import os, sys, requests, time
+          sys.path.insert(0, os.getcwd())
 
           key = os.environ["KLAVIYO_API_KEY"]
-          base_headers = {
+          BASE = "https://a.klaviyo.com/api"
+          HEADERS = {
               "Authorization": f"Klaviyo-API-Key {key}",
               "revision": "2024-10-15",
+              "Content-Type": "application/json",
               "Accept": "application/json",
           }
-          patch_headers = {**base_headers, "Content-Type": "application/json"}
 
-          # These are the ACTUAL flow-linked template IDs (confirmed from flow-actions audit)
-          # SUy9ps = Welcome Series, X7W7u7 = Thank You, SkAgJT = Abandoned Bag 1
-          # S4Sg2P = Browse Abandonment, SyfwwC = Shipping, RVetTZ = Out for Delivery, T6DiMR = Delivered
-          TEMPLATES = [
-              ("SUy9ps", "klaviyo_templates/v2/lb_welcome_series.html",        "LB v2 — Welcome Series"),
-              ("XfxXxj", "klaviyo_templates/v2/lb_customer_thank_you.html",    "LB v2 — Customer Thank You"),
-              ("TMdH2N", "klaviyo_templates/v2/lb_abandoned_bag_1.html",       "LB v2 — Abandoned Bag 1"),
-              ("XtVUCP", "klaviyo_templates/v2/lb_browse_abandonment.html",    "LB v2 — Browse Abandonment"),
-              ("UKGVLB", "klaviyo_templates/v2/lb_shipping_confirmation.html", "LB v2 — Shipping Confirmation"),
-              ("XZsrmD", "klaviyo_templates/v2/lb_out_for_delivery.html",      "LB v2 — Out for Delivery"),
-              ("WsUiTk", "klaviyo_templates/v2/lb_delivered_review.html",      "LB v2 — Delivered + Review"),
-          ]
+          def get_template_id_for_message(msg_id):
+              r = requests.get(f"{BASE}/flow-messages/{msg_id}/relationships/template/", headers=HEADERS)
+              if r.ok:
+                  return r.json().get("data", {}).get("id")
+              # fallback
+              r2 = requests.get(f"{BASE}/flow-messages/{msg_id}/?include=template", headers=HEADERS)
+              if r2.ok:
+                  return r2.json().get("data", {}).get("relationships", {}).get("template", {}).get("data", {}).get("id")
+              return None
 
-          for tmpl_id, html_path, name in TEMPLATES:
-              # First verify it's accessible
-              gr = requests.get(f"https://a.klaviyo.com/api/templates/{tmpl_id}/?fields[template]=id,name,editor_type", headers=base_headers)
-              if gr.ok:
-                  attr = gr.json()["data"]["attributes"]
-                  print(f"  Found: {tmpl_id} | {attr['editor_type']} | {attr['name']}")
-              else:
-                  print(f"  ❌ GET {tmpl_id} failed: {gr.status_code}")
+          def patch_template(tmpl_id, name, html):
+              body = {"data": {"type": "template", "id": tmpl_id, "attributes": {"name": name, "html": html}}}
+              r = requests.patch(f"{BASE}/templates/{tmpl_id}/", headers=HEADERS, json=body, timeout=30)
+              return r
+
+          # Flow message ID → (flow name, v2 html file, new template name)
+          MESSAGE_MAP = {
+              "UjfrVL": ("Welcome Series",       "klaviyo_templates/v2/lb_welcome_series.html",        "LB v2 — Welcome Series"),
+              "VjwdXC": ("Customer Thank You",   "klaviyo_templates/v2/lb_customer_thank_you.html",    "LB v2 — Customer Thank You"),
+              "YkSXSX": ("Abandoned Bag 1",      "klaviyo_templates/v2/lb_abandoned_bag_1.html",       "LB v2 — Abandoned Bag 1"),
+              "Y5aXaT": ("Browse Abandonment",   "klaviyo_templates/v2/lb_browse_abandonment.html",    "LB v2 — Browse Abandonment"),
+              "YyydEG": ("Shipping Confirmation","klaviyo_templates/v2/lb_shipping_confirmation.html", "LB v2 — Shipping Confirmation"),
+              "XVxb45": ("Out for Delivery",     "klaviyo_templates/v2/lb_out_for_delivery.html",      "LB v2 — Out for Delivery"),
+              "Ridrhn": ("Delivered + Review",   "klaviyo_templates/v2/lb_delivered_review.html",      "LB v2 — Delivered + Review"),
+          }
+
+          for msg_id, (flow_name, html_path, tmpl_name) in MESSAGE_MAP.items():
+              print(f"\n--- {flow_name} (msg={msg_id}) ---")
+
+              # Step 1: get current template linked to this flow message
+              tmpl_id = get_template_id_for_message(msg_id)
+              if not tmpl_id:
+                  print(f"  ❌ Could not resolve template ID for message {msg_id}")
+                  continue
+              print(f"  Current template: {tmpl_id}")
+
+              # Step 2: check editor type
+              gr = requests.get(f"{BASE}/templates/{tmpl_id}/?fields[template]=id,name,editor_type", headers=HEADERS)
+              if not gr.ok:
+                  print(f"  ❌ Can't GET template {tmpl_id}: {gr.status_code}")
+                  continue
+              attrs = gr.json()["data"]["attributes"]
+              editor = attrs.get("editor_type")
+              print(f"  Editor: {editor} | Name: {attrs['name']}")
+
+              if editor == "SYSTEM_DRAGGABLE":
+                  print(f"  ⚠️  DND template — cannot patch HTML directly. Will create new CODE template and swap.")
+
+                  # Create new CODE template
+                  with open(html_path) as f:
+                      html = f.read()
+                  create_body = {"data": {"type": "template", "attributes": {"name": tmpl_name, "editor_type": "CODE", "html": html}}}
+                  cr = requests.post(f"{BASE}/templates/", headers=HEADERS, json=create_body, timeout=30)
+                  if not cr.ok:
+                      print(f"  ❌ Create failed: {cr.status_code} {cr.text[:200]}")
+                      continue
+                  new_id = cr.json()["data"]["id"]
+                  print(f"  ✅ Created new template: {new_id}")
+
+                  # Swap the flow message to point to the new template
+                  swap_body = {"data": {"type": "template", "id": new_id}}
+                  sr = requests.patch(f"{BASE}/flow-messages/{msg_id}/relationships/template/", headers=HEADERS, json=swap_body, timeout=30)
+                  if sr.ok or sr.status_code == 204:
+                      print(f"  ✅ Swapped flow message {msg_id} → {new_id}")
+                  else:
+                      print(f"  ❌ Swap failed: {sr.status_code} {sr.text[:200]}")
+                  time.sleep(0.5)
                   continue
 
+              # CODE or USER_DRAGGABLE — patch in place
               with open(html_path) as f:
                   html = f.read()
-
-              body = {
-                  "data": {
-                      "type": "template",
-                      "id": tmpl_id,
-                      "attributes": {"name": name, "html": html}
-                  }
-              }
-
-              r = requests.patch(
-                  f"https://a.klaviyo.com/api/templates/{tmpl_id}/",
-                  headers=patch_headers,
-                  json=body,
-                  timeout=30
-              )
-
+              r = patch_template(tmpl_id, tmpl_name, html)
               if r.ok:
-                  print(f"✅ {name} ({tmpl_id}) updated")
+                  print(f"  ✅ Updated in place")
               else:
-                  print(f"❌ {name} ({tmpl_id}) — {r.status_code}: {r.text[:200]}")
-
+                  print(f"  ❌ Patch failed: {r.status_code} {r.text[:200]}")
               time.sleep(0.5)
 
           PYEOF
