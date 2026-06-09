@@ -1,0 +1,38 @@
+name: Klaviyo — Update Welcome Template
+
+on:
+  workflow_dispatch:
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Update TGepj9 with v2 HTML
+        env:
+          KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, requests
+
+          key = os.environ["KLAVIYO_API_KEY"]
+          headers = {
+              "Authorization": f"Klaviyo-API-Key {key}",
+              "revision": "2024-10-15",
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+          }
+
+          # First verify we can see TGepj9
+          r = requests.get("https://a.klaviyo.com/api/templates/TGepj9/?fields[template]=id,name,editor_type", headers=headers)
+          print(f"GET TGepj9: {r.status_code}")
+          if r.ok:
+              d = r.json()["data"]
+              print(f"  name={d['attributes']['name']} editor={d['attributes']['editor_type']}")
+          else:
+              print(f"  {r.text[:300]}")
+          PYEOF
