@@ -12,59 +12,30 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests
-      - name: Update all 7 flow templates with v2 HTML
+      - name: List all templates and find flow-linked ones
         env:
           KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
         run: |
           python3 - <<'PYEOF'
-          import os, requests, json, time
+          import os, requests, time
 
           key = os.environ["KLAVIYO_API_KEY"]
           headers = {
               "Authorization": f"Klaviyo-API-Key {key}",
               "revision": "2024-10-15",
-              "Content-Type": "application/json",
               "Accept": "application/json",
           }
 
-          # Real flow-linked template IDs (CODE type, confirmed readable)
-          TEMPLATES = [
-              ("TGepj9", "klaviyo_templates/v2/lb_welcome_series.html",        "LB v2 — Welcome Series"),
-              ("X7W7u7", "klaviyo_templates/v2/lb_customer_thank_you.html",    "LB v2 — Customer Thank You"),
-              ("SkAgJT", "klaviyo_templates/v2/lb_abandoned_bag_1.html",       "LB v2 — Abandoned Bag 1"),
-              ("S4Sg2P", "klaviyo_templates/v2/lb_browse_abandonment.html",    "LB v2 — Browse Abandonment"),
-              ("SyfwwC", "klaviyo_templates/v2/lb_shipping_confirmation.html", "LB v2 — Shipping Confirmation"),
-              ("RVetTZ", "klaviyo_templates/v2/lb_out_for_delivery.html",      "LB v2 — Out for Delivery"),
-              ("T6DiMR", "klaviyo_templates/v2/lb_delivered_review.html",      "LB v2 — Delivered + Review"),
-          ]
-
-          for tmpl_id, html_path, name in TEMPLATES:
-              with open(html_path) as f:
-                  html = f.read()
-
-              body = {
-                  "data": {
-                      "type": "template",
-                      "id": tmpl_id,
-                      "attributes": {
-                          "name": name,
-                          "html": html
-                      }
-                  }
-              }
-
-              r = requests.patch(
-                  f"https://a.klaviyo.com/api/templates/{tmpl_id}/",
-                  headers=headers,
-                  json=body,
-                  timeout=30
-              )
-
-              if r.ok:
-                  print(f"✅ {name} ({tmpl_id}) — updated")
-              else:
-                  print(f"❌ {name} ({tmpl_id}) — {r.status_code}: {r.text[:300]}")
-
-              time.sleep(0.5)
-
+          # List all templates, sorted by most recently updated
+          url = "https://a.klaviyo.com/api/templates/?sort=-updated&page[size]=100&fields[template]=id,name,editor_type,updated"
+          r = requests.get(url, headers=headers, timeout=30)
+          print(f"List templates: {r.status_code}")
+          if r.ok:
+              templates = r.json().get("data", [])
+              print(f"Total: {len(templates)}")
+              for t in templates:
+                  a = t["attributes"]
+                  print(f"  {t['id']} | {a['editor_type']:20s} | {a['updated'][:19]} | {a['name']}")
+          else:
+              print(r.text[:500])
           PYEOF
