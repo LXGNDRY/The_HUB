@@ -26,16 +26,38 @@ jobs:
               "Accept": "application/json",
           }
 
-          # List all templates, sorted by most recently updated
-          url = "https://a.klaviyo.com/api/templates/?sort=-updated&page[size]=100&fields[template]=id,name,editor_type,updated"
-          r = requests.get(url, headers=headers, timeout=30)
-          print(f"List templates: {r.status_code}")
-          if r.ok:
-              templates = r.json().get("data", [])
-              print(f"Total: {len(templates)}")
-              for t in templates:
-                  a = t["attributes"]
-                  print(f"  {t['id']} | {a['editor_type']:20s} | {a['updated'][:19]} | {a['name']}")
-          else:
-              print(r.text[:500])
+          # Paginate through all templates
+          url = "https://a.klaviyo.com/api/templates/?sort=-updated&page[size]=10&fields[template]=id,name,editor_type,updated"
+          all_templates = []
+          while url:
+              r = requests.get(url, headers=headers, timeout=30)
+              if not r.ok:
+                  print(f"ERROR {r.status_code}: {r.text[:300]}")
+                  break
+              data = r.json()
+              all_templates.extend(data.get("data", []))
+              url = data.get("links", {}).get("next")
+              time.sleep(0.3)
+
+          print(f"Total templates: {len(all_templates)}")
+          for t in all_templates:
+              a = t["attributes"]
+              print(f"  {t['id']} | {a['editor_type']:20s} | {a['updated'][:19]} | {a['name']}")
+
+          # Also check: can we PATCH a known-existing template?
+          # Try to GET and then PATCH TGepj9
+          test_id = "TGepj9"
+          gr = requests.get(f"https://a.klaviyo.com/api/templates/{test_id}/?fields[template]=id,name", headers=headers)
+          print(f"\nGET {test_id}: {gr.status_code}")
+          if gr.ok:
+              print(f"  Found: {gr.json()['data']['attributes']['name']}")
+              # Try PATCH
+              patch_headers = {**headers, "Content-Type": "application/json"}
+              pr = requests.patch(
+                  f"https://a.klaviyo.com/api/templates/{test_id}/",
+                  headers=patch_headers,
+                  json={"data": {"type": "template", "id": test_id, "attributes": {"name": "LB v2 — Welcome Series"}}},
+                  timeout=30
+              )
+              print(f"PATCH {test_id}: {pr.status_code} {pr.text[:200]}")
           PYEOF
