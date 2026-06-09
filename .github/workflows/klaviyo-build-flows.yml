@@ -1,0 +1,268 @@
+name: Klaviyo — Build All Flows From Scratch
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+
+      - name: Build all 7 flows
+        env:
+          KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
+        run: |
+          python3 - <<'PYEOF'
+          import os, requests, json, time
+
+          key = os.environ["KLAVIYO_API_KEY"]
+          BASE = "https://a.klaviyo.com/api"
+          H = {
+              "Authorization": f"Klaviyo-API-Key {key}",
+              "revision": "2024-10-15",
+              "Content-Type": "application/json",
+              "Accept": "application/json",
+          }
+
+          def post(path, body):
+              r = requests.post(f"{BASE}/{path}", headers=H, json=body, timeout=30)
+              if not r.ok:
+                  raise Exception(f"POST /{path} failed {r.status_code}: {r.text[:300]}")
+              return r.json()
+
+          def patch(path, body):
+              r = requests.patch(f"{BASE}/{path}", headers=H, json=body, timeout=30)
+              if not r.ok:
+                  raise Exception(f"PATCH /{path} failed {r.status_code}: {r.text[:300]}")
+              return r.json() if r.text else {}
+
+          def create_template(name, html_file):
+              with open(html_file) as f:
+                  html = f.read()
+              result = post("templates/", {
+                  "data": {
+                      "type": "template",
+                      "attributes": {"name": name, "editor_type": "CODE", "html": html}
+                  }
+              })
+              tmpl_id = result["data"]["id"]
+              print(f"  ✅ Template created: {tmpl_id} — {name}")
+              return tmpl_id
+
+          def create_flow(name, trigger_type, metric_id=None, list_id=None):
+              attrs = {"name": name, "status": "draft"}
+              if trigger_type == "metric" and metric_id:
+                  trigger = {
+                      "type": "metric-trigger",
+                      "attributes": {"metric": {"data": {"type": "metric", "id": metric_id}}}
+                  }
+              elif trigger_type == "list" and list_id:
+                  trigger = {
+                      "type": "list-trigger",
+                      "attributes": {"list": {"data": {"type": "list", "id": list_id}}}
+                  }
+              else:
+                  trigger = None
+
+              body = {"data": {"type": "flow", "attributes": attrs}}
+              if trigger:
+                  body["data"]["relationships"] = {"trigger": {"data": trigger}}
+
+              result = post("flows/", body)
+              flow_id = result["data"]["id"]
+              print(f"  ✅ Flow created: {flow_id} — {name}")
+              return flow_id
+
+          # ── Step 1: Get metric IDs we need ─────────────────────────────────
+          print("\n=== Fetching metrics ===")
+          metrics_r = requests.get(f"{BASE}/metrics/?page[size]=10", headers=H)
+          metrics_r.raise_for_status()
+          all_metrics = {}
+          url = f"{BASE}/metrics/?page[size]=10"
+          while url:
+              r = requests.get(url, headers=H)
+              data = r.json()
+              for m in data.get("data", []):
+                  all_metrics[m["attributes"]["name"]] = m["id"]
+              url = data.get("links", {}).get("next")
+              time.sleep(0.3)
+
+          print(f"  Found {len(all_metrics)} metrics")
+
+          # Key metric names in Klaviyo (Shopify integration)
+          PLACED_ORDER    = all_metrics.get("Placed Order")
+          STARTED_CHECKOUT= all_metrics.get("Started Checkout")
+          VIEWED_PRODUCT  = all_metrics.get("Viewed Product")
+          FULFILLED_ORDER = all_metrics.get("Fulfilled Order")
+          SHIPPED_ORDER   = all_metrics.get("Shipped Order")
+          DELIVERED       = all_metrics.get("Delivered")
+          OUT_DELIVERY    = all_metrics.get("Out for Delivery")
+          SUBSCRIBED      = all_metrics.get("Subscribed to List")
+
+          print(f"  Placed Order:      {PLACED_ORDER}")
+          print(f"  Started Checkout:  {STARTED_CHECKOUT}")
+          print(f"  Viewed Product:    {VIEWED_PRODUCT}")
+          print(f"  Fulfilled Order:   {FULFILLED_ORDER}")
+          print(f"  Shipped:           {SHIPPED_ORDER}")
+          print(f"  Delivered:         {DELIVERED}")
+          print(f"  Out for Delivery:  {OUT_DELIVERY}")
+          print(f"  Subscribed List:   {SUBSCRIBED}")
+
+          # ── Step 2: Get email list ID for welcome series ───────────────────
+          print("\n=== Fetching lists ===")
+          lists_r = requests.get(f"{BASE}/lists/?page[size]=10", headers=H)
+          lists_r.raise_for_status()
+          all_lists = {}
+          for l in lists_r.json().get("data", []):
+              all_lists[l["attributes"]["name"]] = l["id"]
+              print(f"  List: {l['id']} — {l['attributes']['name']}")
+
+          EMAIL_LIST_ID = list(all_lists.values())[0] if all_lists else None
+
+          # ── Step 3: Create all templates ───────────────────────────────────
+          print("\n=== Creating v2 templates ===")
+          V2 = "klaviyo_templates/v2"
+          T = {
+              "welcome":       create_template("LB v2 — Welcome Series",       f"{V2}/lb_welcome_series.html"),
+              "thank_you":     create_template("LB v2 — Customer Thank You",    f"{V2}/lb_customer_thank_you.html"),
+              "abandoned_1":   create_template("LB v2 — Abandoned Bag 1",      f"{V2}/lb_abandoned_bag_1.html"),
+              "abandoned_2":   create_template("LB v2 — Abandoned Bag 2",      f"{V2}/lb_abandoned_bag_2.html"),
+              "browse":        create_template("LB v2 — Browse Abandonment",   f"{V2}/lb_browse_abandonment.html"),
+              "shipping":      create_template("LB v2 — Shipping Confirmation",f"{V2}/lb_shipping_confirmation.html"),
+              "out_delivery":  create_template("LB v2 — Out for Delivery",     f"{V2}/lb_out_for_delivery.html"),
+              "delivered":     create_template("LB v2 — Delivered + Review",   f"{V2}/lb_delivered_review.html"),
+          }
+          time.sleep(1)
+
+          # ── Step 4: Create flows ───────────────────────────────────────────
+          print("\n=== Creating flows ===")
+
+          # We'll create flows then add email actions via flow-actions API
+          # Klaviyo flow creation API: POST /api/flows/
+          # Then POST /api/flow-actions/ to add email steps
+          # Then POST /api/flow-messages/ to add messages with template
+
+          def add_email_action(flow_id, template_id, delay_hours=0, position=1):
+              """Add a SEND_EMAIL action to a flow with a delay."""
+              # Create flow action
+              action_body = {
+                  "data": {
+                      "type": "flow-action",
+                      "attributes": {
+                          "action_type": "SEND_EMAIL",
+                          "tracking_options": {
+                              "is_add_utm": True,
+                              "utm_params": [
+                                  {"name": "utm_source", "value": "klaviyo"},
+                                  {"name": "utm_medium", "value": "email"},
+                              ]
+                          }
+                      },
+                      "relationships": {
+                          "flow": {"data": {"type": "flow", "id": flow_id}},
+                          "template": {"data": {"type": "template", "id": template_id}},
+                      }
+                  }
+              }
+              r = requests.post(f"{BASE}/flow-actions/", headers=H, json=action_body, timeout=30)
+              if r.ok:
+                  action_id = r.json()["data"]["id"]
+                  print(f"    ✅ Email action added: {action_id}")
+                  return action_id
+              else:
+                  print(f"    ⚠️  flow-action POST: {r.status_code} {r.text[:200]}")
+                  return None
+
+          results = {}
+
+          # 1. Welcome Series — trigger: Added to List
+          print("\n--- 1. Email Welcome Series ---")
+          try:
+              list_id = EMAIL_LIST_ID or list(all_lists.values())[0]
+              flow_id = create_flow("Email Welcome Series with Discount", "list", list_id=list_id)
+              add_email_action(flow_id, T["welcome"], delay_hours=0)
+              results["welcome"] = flow_id
+          except Exception as e:
+              print(f"  ❌ {e}")
+
+          time.sleep(1)
+
+          # 2. Customer Thank You — trigger: Placed Order
+          print("\n--- 2. Customer Thank You ---")
+          try:
+              flow_id = create_flow("Customer Thank You", "metric", metric_id=PLACED_ORDER)
+              add_email_action(flow_id, T["thank_you"], delay_hours=0)
+              results["thank_you"] = flow_id
+          except Exception as e:
+              print(f"  ❌ {e}")
+
+          time.sleep(1)
+
+          # 3. Abandoned Cart — trigger: Started Checkout
+          print("\n--- 3. Abandoned Cart Reminder ---")
+          try:
+              flow_id = create_flow("Abandoned Cart Reminder", "metric", metric_id=STARTED_CHECKOUT)
+              add_email_action(flow_id, T["abandoned_1"], delay_hours=1)
+              add_email_action(flow_id, T["abandoned_2"], delay_hours=24)
+              results["abandoned"] = flow_id
+          except Exception as e:
+              print(f"  ❌ {e}")
+
+          time.sleep(1)
+
+          # 4. Browse Abandonment — trigger: Viewed Product
+          print("\n--- 4. Browse Abandonment ---")
+          try:
+              flow_id = create_flow("Browse Abandonment", "metric", metric_id=VIEWED_PRODUCT)
+              add_email_action(flow_id, T["browse"], delay_hours=1)
+              results["browse"] = flow_id
+          except Exception as e:
+              print(f"  ❌ {e}")
+
+          time.sleep(1)
+
+          # 5. Shipping Confirmation — trigger: Fulfilled Order or Shipped
+          print("\n--- 5. LB — Shipping Confirmation ---")
+          try:
+              trig = SHIPPED_ORDER or FULFILLED_ORDER
+              flow_id = create_flow("LB — Shipping Confirmation", "metric", metric_id=trig)
+              add_email_action(flow_id, T["shipping"], delay_hours=0)
+              results["shipping"] = flow_id
+          except Exception as e:
+              print(f"  ❌ {e}")
+
+          time.sleep(1)
+
+          # 6. Out for Delivery
+          print("\n--- 6. LB — Out for Delivery ---")
+          try:
+              trig = OUT_DELIVERY or FULFILLED_ORDER
+              flow_id = create_flow("LB — Out for Delivery", "metric", metric_id=trig)
+              add_email_action(flow_id, T["out_delivery"], delay_hours=0)
+              results["out_delivery"] = flow_id
+          except Exception as e:
+              print(f"  ❌ {e}")
+
+          time.sleep(1)
+
+          # 7. Delivered + Review
+          print("\n--- 7. LB — Delivered + Review ---")
+          try:
+              trig = DELIVERED or PLACED_ORDER
+              flow_id = create_flow("LB — Delivered + Review", "metric", metric_id=trig)
+              add_email_action(flow_id, T["delivered"], delay_hours=0)
+              results["delivered"] = flow_id
+          except Exception as e:
+              print(f"  ❌ {e}")
+
+          print("\n\n=== FINAL RESULTS ===")
+          for name, flow_id in results.items():
+              print(f"  {name}: {flow_id}")
+          print(f"\nTemplates: {json.dumps(T, indent=2)}")
+
+          PYEOF
