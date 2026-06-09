@@ -12,7 +12,7 @@ jobs:
         with:
           python-version: "3.11"
       - run: pip install requests
-      - name: List all templates and find flow-linked ones
+      - name: Update all 7 flow templates with v2 HTML
         env:
           KLAVIYO_API_KEY: ${{ secrets.KLAVIYO_API_KEY }}
         run: |
@@ -23,41 +23,44 @@ jobs:
           headers = {
               "Authorization": f"Klaviyo-API-Key {key}",
               "revision": "2024-10-15",
+              "Content-Type": "application/json",
               "Accept": "application/json",
           }
 
-          # Paginate through all templates
-          url = "https://a.klaviyo.com/api/templates/?sort=-updated&page[size]=10&fields[template]=id,name,editor_type,updated"
-          all_templates = []
-          while url:
-              r = requests.get(url, headers=headers, timeout=30)
-              if not r.ok:
-                  print(f"ERROR {r.status_code}: {r.text[:300]}")
-                  break
-              data = r.json()
-              all_templates.extend(data.get("data", []))
-              url = data.get("links", {}).get("next")
-              time.sleep(0.3)
+          TEMPLATES = [
+              ("TGepj9", "klaviyo_templates/v2/lb_welcome_series.html",        "LB v2 — Welcome Series"),
+              ("X7W7u7", "klaviyo_templates/v2/lb_customer_thank_you.html",    "LB v2 — Customer Thank You"),
+              ("SkAgJT", "klaviyo_templates/v2/lb_abandoned_bag_1.html",       "LB v2 — Abandoned Bag 1"),
+              ("S4Sg2P", "klaviyo_templates/v2/lb_browse_abandonment.html",    "LB v2 — Browse Abandonment"),
+              ("SyfwwC", "klaviyo_templates/v2/lb_shipping_confirmation.html", "LB v2 — Shipping Confirmation"),
+              ("RVetTZ", "klaviyo_templates/v2/lb_out_for_delivery.html",      "LB v2 — Out for Delivery"),
+              ("T6DiMR", "klaviyo_templates/v2/lb_delivered_review.html",      "LB v2 — Delivered + Review"),
+          ]
 
-          print(f"Total templates: {len(all_templates)}")
-          for t in all_templates:
-              a = t["attributes"]
-              print(f"  {t['id']} | {a['editor_type']:20s} | {a['updated'][:19]} | {a['name']}")
+          for tmpl_id, html_path, name in TEMPLATES:
+              with open(html_path) as f:
+                  html = f.read()
 
-          # Also check: can we PATCH a known-existing template?
-          # Try to GET and then PATCH TGepj9
-          test_id = "TGepj9"
-          gr = requests.get(f"https://a.klaviyo.com/api/templates/{test_id}/?fields[template]=id,name", headers=headers)
-          print(f"\nGET {test_id}: {gr.status_code}")
-          if gr.ok:
-              print(f"  Found: {gr.json()['data']['attributes']['name']}")
-              # Try PATCH
-              patch_headers = {**headers, "Content-Type": "application/json"}
-              pr = requests.patch(
-                  f"https://a.klaviyo.com/api/templates/{test_id}/",
-                  headers=patch_headers,
-                  json={"data": {"type": "template", "id": test_id, "attributes": {"name": "LB v2 — Welcome Series"}}},
+              body = {
+                  "data": {
+                      "type": "template",
+                      "id": tmpl_id,
+                      "attributes": {"name": name, "html": html}
+                  }
+              }
+
+              r = requests.patch(
+                  f"https://a.klaviyo.com/api/templates/{tmpl_id}/",
+                  headers=headers,
+                  json=body,
                   timeout=30
               )
-              print(f"PATCH {test_id}: {pr.status_code} {pr.text[:200]}")
+
+              if r.ok:
+                  print(f"✅ {name} ({tmpl_id})")
+              else:
+                  print(f"❌ {name} ({tmpl_id}) — {r.status_code}: {r.text[:200]}")
+
+              time.sleep(0.5)
+
           PYEOF
