@@ -1,0 +1,24 @@
+name: GMC Apply Attribute Rules
+
+on:
+  workflow_dispatch:
+
+jobs:
+  apply-rules:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install google-auth google-auth-httplib2 google-api-python-client
+
+      - name: Run attribute rules script
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: python scripts/gmc_apply_attribute_rules.py
