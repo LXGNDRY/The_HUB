@@ -1,0 +1,57 @@
+name: Enhanced Conversions — Upload
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Mode: list-actions | backfill | order"
+        required: true
+        default: "list-actions"
+        type: choice
+        options:
+          - list-actions
+          - backfill
+          - order
+      order_id:
+        description: "Shopify Order ID (only for mode=order)"
+        required: false
+        type: string
+      conversion_action_id:
+        description: "Google Ads Conversion Action ID (required for backfill/order)"
+        required: false
+        type: string
+
+  # Daily automatic run — upload previous day's orders
+  schedule:
+    - cron: "30 6 * * *"  # 1:30 AM CDT daily
+
+jobs:
+  upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install google-auth google-auth-httplib2 google-api-python-client requests
+
+      - name: Run enhanced conversions
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          CONVERSION_ACTION_ID: ${{ github.event.inputs.conversion_action_id || vars.CONVERSION_ACTION_ID || '' }}
+        run: |
+          MODE="${{ github.event.inputs.mode || 'backfill' }}"
+          echo "Running in mode: $MODE"
+          if [ "$MODE" = "list-actions" ]; then
+            python scripts/gmc_enhanced_conversions.py --list-actions
+          elif [ "$MODE" = "order" ]; then
+            python scripts/gmc_enhanced_conversions.py --order "${{ github.event.inputs.order_id }}"
+          else
+            python scripts/gmc_enhanced_conversions.py --backfill
+          fi
