@@ -1,0 +1,40 @@
+name: GMC List Data Sources
+on:
+  workflow_dispatch:
+jobs:
+  list-datasources:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth google-api-python-client
+      - name: List all data sources
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          python3 - << 'PYEOF'
+          import os, json
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+
+          creds = service_account.Credentials.from_service_account_info(
+              json.loads(os.environ["GCP_SA_KEY"]),
+              scopes=["https://www.googleapis.com/auth/content"],
+          )
+          service = build("content", "v2.1", credentials=creds)
+          result = service.datafeeds().list(merchantId="582171114").execute()
+          feeds = result.get("resources", [])
+          print(f"Total data sources: {len(feeds)}")
+          with_products = []
+          empty = []
+          for f in feeds:
+              fid = str(f.get("id", ""))
+              name = f.get("name", "")
+              targets = f.get("targets", [{}])
+              country = targets[0].get("country", "-") if targets else "-"
+              lang = targets[0].get("language", "-") if targets else "-"
+              fmt = f.get("contentType", "unknown")
+              print(f"  ID={fid} | {name} | {country}/{lang} | {fmt}")
+          PYEOF
