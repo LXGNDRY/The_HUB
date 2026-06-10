@@ -1,0 +1,68 @@
+name: GMC Datasource Inspector
+on:
+  workflow_dispatch:
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install -q google-auth google-api-python-client requests
+      - name: Inspect all data sources
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          python3 << 'PYEOF'
+          import os, json, time
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+          import googleapiclient.errors
+
+          MERCHANT_ID = "582171114"
+          creds = service_account.Credentials.from_service_account_info(
+              json.loads(os.environ["GCP_SA_KEY"]),
+              scopes=["https://www.googleapis.com/auth/content"],
+          )
+          service = build("content", "v2.1", credentials=creds, cache_discovery=False)
+
+          for attempt in range(3):
+              try:
+                  result = service.datafeeds().list(merchantId=MERCHANT_ID).execute()
+                  break
+              except Exception as e:
+                  print(f"Attempt {attempt+1} failed: {e}")
+                  time.sleep(10)
+
+          feeds = result.get("resources", [])
+          print(f"TOTAL_FEEDS={len(feeds)}")
+
+          with_products = []
+          empty_ids = []
+
+          for f in feeds:
+              fid     = str(f.get("id",""))
+              name    = f.get("name","")
+              targets = f.get("targets",[{}])
+              country = targets[0].get("country","-") if targets else "-"
+              lang    = targets[0].get("language","-") if targets else "-"
+              # fetch status for item count
+              try:
+                  st = service.datafeedstatuses().get(
+                      merchantId=MERCHANT_ID, datafeedId=fid).execute()
+                  items = st.get("itemsTotal", 0)
+              except:
+                  items = 0
+              time.sleep(0.2)
+              flag = "HAS_PRODUCTS" if items > 0 else "EMPTY"
+              print(f"{flag} | id={fid} | name={name} | country={country} | lang={lang} | items={items}")
+              if items > 0:
+                  with_products.append(fid)
+              else:
+                  empty_ids.append(fid)
+
+          print(f"\nSUMMARY: {len(with_products)} with products, {len(empty_ids)} empty")
+          print(f"WITH_PRODUCTS_IDS={','.join(with_products)}")
+          print(f"EMPTY_IDS={','.join(empty_ids)}")
+          PYEOF
