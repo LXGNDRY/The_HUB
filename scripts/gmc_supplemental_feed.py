@@ -129,71 +129,175 @@ def strip_html(raw_html):
     return text
 
 
-def build_optimised_description(body_html, material=None, fit=None, color=None):
-    """
-    Build a keyword-rich plain-text GMC description from Shopify bodyHtml.
+# ── Description templates by category ───────────────────────────────────────
+# Each template uses {title}, {gsm}, {fit}, {color}, {features} placeholders.
+# GMC target: 500–800 chars. Hard limit: 5,000 chars.
 
-    Extracts the intro pitch, Features, and Fabric & Construction sections,
-    then appends variant-level signals (material weight, fit, color).
+DESC_TEMPLATES = {
+    "tshirt": (
+        "{title} — a heavyweight oversized graphic tee built for everyday streetwear. "
+        "{gsm_line}"
+        "Drop-shoulder cut with a boxy, relaxed silhouette that sits off the shoulder for that authentic streetwear fit. "
+        "{fit_line}"
+        "Side-seamed construction for shape retention. Pre-shrunk and finished to true-to-size. "
+        "100% cotton or cotton-blend fabric — breathable, durable, and wash-resistant. "
+        "{color_line}"
+        "Machine wash cold. Free shipping. "
+        "Perfect for graphic tee collectors, streetwear enthusiasts, and anyone who wants a statement piece that holds up."
+    ),
+    "hoodie": (
+        "{title} — a heavyweight oversized hoodie engineered for bold streetwear style and everyday comfort. "
+        "{gsm_line}"
+        "Features a kangaroo front pocket, ribbed cuffs and hem, and a drop-shoulder silhouette. "
+        "{fit_line}"
+        "Double-stitched seams for long-term durability. Pre-shrunk to maintain shape after wash. "
+        "100% cotton heavyweight fleece — thick, warm, and built to last. "
+        "{color_line}"
+        "Machine wash cold, tumble dry low. Free shipping. "
+        "Ideal for streetwear layering, casual wear, and anyone who lives in their hoodie."
+    ),
+    "crewneck": (
+        "{title} — a heavyweight oversized crewneck sweatshirt with a clean, minimal streetwear silhouette. "
+        "{gsm_line}"
+        "Ribbed crew neckline, ribbed cuffs and hem. Drop-shoulder fit for a relaxed, modern look. "
+        "{fit_line}"
+        "Double-stitched for durability. Pre-shrunk for true-to-size fit. "
+        "100% cotton heavyweight fleece — dense, structured fabric that holds its shape. "
+        "{color_line}"
+        "Machine wash cold. Free shipping. "
+        "Great for streetwear layering, casual fits, or everyday wear year-round."
+    ),
+    "sweatshirt": (
+        "{title} — a premium heavyweight streetwear sweatshirt with an oversized silhouette and everyday versatility. "
+        "{gsm_line}"
+        "Clean construction with ribbed cuffs and hem. Drop-shoulder design for a relaxed fit. "
+        "{fit_line}"
+        "Pre-shrunk and side-seamed for shape retention. Built to last through repeated wash cycles. "
+        "{color_line}"
+        "Machine wash cold. Free shipping. "
+        "A wardrobe essential for streetwear fans and everyday casual wear."
+    ),
+    "sweatpants": (
+        "{title} — premium heavyweight streetwear sweatpants designed for comfort and style. "
+        "{gsm_line}"
+        "Elastic waistband with drawstring. Tapered or relaxed leg depending on cut. "
+        "Ribbed cuffs at the ankle for a clean, structured finish. "
+        "{fit_line}"
+        "Cotton-blend construction — soft, breathable, and built for all-day wear. "
+        "{color_line}"
+        "Machine wash cold. Free shipping. "
+        "Perfect as a matching set bottom or standalone streetwear staple."
+    ),
+    "jeans": (
+        "{title} — streetwear-influenced denim jeans with a bold, relaxed silhouette. "
+        "Baggy or wide-leg cut for authentic streetwear styling. "
+        "{fit_line}"
+        "Durable denim construction with reinforced stitching at stress points. "
+        "Available in washed and raw finish options. "
+        "{color_line}"
+        "Machine wash cold, hang dry recommended. Free shipping. "
+        "The go-to denim choice for streetwear fits from casual to elevated."
+    ),
+    "shorts": (
+        "{title} — premium streetwear shorts built for comfort and style in warmer months. "
+        "{gsm_line}"
+        "Elastic waistband with drawstring. Mid-thigh to knee length. "
+        "{fit_line}"
+        "Lightweight and breathable fabric construction. "
+        "{color_line}"
+        "Machine wash cold. Free shipping. "
+        "Ideal for summer streetwear fits, athletic wear, and casual day-to-day use."
+    ),
+    "polo": (
+        "{title} — a premium streetwear polo shirt blending classic structure with modern fit. "
+        "{gsm_line}"
+        "Ribbed polo collar and two-button placket. Short sleeve cut with a clean silhouette. "
+        "{fit_line}"
+        "Cotton pique or woven construction — structured, breathable, and easy to style. "
+        "{color_line}"
+        "Machine wash cold. Free shipping. "
+        "A versatile piece that works dressed up or down in any streetwear rotation."
+    ),
+    "tank": (
+        "{title} — a premium streetwear tank top designed for layering or wearing solo. "
+        "{gsm_line}"
+        "Sleeveless cut with a relaxed, drop-arm silhouette. "
+        "{fit_line}"
+        "Soft cotton construction — lightweight and breathable for all-day comfort. "
+        "{color_line}"
+        "Machine wash cold. Free shipping. "
+        "Perfect for warm weather wear, gym sessions, or as a layering base."
+    ),
+    "jacket": (
+        "{title} — a premium streetwear jacket built for bold style and everyday function. "
+        "{gsm_line}"
+        "Full-zip or button-front closure with structured collar. "
+        "{fit_line}"
+        "Durable outer shell with quality stitching at all seams. "
+        "{color_line}"
+        "Machine wash cold or dry clean depending on material. Free shipping. "
+        "A statement outerwear piece for streetwear layering in any season."
+    ),
+    "set": (
+        "{title} — a matching streetwear hoodie and jogger set built for coordinated style. "
+        "{gsm_line}"
+        "Hoodie features kangaroo pocket, ribbed cuffs and hem. "
+        "Joggers feature elastic waistband with drawstring and ribbed ankle cuffs. "
+        "{fit_line}"
+        "Heavyweight cotton fleece construction — warm, structured, and durable. "
+        "{color_line}"
+        "Machine wash cold. Free shipping. "
+        "The ultimate matching set for a clean, effortless streetwear look."
+    ),
+    "hat": (
+        "{title} — a premium streetwear trucker hat with a structured front panel and mesh back. "
+        "Foam front panel holds shape. Adjustable snap closure fits most head sizes (56–60cm). "
+        "Embroidered or printed graphic on front. "
+        "{color_line}"
+        "Spot clean recommended. Free shipping. "
+        "A clean streetwear accessory that completes any fit."
+    ),
+}
+
+
+def build_optimised_description(body_html, material=None, fit=None, color=None,
+                                product_title="", tags_list=None):
+    """
+    Build a keyword-rich plain-text GMC description.
+
+    Generates product-specific descriptions using the category template system
+    driven by title, tags, GSM weight, fit, and color — bypassing the thin
+    Shopify body HTML sections that caused GMC's 'missing details' flag.
+
     Target: 500-800 chars. Hard limit: 5,000 chars (GMC max).
     """
-    plain = strip_html(body_html)
-    parts = []
+    if tags_list is None:
+        tags_list = []
 
-    # Intro / pitch paragraph
-    intro_match = re.search(
-        r'(?:Premium Streetwear|Streetwear)[,.]?\s+(.+?)(?=Features|Fabric)',
-        plain, re.IGNORECASE | re.DOTALL
+    cat = categorize(product_title, tags_list) if product_title else "tshirt"
+    gsm = get_gsm(tags_list) if tags_list else ""
+
+    # Build filler lines
+    gsm_line   = f"Made with {gsm} premium cotton fabric for a dense, durable feel. " if gsm else ""
+    fit_line   = f"{fit} silhouette. " if fit else "Oversized silhouette. "
+    color_line = f"Available in {color}. " if color else ""
+
+    # Clean product title — strip brand suffix if present
+    clean_title = re.sub(
+        r'\s*[|·—\-]+\s*(Premium Streetwear|Legendary Branding[^\s]*).*$',
+        '', product_title, flags=re.IGNORECASE
+    ).strip() or product_title
+
+    template = DESC_TEMPLATES.get(cat, DESC_TEMPLATES["tshirt"])
+    description = template.format(
+        title=clean_title,
+        gsm_line=gsm_line,
+        fit_line=fit_line,
+        color_line=color_line,
+        features="",  # reserved for future per-product expansion
     )
-    if intro_match:
-        intro = re.sub(r'\s+', ' ', intro_match.group(0)).strip()
-        intro = re.sub(r'^.*?(?:Premium Streetwear[,.]?\s*)', '', intro, flags=re.IGNORECASE).strip()
-        if intro:
-            parts.append(intro[:250])
 
-    # Features section
-    features_match = re.search(
-        r'Features\s+([\s\S]+?)(?=Fabric|Construction|Care Instructions|Size Guide|Shipping)',
-        plain, re.IGNORECASE
-    )
-    if features_match:
-        features = re.sub(r'\s+', ' ', features_match.group(1)).strip()
-        if features:
-            parts.append(f"Features: {features[:200]}")
-
-    # Fabric & Construction section
-    fabric_match = re.search(
-        r'Fabric\s*&?\s*Construction\s+([\s\S]+?)(?=Care Instructions|Size Guide|Shipping)',
-        plain, re.IGNORECASE
-    )
-    if fabric_match:
-        fabric = re.sub(r'\s+', ' ', fabric_match.group(1)).strip()
-        if fabric:
-            parts.append(f"Construction: {fabric[:200]}")
-
-    # Material/weight signal from enrichment
-    if material:
-        parts.append(f"Fabric: {material}.")
-
-    # Variant-level signals
-    attr_parts = []
-    if fit:
-        attr_parts.append(fit)
-    if color:
-        attr_parts.append(f"available in {color}")
-    if attr_parts:
-        parts.append("Offered in " + ", ".join(attr_parts) + ".")
-
-    # Fallback for products with no bodyHtml
-    if not parts:
-        base = "Premium streetwear apparel by Legendary Branding."
-        if material:
-            base += f" {material}."
-        if fit:
-            base += f" {fit}."
-        parts.append(base)
-
-    description = re.sub(r'\s+', ' ', " ".join(parts)).strip()
+    description = re.sub(r'\s+', ' ', description).strip()
     description = html.unescape(description)
     return description[:5000]
 
@@ -592,6 +696,8 @@ for product in all_products:
             material=material,
             fit=fit,
             color=color if color else None,
+            product_title=title,
+            tags_list=tags_list,
         )
 
         # ── Generate one record per target market ────────────────────────
