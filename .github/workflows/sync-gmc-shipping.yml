@@ -1,0 +1,27 @@
+name: Sync GMC Shipping — Match Shopify Exactly
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests google-auth google-api-python-client -q
+      - name: Sync GMC shipping to match Shopify
+        env:
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: python scripts/sync_gmc_shipping.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: shipping-sync-report
+          path: outputs/shipping_sync_report.json
+          if-no-files-found: ignore
