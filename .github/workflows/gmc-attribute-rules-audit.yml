@@ -1,0 +1,21 @@
+name: GMC Attribute Rules Audit
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth google-api-python-client -q
+      - run: python scripts/gmc_attribute_rules_audit.py
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gmc-attribute-rules-audit
+          path: outputs/gmc_attribute_rules_audit.json
+          if-no-files-found: ignore
