@@ -1,13 +1,16 @@
 """
 fix_gmc_shipping.py
 -------------------
-Reads current GMC shipping settings, identifies countries in the
-56-country ad target list that lack shipping coverage, and patches
-the free-shipping service to include all of them.
+Adds free-shipping service entries for the 5 countries missing from GMC:
+  AM (Armenia), JM (Jamaica), PR (Puerto Rico), QA (Qatar), TT (Trinidad & Tobago)
 
-Merchant ID : 582171114
-Target      : All 56 countries targeted in THEE PMax campaign
-Rule        : Free shipping, no minimum order value
+Each country needs its own service entry with:
+  - deliveryCountry: ISO code
+  - currency: local currency
+  - singleValue flatRate of 0
+  - deliveryTime: 6-12 transit + 2 handling (matching existing intl services)
+
+Merchant ID: 582171114
 """
 
 import json
@@ -31,117 +34,95 @@ creds = service_account.Credentials.from_service_account_info(
     scopes=["https://www.googleapis.com/auth/content"],
 )
 service = build("content", "v2.1", credentials=creds)
-
 MERCHANT_ID = 582171114
 
-# ── All 56 targeted countries ─────────────────────────────────────────────────
-TARGET_COUNTRIES = [
-    # Tier 1
-    "US", "GB", "CA", "FR", "DE", "IE", "ES", "IT", "AU", "NZ",
-    "JP", "KR", "SG", "HK", "NL", "BE", "CH", "NO", "SE", "DK",
-    "FI", "AT", "PT", "GR", "CZ", "PL", "HU", "RO", "AE", "QA",
-    "KW", "BH", "SA", "IL", "MX",
-    # Tier 2
-    "AR", "CL", "CO", "EC", "PE", "DO", "SV", "GT", "JM", "PA",
-    "PR", "TT", "KZ", "AM", "GE", "MA", "EG", "JO", "LB", "ZA",
-    "MY",
-]
+# ── Countries to add (code → local currency) ─────────────────────────────────
+MISSING_COUNTRIES = {
+    "AM": "AMD",   # Armenia
+    "JM": "JMD",   # Jamaica
+    "PR": "USD",   # Puerto Rico (uses USD)
+    "QA": "QAR",   # Qatar
+    "TT": "TTD",   # Trinidad & Tobago
+}
 
-def get_shipping_settings():
-    resp = service.shippingsettings().get(
-        merchantId=MERCHANT_ID,
-        accountId=MERCHANT_ID,
-    ).execute()
-    return resp
-
-def get_covered_countries(settings):
-    """Return set of country codes already covered by any shipping service."""
-    covered = set()
-    for svc in settings.get("services", []):
-        for country in svc.get("deliveryCountries", []):
-            covered.add(country)
-    return covered
-
-def find_free_shipping_service(settings):
-    """Find the existing free shipping service to patch."""
-    for i, svc in enumerate(settings.get("services", [])):
-        name = svc.get("name", "").lower()
-        # Look for free shipping service (no rate table / flatRate of 0)
-        rate_groups = svc.get("rateGroups", [])
-        is_free = False
-        if not rate_groups:
-            is_free = True
-        else:
-            for rg in rate_groups:
-                single_value = rg.get("singleValue", {})
-                if single_value.get("flatRate", {}).get("value") == "0":
-                    is_free = True
-        if is_free or "free" in name:
-            return i, svc
-    return None, None
+def build_free_service(country_code, currency):
+    """Build a free-shipping service entry matching the existing intl pattern."""
+    return {
+        "name": f"free_shipping_{country_code}",
+        "active": True,
+        "deliveryCountry": country_code,
+        "currency": currency,
+        "deliveryTime": {
+            "minTransitTimeInDays": 6,
+            "maxTransitTimeInDays": 12,
+            "minHandlingTimeInDays": 2,
+            "maxHandlingTimeInDays": 2,
+        },
+        "shipmentType": "delivery",
+        "rateGroups": [
+            {
+                "singleValue": {
+                    "flatRate": {
+                        "value": "0",
+                        "currency": currency,
+                    }
+                }
+            }
+        ],
+    }
 
 def main():
     print(f"Fetching shipping settings for merchant {MERCHANT_ID}...")
-    settings = get_shipping_settings()
+    settings = service.shippingsettings().get(
+        merchantId=MERCHANT_ID, accountId=MERCHANT_ID
+    ).execute()
 
-    services = settings.get("services", [])
-    print(f"Found {len(services)} shipping service(s):")
-    for svc in services:
-        countries = svc.get("deliveryCountries", [])
-        print(f"  '{svc.get('name')}' — {len(countries)} countries: {sorted(countries)}")
+    existing_services = settings.get("services", [])
+    existing_countries = {svc.get("deliveryCountry") for svc in existing_services}
+    print(f"Existing services: {len(existing_services)} covering {len(existing_countries)} countries")
 
-    covered = get_covered_countries(settings)
-    print(f"\nCurrently covered: {len(covered)} countries")
+    # Determine which are still missing
+    to_add = {k: v for k, v in MISSING_COUNTRIES.items() if k not in existing_countries}
+    already_present = {k: v for k, v in MISSING_COUNTRIES.items() if k in existing_countries}
 
-    missing = [c for c in TARGET_COUNTRIES if c not in covered]
-    print(f"Missing from 56-country target list: {len(missing)} — {sorted(missing)}")
+    if already_present:
+        print(f"Already present (skip): {list(already_present.keys())}")
 
-    if not missing:
-        print("\nAll 56 target countries already have shipping coverage. Nothing to do.")
+    if not to_add:
+        print("Nothing to add — all target countries already have shipping entries.")
         return
 
-    # Find the free shipping service to patch
-    idx, free_svc = find_free_shipping_service(settings)
-    if free_svc is None:
-        print("\nNo free shipping service found. Looking for any active service to extend...")
-        # Fall back: use first active service
-        for i, svc in enumerate(services):
-            if svc.get("active", False):
-                idx, free_svc = i, svc
-                break
+    print(f"\nAdding {len(to_add)} new free-shipping services: {list(to_add.keys())}")
 
-    if free_svc is None:
-        sys.exit("ERROR: No active shipping service found to patch. Please check GMC manually.")
+    # Append new service entries
+    new_services = [build_free_service(code, currency) for code, currency in to_add.items()]
+    settings["services"] = existing_services + new_services
 
-    print(f"\nPatching service: '{free_svc.get('name')}' (index {idx})")
-
-    # Add missing countries to this service
-    existing_countries = free_svc.get("deliveryCountries", [])
-    updated_countries = sorted(set(existing_countries) | set(missing))
-    settings["services"][idx]["deliveryCountries"] = updated_countries
-
-    print(f"Updated deliveryCountries ({len(updated_countries)}): {updated_countries}")
-
-    # Push the update
-    print("\nPushing updated shipping settings to GMC...")
-    result = service.shippingsettings().update(
+    print("Pushing updated shipping settings to GMC...")
+    service.shippingsettings().update(
         merchantId=MERCHANT_ID,
         accountId=MERCHANT_ID,
         body=settings,
     ).execute()
+    print("Push complete.")
 
     # Verify
-    updated_settings = get_shipping_settings()
-    updated_covered = get_covered_countries(updated_settings)
-    still_missing = [c for c in TARGET_COUNTRIES if c not in updated_covered]
+    updated = service.shippingsettings().get(
+        merchantId=MERCHANT_ID, accountId=MERCHANT_ID
+    ).execute()
+    updated_countries = {svc.get("deliveryCountry") for svc in updated.get("services", [])}
+
+    still_missing = [c for c in MISSING_COUNTRIES if c not in updated_countries]
+    confirmed = [c for c in MISSING_COUNTRIES if c in updated_countries]
 
     print(f"\n=== RESULT ===")
-    print(f"Countries now covered: {len(updated_covered)}")
-    print(f"Still missing: {len(still_missing)} — {still_missing}")
+    print(f"Confirmed added: {confirmed}")
+    print(f"Still missing:   {still_missing}")
+
     if not still_missing:
-        print("SUCCESS: All 56 target countries now have shipping coverage.")
+        print("\nSUCCESS: All 5 countries now have free-shipping coverage in GMC.")
     else:
-        print(f"WARNING: {len(still_missing)} countries still missing coverage: {still_missing}")
+        sys.exit(f"ERROR: {len(still_missing)} countries still missing: {still_missing}")
 
 if __name__ == "__main__":
     main()
