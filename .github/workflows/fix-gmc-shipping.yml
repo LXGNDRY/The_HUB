@@ -1,0 +1,19 @@
+name: Fix GMC Shipping — Add Missing Countries
+
+on:
+  workflow_dispatch:
+
+jobs:
+  fix-shipping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth google-api-python-client -q
+      - name: Fix GMC shipping coverage for all 56 ad target countries
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: python scripts/fix_gmc_shipping.py
