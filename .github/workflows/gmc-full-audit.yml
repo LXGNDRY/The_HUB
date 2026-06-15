@@ -1,0 +1,25 @@
+name: GMC Full Audit
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth google-api-python-client -q
+      - name: Run full GMC audit
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: python scripts/gmc_full_audit.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gmc-full-audit
+          path: outputs/gmc_full_audit.json
+          if-no-files-found: ignore
