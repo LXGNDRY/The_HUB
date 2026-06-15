@@ -1,0 +1,47 @@
+name: Dump GMC Shipping Structure
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth google-api-python-client -q
+      - name: Dump shipping structure
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          python - << 'PYEOF'
+          import json, os, sys
+          from google.oauth2 import service_account
+          from googleapiclient.discovery import build
+
+          sa_info = json.loads(os.environ["GCP_SA_KEY"])
+          creds = service_account.Credentials.from_service_account_info(
+              sa_info, scopes=["https://www.googleapis.com/auth/content"])
+          service = build("content", "v2.1", credentials=creds)
+          MERCHANT_ID = 582171114
+          resp = service.shippingsettings().get(
+              merchantId=MERCHANT_ID, accountId=MERCHANT_ID).execute()
+          import os as _os
+          _os.makedirs("outputs", exist_ok=True)
+          with open("outputs/gmc_shipping.json", "w") as f:
+              json.dump(resp, f, indent=2)
+          print(f"Services: {len(resp.get('services', []))}")
+          for svc in resp.get("services", []):
+              print(f"  '{svc.get('name')}' | countries: {svc.get('deliveryCountries', [])} | active: {svc.get('active')}")
+              for rg in svc.get("rateGroups", []):
+                  sv = rg.get("singleValue", {})
+                  print(f"    rate: {sv.get('flatRate', 'N/A')}")
+          PYEOF
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gmc-shipping-structure
+          path: outputs/gmc_shipping.json
