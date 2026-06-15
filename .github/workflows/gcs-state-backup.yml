@@ -1,0 +1,21 @@
+name: GCS State Backup
+on:
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth google-cloud-storage -q
+      - run: python scripts/gcs_state_backup.py
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gcs-state-backup
+          path: outputs/gcs_backup/
+          if-no-files-found: warn
