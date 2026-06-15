@@ -1,0 +1,17 @@
+name: GMC Delete Content API Products
+on:
+  workflow_dispatch:
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth google-api-python-client -q
+      - run: python scripts/gmc_delete_content_api_products.py
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
