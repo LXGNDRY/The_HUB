@@ -5,7 +5,7 @@ Apply keyword-optimised title overrides + full apparel attribute enrichment
 to all GMC product variants via Content API custombatch insert.
 
 IMPROVEMENTS v2:
-  1. TARGET_MARKETS expanded to all 56 ad-targeted countries (was 43)
+  1. TARGET_MARKETS expanded to all 63 ad-targeted countries (was 58) — added IN, VN, BR, NG, KE
   2. itemGroupId added per product — groups variants under one Shopping listing
   3. Color normalization expanded — covers all catalog colors
   4. sizeType "oversize" used for oversized/boxy/baggy fits
@@ -493,6 +493,14 @@ TARGET_MARKETS = [
     {"country": "LB", "lang": "en", "currency": "USD", "size_system": "US"},  # FIX 1
     # ── Africa ───────────────────────────────────────────────────────────────
     {"country": "ZA", "lang": "en", "currency": "USD", "size_system": "UK"},  # FIX 1 — ZA uses UK sizing
+    {"country": "NG", "lang": "en", "currency": "USD", "size_system": "UK"},  # Nigeria
+    {"country": "KE", "lang": "en", "currency": "USD", "size_system": "UK"},  # Kenya
+    # ── South Asia ───────────────────────────────────────────────────────────
+    {"country": "IN", "lang": "en", "currency": "USD", "size_system": "US"},  # India
+    # ── Southeast Asia ───────────────────────────────────────────────────────
+    {"country": "VN", "lang": "en", "currency": "USD", "size_system": "US"},  # Vietnam
+    # ── South America ────────────────────────────────────────────────────────
+    {"country": "BR", "lang": "pt", "currency": "USD", "size_system": "US"},  # Brazil
 ]
 
 def build_shipping(country: str) -> list:
