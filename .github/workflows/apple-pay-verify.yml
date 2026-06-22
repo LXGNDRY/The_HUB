@@ -111,20 +111,35 @@ jobs:
 
       - name: Create Shopify backend service
         run: |
-          if ! gcloud compute backend-services describe shopify-backend \
+          # Check if backend already has NEG attached
+          BACKENDS=$(gcloud compute backend-services describe shopify-backend \
+            --global --project=$PROJECT_ID --format="value(backends)" 2>/dev/null || echo "")
+          
+          if [ -z "$BACKENDS" ] && gcloud compute backend-services describe shopify-backend \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            # Service exists but no backend attached — add it
+            gcloud compute backend-services add-backend shopify-backend \
+              --global \
+              --network-endpoint-group=shopify-neg \
+              --global-network-endpoint-group \
+              --balancing-mode=RATE \
+              --max-rate-per-endpoint=100 \
+              --project=$PROJECT_ID
+            echo "Backend NEG attached to existing service"
+          elif ! gcloud compute backend-services describe shopify-backend \
                --global --project=$PROJECT_ID 2>/dev/null; then
             gcloud compute backend-services create shopify-backend \
               --global --protocol=HTTPS --project=$PROJECT_ID
             gcloud compute backend-services add-backend shopify-backend \
               --global \
               --network-endpoint-group=shopify-neg \
-              --network-endpoint-group-region=global \
+              --global-network-endpoint-group \
               --balancing-mode=RATE \
               --max-rate-per-endpoint=100 \
               --project=$PROJECT_ID
             echo "Shopify backend created"
           else
-            echo "Shopify backend already exists"
+            echo "Shopify backend already exists with NEG"
           fi
 
       - name: Create URL map
