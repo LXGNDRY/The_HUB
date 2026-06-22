@@ -1,7 +1,10 @@
 name: Apple Pay Domain Verification Setup
-# v2
+# v3
 
 on:
+  push:
+    paths:
+      - .github/workflows/apple-pay-verify.yml
   workflow_dispatch:
 
 jobs:
