@@ -1,0 +1,260 @@
+name: Apple Pay Domain Verification Setup
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup-apple-pay-verification:
+    runs-on: ubuntu-latest
+    env:
+      PROJECT_ID: idx-lngndny
+      BUCKET_NAME: lb-applepay-domain
+      REGION: us-central1
+
+    steps:
+      - name: Authenticate to GCP
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Set up Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: idx-lngndny
+
+      - name: Write Apple Pay verification file
+        run: |
+          mkdir -p .well-known
+          printf '{"version":1,"pspId":"1EDBF0FDBF5FA2065E29979C27D7CC7C95341B4E065BD8D8831658022009A572","createdOn":1749646752541}' \
+            > .well-known/apple-developer-merchantid-domain-association
+          echo "File written:"
+          cat .well-known/apple-developer-merchantid-domain-association
+          echo ""
+          echo "Size: $(wc -c < .well-known/apple-developer-merchantid-domain-association) bytes"
+
+      - name: Enable required GCP APIs
+        run: |
+          gcloud services enable compute.googleapis.com storage.googleapis.com --project=$PROJECT_ID
+          echo "APIs enabled"
+
+      - name: Create GCS bucket (idempotent)
+        run: |
+          if ! gsutil ls gs://$BUCKET_NAME 2>/dev/null; then
+            gsutil mb -p $PROJECT_ID -l $REGION gs://$BUCKET_NAME
+            echo "Bucket created"
+          else
+            echo "Bucket already exists"
+          fi
+
+      - name: Upload file with correct headers
+        run: |
+          gsutil -h "Content-Type:text/plain" \
+                 -h "Cache-Control:no-cache, no-store, must-revalidate" \
+                 cp .well-known/apple-developer-merchantid-domain-association \
+                 gs://$BUCKET_NAME/.well-known/apple-developer-merchantid-domain-association
+          echo "Uploaded to GCS"
+
+      - name: Make file publicly readable
+        run: |
+          gsutil iam ch allUsers:objectViewer gs://$BUCKET_NAME
+          echo "Bucket is now public"
+
+      - name: Verify GCS public URL
+        run: |
+          URL="https://storage.googleapis.com/$BUCKET_NAME/.well-known/apple-developer-merchantid-domain-association"
+          echo "GCS URL: $URL"
+          sleep 5
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$URL")
+          echo "HTTP Status: $HTTP_STATUS"
+          echo "Content:"
+          curl -s "$URL"
+          echo ""
+
+      - name: Reserve static global IP
+        run: |
+          if ! gcloud compute addresses describe lb-apple-pay-ip --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute addresses create lb-apple-pay-ip \
+              --global --ip-version=IPV4 --project=$PROJECT_ID
+            echo "Static IP reserved"
+          else
+            echo "Static IP already exists"
+          fi
+          LB_IP=$(gcloud compute addresses describe lb-apple-pay-ip --global --project=$PROJECT_ID --format="value(address)")
+          echo "LB IP: $LB_IP"
+          echo "LB_IP=$LB_IP" >> $GITHUB_ENV
+
+      - name: Create GCS backend bucket
+        run: |
+          if ! gcloud compute backend-buckets describe lb-applepay-backend --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute backend-buckets create lb-applepay-backend \
+              --gcs-bucket-name=$BUCKET_NAME --project=$PROJECT_ID
+            echo "Backend bucket created"
+          else
+            echo "Backend bucket already exists"
+          fi
+
+      - name: Create Shopify internet NEG
+        run: |
+          if ! gcloud compute network-endpoint-groups describe shopify-neg \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute network-endpoint-groups create shopify-neg \
+              --network-endpoint-type=internet-fqdn-port \
+              --global --project=$PROJECT_ID
+            gcloud compute network-endpoint-groups update shopify-neg \
+              --global \
+              --add-endpoint="fqdn=lngndny.myshopify.com,port=443" \
+              --project=$PROJECT_ID
+            echo "Shopify NEG created"
+          else
+            echo "Shopify NEG already exists"
+          fi
+
+      - name: Create Shopify backend service
+        run: |
+          if ! gcloud compute backend-services describe shopify-backend \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute backend-services create shopify-backend \
+              --global --protocol=HTTPS --project=$PROJECT_ID
+            gcloud compute backend-services add-backend shopify-backend \
+              --global \
+              --network-endpoint-group=shopify-neg \
+              --network-endpoint-group-region=global \
+              --balancing-mode=RATE \
+              --max-rate-per-endpoint=100 \
+              --project=$PROJECT_ID
+            echo "Shopify backend created"
+          else
+            echo "Shopify backend already exists"
+          fi
+
+      - name: Create URL map
+        run: |
+          cat > /tmp/url-map.yaml << EOF
+          defaultService: https://www.googleapis.com/compute/v1/projects/$PROJECT_ID/global/backendServices/shopify-backend
+          hostRules:
+          - hosts:
+            - legendary-branding.com
+            - www.legendary-branding.com
+            pathMatcher: main-matcher
+          pathMatchers:
+          - defaultService: https://www.googleapis.com/compute/v1/projects/$PROJECT_ID/global/backendServices/shopify-backend
+            name: main-matcher
+            pathRules:
+            - paths:
+              - /.well-known/apple-developer-merchantid-domain-association
+              service: https://www.googleapis.com/compute/v1/projects/$PROJECT_ID/global/backendBuckets/lb-applepay-backend
+          EOF
+
+          if ! gcloud compute url-maps describe lb-applepay-urlmap \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute url-maps import lb-applepay-urlmap \
+              --global --source=/tmp/url-map.yaml --project=$PROJECT_ID --quiet
+            echo "URL map created"
+          else
+            gcloud compute url-maps import lb-applepay-urlmap \
+              --global --source=/tmp/url-map.yaml --project=$PROJECT_ID --quiet
+            echo "URL map updated"
+          fi
+
+      - name: Create HTTPS target proxy
+        run: |
+          # Get the managed SSL cert for the domain (or create one)
+          if ! gcloud compute ssl-certificates describe lb-applepay-cert \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute ssl-certificates create lb-applepay-cert \
+              --domains=legendary-branding.com,www.legendary-branding.com \
+              --global --project=$PROJECT_ID
+            echo "SSL certificate created (Google-managed, will provision once DNS is updated)"
+          else
+            echo "SSL cert already exists"
+          fi
+
+          if ! gcloud compute target-https-proxies describe lb-applepay-https-proxy \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute target-https-proxies create lb-applepay-https-proxy \
+              --url-map=lb-applepay-urlmap \
+              --ssl-certificates=lb-applepay-cert \
+              --global --project=$PROJECT_ID
+            echo "HTTPS proxy created"
+          else
+            echo "HTTPS proxy already exists"
+          fi
+
+      - name: Create HTTP target proxy (for redirect)
+        run: |
+          # HTTP to HTTPS redirect URL map
+          if ! gcloud compute url-maps describe lb-applepay-http-redirect \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute url-maps import lb-applepay-http-redirect \
+              --global --project=$PROJECT_ID --quiet << 'EOF'
+              defaultUrlRedirect:
+                redirectResponseCode: MOVED_PERMANENTLY_DEFAULT
+                httpsRedirect: true
+          EOF
+            echo "HTTP redirect map created"
+          fi
+
+          if ! gcloud compute target-http-proxies describe lb-applepay-http-proxy \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute target-http-proxies create lb-applepay-http-proxy \
+              --url-map=lb-applepay-http-redirect \
+              --global --project=$PROJECT_ID
+            echo "HTTP proxy created"
+          fi
+
+      - name: Create forwarding rules
+        run: |
+          # HTTPS forwarding rule
+          if ! gcloud compute forwarding-rules describe lb-applepay-https-fwd \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute forwarding-rules create lb-applepay-https-fwd \
+              --global \
+              --ip-address=lb-apple-pay-ip \
+              --ip-protocol=TCP \
+              --port-range=443 \
+              --target-https-proxy=lb-applepay-https-proxy \
+              --project=$PROJECT_ID
+            echo "HTTPS forwarding rule created"
+          fi
+
+          # HTTP forwarding rule
+          if ! gcloud compute forwarding-rules describe lb-applepay-http-fwd \
+               --global --project=$PROJECT_ID 2>/dev/null; then
+            gcloud compute forwarding-rules create lb-applepay-http-fwd \
+              --global \
+              --ip-address=lb-apple-pay-ip \
+              --ip-protocol=TCP \
+              --port-range=80 \
+              --target-http-proxy=lb-applepay-http-proxy \
+              --project=$PROJECT_ID
+            echo "HTTP forwarding rule created"
+          fi
+
+      - name: Print DNS update instructions
+        run: |
+          echo ""
+          echo "================================================================"
+          echo "  LOAD BALANCER DEPLOYED SUCCESSFULLY"
+          echo "================================================================"
+          echo ""
+          echo "  Static IP: $LB_IP"
+          echo ""
+          echo "  REQUIRED: Update DNS records in Google Cloud DNS"
+          echo ""
+          echo "  Zone: legendary-branding-com (or similar)"
+          echo ""
+          echo "  UPDATE these A records:"
+          echo "    legendary-branding.com     A  →  $LB_IP"
+          echo "    www.legendary-branding.com A  →  $LB_IP"
+          echo ""
+          echo "  The Load Balancer routes:"
+          echo "    /.well-known/apple-developer-merchantid-domain-association"
+          echo "       → GCS bucket (200 OK, text/plain)"
+          echo "    Everything else → lngndny.myshopify.com (Shopify)"
+          echo ""
+          echo "  NOTE: Google-managed SSL cert will auto-provision once DNS"
+          echo "  is pointed at the LB IP (takes ~15-30 minutes)."
+          echo ""
+          echo "  After DNS propagates, verify at:"
+          echo "  https://legendary-branding.com/.well-known/apple-developer-merchantid-domain-association"
+          echo "================================================================"
