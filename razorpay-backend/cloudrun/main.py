@@ -161,6 +161,25 @@ def health():
 
 
 # ---------------------------------------------------------------------------
+# Route: GET /.well-known/apple-developer-merchantid-domain-association
+# Serves Apple Pay domain verification file for Razorpay
+# ---------------------------------------------------------------------------
+@app.route("/.well-known/apple-developer-merchantid-domain-association", methods=["GET"])
+def apple_pay_domain_association():
+    content = '{"version":1,"pspId":"1EDBF0FDBF5FA2065E29979C27D7CC7C95341B4E065BD8D8831658022009A572","createdOn":1749646752541}'
+    from flask import Response
+    return Response(
+        content,
+        status=200,
+        mimetype="text/plain",
+        headers={
+            "Cache-Control": "no-cache, no-store, must-revalidate",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+
+
+# ---------------------------------------------------------------------------
 # Route: POST /create-order
 # ---------------------------------------------------------------------------
 @app.route("/create-order", methods=["POST"])
