@@ -253,7 +253,7 @@ jobs:
                --global --project=$PROJECT_ID 2>/dev/null; then
             gcloud compute forwarding-rules create lb-applepay-https-fwd \
               --global \
-              --ip-address=lb-apple-pay-ip \
+              --address=lb-apple-pay-ip \
               --ip-protocol=TCP \
               --port-range=443 \
               --target-https-proxy=lb-applepay-https-proxy \
@@ -266,7 +266,7 @@ jobs:
                --global --project=$PROJECT_ID 2>/dev/null; then
             gcloud compute forwarding-rules create lb-applepay-http-fwd \
               --global \
-              --ip-address=lb-apple-pay-ip \
+              --address=lb-apple-pay-ip \
               --ip-protocol=TCP \
               --port-range=80 \
               --target-http-proxy=lb-applepay-http-proxy \
