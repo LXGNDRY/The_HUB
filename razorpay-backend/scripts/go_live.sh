@@ -81,8 +81,39 @@ echo "  ✓ Cloud Run deployed"
 echo "  ✓ URL: $CLOUD_RUN_URL"
 echo ""
 
-# ── Step 3: Print manual steps ───────────────────────────────────
-echo "STEP 3 of 3 — Two manual steps remaining"
+# ── Step 3: Create Shopify URL redirect for Apple Pay domain verification ──
+echo "STEP 3 of 4 — Creating Shopify URL redirect for Apple Pay domain verification"
+echo ""
+
+SHOPIFY_STORE="lngndny.myshopify.com"
+SHOPIFY_TOKEN=$(gcloud secrets versions access latest --secret=SHOPIFY_ADMIN_TOKEN --project=$PROJECT_ID 2>/dev/null || echo "")
+
+if [ -n "$SHOPIFY_TOKEN" ]; then
+  REDIRECT_RESPONSE=$(curl -s -X POST \
+    "https://$SHOPIFY_STORE/admin/api/2025-01/graphql.json" \
+    -H "X-Shopify-Access-Token: $SHOPIFY_TOKEN" \
+    -H "Content-Type: application/json" \
+    -d "$(cat <<JSON
+{"query":"mutation { urlRedirectCreate(urlRedirect: { path: \"/.well-known/apple-developer-merchantid-domain-association\", target: \"${CLOUD_RUN_URL}/.well-known/apple-developer-merchantid-domain-association\" }) { urlRedirect { id path target } userErrors { field message } } }"}
+JSON
+)")
+
+  if echo "$REDIRECT_RESPONSE" | python3 -c "import sys,json; r=json.load(sys.stdin); errs=r.get('data',{}).get('urlRedirectCreate',{}).get('userErrors',[]); print('  ✓ Apple Pay redirect created' if not errs else f'  ⚠ Redirect issue: {errs}')" 2>/dev/null; then
+    true
+  else
+    echo "  ⚠ Could not create redirect automatically — create manually in Shopify:"
+    echo "    Path:   /.well-known/apple-developer-merchantid-domain-association"
+    echo "    Target: ${CLOUD_RUN_URL}/.well-known/apple-developer-merchantid-domain-association"
+  fi
+else
+  echo "  ⚠ SHOPIFY_ADMIN_TOKEN not yet in Secret Manager — create redirect manually after deploy:"
+  echo "    Path:   /.well-known/apple-developer-merchantid-domain-association"
+  echo "    Target: ${CLOUD_RUN_URL}/.well-known/apple-developer-merchantid-domain-association"
+fi
+echo ""
+
+# ── Step 4: Print manual steps ───────────────────────────────────
+echo "STEP 4 of 4 — Two manual steps remaining"
 echo ""
 echo "  ─────────────────────────────────────────────────────────"
 echo "  A) Swap placeholders in LegendaryBrandingTHEME dev branch:"
@@ -106,7 +137,15 @@ echo "       Enable Auto Capture"
 echo ""
 echo "  ─────────────────────────────────────────────────────────"
 echo ""
-echo "  After A and B — merge dev → main, preview → live."
+echo "  C) Verify Apple Pay domains in Razorpay Dashboard:"
+echo "     → Settings → Payment Methods → Apple Pay"
+echo "     Click 'Verify Domains' for:"
+echo "       legendary-branding.com"
+echo "       www.legendary-branding.com"
+echo ""
+echo "  ─────────────────────────────────────────────────────"
+echo ""
+echo "  After A, B, and C — merge dev → main, preview → live."
 echo "  You're live. 🔥"
 echo ""
 echo "============================================================"
