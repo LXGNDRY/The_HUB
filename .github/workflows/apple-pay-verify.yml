@@ -122,8 +122,6 @@ jobs:
               --global \
               --network-endpoint-group=shopify-neg \
               --global-network-endpoint-group \
-              --balancing-mode=RATE \
-              --max-rate-per-endpoint=100 \
               --project=$PROJECT_ID
             echo "Backend NEG attached to existing service"
           elif ! gcloud compute backend-services describe shopify-backend \
@@ -134,8 +132,6 @@ jobs:
               --global \
               --network-endpoint-group=shopify-neg \
               --global-network-endpoint-group \
-              --balancing-mode=RATE \
-              --max-rate-per-endpoint=100 \
               --project=$PROJECT_ID
             echo "Shopify backend created"
           else
