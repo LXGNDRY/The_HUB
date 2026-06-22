@@ -1,4 +1,5 @@
 name: Apple Pay Domain Verification Setup
+# v2
 
 on:
   workflow_dispatch:
