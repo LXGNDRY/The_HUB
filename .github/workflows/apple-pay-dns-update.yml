@@ -21,6 +21,25 @@ jobs:
         with:
           project_id: idx-lngndny
 
+      - name: Enable Cloud DNS API and grant permissions
+        run: |
+          # Enable the DNS API
+          gcloud services enable dns.googleapis.com --project=$PROJECT_ID
+          echo "DNS API enable requested, waiting 15s for propagation..."
+          sleep 15
+
+          # Get the current service account
+          SA_EMAIL=$(gcloud config get-value account)
+          echo "Service Account: $SA_EMAIL"
+
+          # Grant DNS Admin role
+          gcloud projects add-iam-policy-binding $PROJECT_ID \
+            --member="serviceAccount:${SA_EMAIL}" \
+            --role="roles/dns.admin" \
+            --condition=None 2>&1 | tail -3 || echo "IAM binding may already exist — continuing"
+
+          echo "Setup complete"
+
       - name: Find DNS zone and current A records
         run: |
           echo "=== All DNS zones ==="
