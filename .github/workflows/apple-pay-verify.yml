@@ -213,16 +213,27 @@ jobs:
 
       - name: Create HTTP target proxy (for redirect)
         run: |
-          # HTTP to HTTPS redirect URL map
+          # HTTP to HTTPS redirect URL map — use gcloud create with REST patch
           if ! gcloud compute url-maps describe lb-applepay-http-redirect \
                --global --project=$PROJECT_ID 2>/dev/null; then
-            gcloud compute url-maps import lb-applepay-http-redirect \
-              --global --project=$PROJECT_ID --quiet << 'EOF'
-              defaultUrlRedirect:
-                redirectResponseCode: MOVED_PERMANENTLY_DEFAULT
-                httpsRedirect: true
-          EOF
+            # Create with temp backend, then patch to be a redirect
+            gcloud compute url-maps create lb-applepay-http-redirect \
+              --default-backend-bucket=lb-applepay-backend \
+              --global --project=$PROJECT_ID
+
+            # Patch to HTTPS redirect via REST
+            ACCESS_TOKEN=$(gcloud auth print-access-token)
+            FINGERPRINT=$(gcloud compute url-maps describe lb-applepay-http-redirect \
+              --global --project=$PROJECT_ID --format="value(fingerprint)")
+            curl -s -X PATCH \
+              "https://compute.googleapis.com/compute/v1/projects/${PROJECT_ID}/global/urlMaps/lb-applepay-http-redirect" \
+              -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+              -H "Content-Type: application/json" \
+              -d "{\"fingerprint\": \"${FINGERPRINT}\", \"defaultUrlRedirect\": {\"redirectResponseCode\": \"MOVED_PERMANENTLY_DEFAULT\", \"httpsRedirect\": true}}" \
+              | python3 -c "import sys,json; r=json.load(sys.stdin); print('Redirect map status:', r.get('status','ok'))"
             echo "HTTP redirect map created"
+          else
+            echo "HTTP redirect map already exists"
           fi
 
           if ! gcloud compute target-http-proxies describe lb-applepay-http-proxy \
@@ -231,6 +242,8 @@ jobs:
               --url-map=lb-applepay-http-redirect \
               --global --project=$PROJECT_ID
             echo "HTTP proxy created"
+          else
+            echo "HTTP proxy already exists"
           fi
 
       - name: Create forwarding rules
