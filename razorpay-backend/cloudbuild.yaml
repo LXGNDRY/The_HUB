@@ -1,0 +1,59 @@
+# Cloud Build — Legendary Branding Razorpay Backend
+# Trigger: push to main branch of The_HUB repo (razorpay-backend/ directory)
+#
+# Usage (manual deploy):
+#   gcloud builds submit --config cloudbuild.yaml .
+#
+# Substitutions (set in Cloud Build trigger or pass via --substitutions):
+#   _SERVICE_NAME  : lb-razorpay-backend
+#   _REGION        : us-central1
+#   _PROJECT       : idx-lngndny
+
+substitutions:
+  _SERVICE_NAME: lb-razorpay-backend
+  _REGION: us-central1
+  _PROJECT: idx-lngndny
+
+steps:
+  # Step 1: Build the Docker image
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA'
+      - '-t'
+      - 'gcr.io/$PROJECT_ID/${_SERVICE_NAME}:latest'
+      - './cloudrun'
+
+  # Step 2: Push to Container Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - '--all-tags'
+      - 'gcr.io/$PROJECT_ID/${_SERVICE_NAME}'
+
+  # Step 3: Deploy to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - '${_SERVICE_NAME}'
+      - '--image=gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA'
+      - '--region=${_REGION}'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--min-instances=0'
+      - '--max-instances=10'
+      - '--memory=512Mi'
+      - '--cpu=1'
+      - '--timeout=30'
+      - '--set-secrets=RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,SHOPIFY_ADMIN_TOKEN=SHOPIFY_ADMIN_TOKEN:latest,WEBHOOK_SECRET=WEBHOOK_SECRET:latest'
+      - '--set-env-vars=SHOPIFY_STORE_DOMAIN=lngndny.myshopify.com'
+
+images:
+  - 'gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA'
+  - 'gcr.io/$PROJECT_ID/${_SERVICE_NAME}:latest'
+
+options:
+  logging: CLOUD_LOGGING_ONLY
