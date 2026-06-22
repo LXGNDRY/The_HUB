@@ -144,30 +144,23 @@ jobs:
 
       - name: Create URL map
         run: |
-          python3 - << 'PYEOF'
-          import subprocess, os
-          project = os.environ['PROJECT_ID']
-          yaml_content = f"""name: lb-applepay-urlmap
-defaultService: https://www.googleapis.com/compute/v1/projects/{project}/global/backendServices/shopify-backend
-hostRules:
-- hosts:
-  - legendary-branding.com
-  - www.legendary-branding.com
-  pathMatcher: main-matcher
-pathMatchers:
-- name: main-matcher
-  defaultService: https://www.googleapis.com/compute/v1/projects/{project}/global/backendServices/shopify-backend
-  pathRules:
-  - paths:
-    - /.well-known/apple-developer-merchantid-domain-association
-    service: https://www.googleapis.com/compute/v1/projects/{project}/global/backendBuckets/lb-applepay-backend
-"""
-          with open('/tmp/url-map.yaml', 'w') as f:
-              f.write(yaml_content)
-          print("URL map YAML written:")
-          print(yaml_content)
-          PYEOF
+          # Write URL map YAML using printf to avoid heredoc YAML conflicts
+          printf 'name: lb-applepay-urlmap\n' > /tmp/url-map.yaml
+          printf 'defaultService: https://www.googleapis.com/compute/v1/projects/%s/global/backendServices/shopify-backend\n' "$PROJECT_ID" >> /tmp/url-map.yaml
+          printf 'hostRules:\n' >> /tmp/url-map.yaml
+          printf '- hosts:\n' >> /tmp/url-map.yaml
+          printf '  - legendary-branding.com\n' >> /tmp/url-map.yaml
+          printf '  - www.legendary-branding.com\n' >> /tmp/url-map.yaml
+          printf '  pathMatcher: main-matcher\n' >> /tmp/url-map.yaml
+          printf 'pathMatchers:\n' >> /tmp/url-map.yaml
+          printf '- name: main-matcher\n' >> /tmp/url-map.yaml
+          printf '  defaultService: https://www.googleapis.com/compute/v1/projects/%s/global/backendServices/shopify-backend\n' "$PROJECT_ID" >> /tmp/url-map.yaml
+          printf '  pathRules:\n' >> /tmp/url-map.yaml
+          printf '  - paths:\n' >> /tmp/url-map.yaml
+          printf '    - /.well-known/apple-developer-merchantid-domain-association\n' >> /tmp/url-map.yaml
+          printf '    service: https://www.googleapis.com/compute/v1/projects/%s/global/backendBuckets/lb-applepay-backend\n' "$PROJECT_ID" >> /tmp/url-map.yaml
 
+          echo "URL map YAML:"
           cat /tmp/url-map.yaml
 
           if ! gcloud compute url-maps describe lb-applepay-urlmap \
