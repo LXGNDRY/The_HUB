@@ -144,35 +144,48 @@ jobs:
 
       - name: Create URL map
         run: |
-          # Write URL map YAML using printf to avoid heredoc YAML conflicts
-          printf 'name: lb-applepay-urlmap\n' > /tmp/url-map.yaml
-          printf 'defaultService: https://www.googleapis.com/compute/v1/projects/%s/global/backendServices/shopify-backend\n' "$PROJECT_ID" >> /tmp/url-map.yaml
-          printf 'hostRules:\n' >> /tmp/url-map.yaml
-          printf '- hosts:\n' >> /tmp/url-map.yaml
-          printf '  - legendary-branding.com\n' >> /tmp/url-map.yaml
-          printf '  - www.legendary-branding.com\n' >> /tmp/url-map.yaml
-          printf '  pathMatcher: main-matcher\n' >> /tmp/url-map.yaml
-          printf 'pathMatchers:\n' >> /tmp/url-map.yaml
-          printf '- name: main-matcher\n' >> /tmp/url-map.yaml
-          printf '  defaultService: https://www.googleapis.com/compute/v1/projects/%s/global/backendServices/shopify-backend\n' "$PROJECT_ID" >> /tmp/url-map.yaml
-          printf '  pathRules:\n' >> /tmp/url-map.yaml
-          printf '  - paths:\n' >> /tmp/url-map.yaml
-          printf '    - /.well-known/apple-developer-merchantid-domain-association\n' >> /tmp/url-map.yaml
-          printf '    service: https://www.googleapis.com/compute/v1/projects/%s/global/backendBuckets/lb-applepay-backend\n' "$PROJECT_ID" >> /tmp/url-map.yaml
-
-          echo "URL map YAML:"
-          cat /tmp/url-map.yaml
-
+          # Create URL map with Shopify as default, then add .well-known path rule
           if ! gcloud compute url-maps describe lb-applepay-urlmap \
                --global --project=$PROJECT_ID 2>/dev/null; then
-            gcloud compute url-maps import lb-applepay-urlmap \
-              --global --source=/tmp/url-map.yaml --project=$PROJECT_ID --quiet
-            echo "URL map created"
+            gcloud compute url-maps create lb-applepay-urlmap \
+              --default-backend-bucket=lb-applepay-backend \
+              --global --project=$PROJECT_ID
+            echo "URL map created (temp default=GCS while we configure)"
           else
-            gcloud compute url-maps import lb-applepay-urlmap \
-              --global --source=/tmp/url-map.yaml --project=$PROJECT_ID --quiet
-            echo "URL map updated"
+            echo "URL map already exists"
           fi
+
+          # Set Shopify as the real default using REST API
+          ACCESS_TOKEN=$(gcloud auth print-access-token)
+          PROJECT=$PROJECT_ID
+
+          # Get current fingerprint
+          FINGERPRINT=$(gcloud compute url-maps describe lb-applepay-urlmap \
+            --global --project=$PROJECT_ID --format="value(fingerprint)")
+
+          # Patch via REST to set proper default + path rules
+          curl -s -X PATCH \
+            "https://compute.googleapis.com/compute/v1/projects/${PROJECT}/global/urlMaps/lb-applepay-urlmap" \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"fingerprint\": \"${FINGERPRINT}\",
+              \"defaultService\": \"https://www.googleapis.com/compute/v1/projects/${PROJECT}/global/backendServices/shopify-backend\",
+              \"hostRules\": [{
+                \"hosts\": [\"legendary-branding.com\", \"www.legendary-branding.com\"],
+                \"pathMatcher\": \"main-matcher\"
+              }],
+              \"pathMatchers\": [{
+                \"name\": \"main-matcher\",
+                \"defaultService\": \"https://www.googleapis.com/compute/v1/projects/${PROJECT}/global/backendServices/shopify-backend\",
+                \"pathRules\": [{
+                  \"paths\": [\"/.well-known/apple-developer-merchantid-domain-association\"],
+                  \"service\": \"https://www.googleapis.com/compute/v1/projects/${PROJECT}/global/backendBuckets/lb-applepay-backend\"
+                }]
+              }]
+            }" | python3 -c "import sys,json; r=json.load(sys.stdin); print('Status:', r.get('status', r.get('httpErrorMessage', 'ok')))"
+
+          echo "URL map configured"
 
       - name: Create HTTPS target proxy
         run: |
