@@ -7,7 +7,8 @@ Covers: Products, Orders, Customers, Inventory, Content (Pages/Blogs/Articles),
         Analytics / Reports, Store Events,
         Carrier Services / Shipping Rates,
         Flow Automations (Shopify Flow),
-        Shipping Profiles / Delivery Profiles (GraphQL only).
+        Shipping Profiles / Delivery Profiles (GraphQL only),
+        Markets (GraphQL only).
 
 All REST calls use the Admin REST API v2026-04.
 All GraphQL calls use the Admin GraphQL API v2026-04.
@@ -1815,3 +1816,378 @@ def get_shipping_profile(profile_gid: str) -> dict:
     """
     result = _graphql(query, {"id": profile_gid})
     return result.get("data", {}).get("deliveryProfile", {})
+
+
+# ─────────────────────────────────────────────
+# Markets (GraphQL only)
+# ─────────────────────────────────────────────
+# Shopify Markets is GraphQL-only — there is no REST endpoint for markets.
+# Markets control which countries/regions you sell to, what currency/language
+# is presented, and which domain or subfolder serves each market.
+#
+# What a Market tells you:
+#   - Market name + whether it is the primary (default) market
+#   - enabled: whether the market is live and accepting orders
+#   - regions: countries/sub-regions included in this market
+#   - web presence: domain or subfolder + locale used for this market
+#   - currencySettings: presentment currency and auto-rate vs fixed-rate
+#   - metafields: any custom data attached to the market
+#
+# Audit checklist run automatically in audit_markets():
+#   ✓ Primary market exists and is enabled
+#   ✓ No market is disabled while having regions assigned to it
+#   ✓ Every enabled market has at least one region
+#   ✓ Every enabled market has a web presence configured (domain or subfolder)
+#   ✓ No region appears in more than one market (duplicate region)
+#   ✓ Currency settings are explicitly configured (not left to Shopify default)
+# ─────────────────────────────────────────────
+
+_MARKETS_QUERY = """
+query listMarkets($first: Int!, $after: String) {
+  markets(first: $first, after: $after) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      name
+      handle
+      enabled
+      primary
+      createdAt
+      updatedAt
+      regions(first: 50) {
+        nodes {
+          __typename
+          ... on MarketRegionCountry {
+            name
+            code
+          }
+        }
+      }
+      webPresence {
+        domain {
+          host
+          sslEnabled
+        }
+        subfolderSuffix
+        defaultLocale
+        alternateLocales
+        rootUrls {
+          locale
+          url
+        }
+      }
+      currencySettings {
+        baseCurrency {
+          currencyCode
+          currencyName
+        }
+        localCurrencies
+        autoRate
+        conversionRateToPresentmentCurrency
+      }
+    }
+  }
+}
+"""
+
+
+def list_markets(markets_per_page: int = 20) -> dict:
+    """
+    List all Shopify Markets using the GraphQL Admin API.
+
+    Returns a structured dict with:
+      - count: total number of markets
+      - markets: list of markets, each with:
+          - id, name, handle, enabled, primary (bool)
+          - regions: list of {name, code} country dicts
+          - web_presence: domain host or subfolder + locale info
+          - currency: base currency code and whether local currencies are enabled
+          - created_at, updated_at
+
+    Automatically paginates through all markets.
+    Requires 'read_markets' OAuth scope (available on all plans).
+    """
+    markets = []
+    cursor = None
+    has_next = True
+
+    while has_next:
+        variables: dict = {"first": markets_per_page}
+        if cursor:
+            variables["after"] = cursor
+
+        result = _graphql(_MARKETS_QUERY, variables)
+        connection = result["data"]["markets"]
+        page_info = connection["pageInfo"]
+
+        for node in connection["nodes"]:
+            # Flatten regions
+            regions = [
+                {"name": r["name"], "code": r["code"]}
+                for r in node["regions"]["nodes"]
+                if r.get("__typename") == "MarketRegionCountry"
+            ]
+
+            # Flatten web presence
+            wp = node.get("webPresence") or {}
+            domain_host = None
+            ssl_enabled = None
+            if wp.get("domain"):
+                domain_host = wp["domain"].get("host")
+                ssl_enabled = wp["domain"].get("sslEnabled")
+
+            # Flatten currency settings
+            cs = node.get("currencySettings") or {}
+            base_currency = None
+            if cs.get("baseCurrency"):
+                base_currency = cs["baseCurrency"].get("currencyCode")
+
+            markets.append({
+                "id": node["id"],
+                "name": node["name"],
+                "handle": node.get("handle"),
+                "enabled": node.get("enabled", False),
+                "primary": node.get("primary", False),
+                "regions": regions,
+                "regions_count": len(regions),
+                "web_presence": {
+                    "domain": domain_host,
+                    "ssl_enabled": ssl_enabled,
+                    "subfolder": wp.get("subfolderSuffix"),
+                    "default_locale": wp.get("defaultLocale"),
+                    "alternate_locales": wp.get("alternateLocales", []),
+                    "root_urls": wp.get("rootUrls", []),
+                },
+                "currency": {
+                    "base_currency": base_currency,
+                    "local_currencies_enabled": cs.get("localCurrencies", False),
+                    "auto_rate": cs.get("autoRate"),
+                    "conversion_rate": cs.get("conversionRateToPresentmentCurrency"),
+                },
+                "created_at": node.get("createdAt"),
+                "updated_at": node.get("updatedAt"),
+            })
+
+        has_next = page_info["hasNextPage"]
+        cursor = page_info.get("endCursor")
+
+    return {
+        "count": len(markets),
+        "markets": markets,
+    }
+
+
+def get_market(market_gid: str) -> dict:
+    """
+    Get full details for a single market by its GraphQL GID.
+    market_gid format: 'gid://shopify/Market/123456789'
+
+    Use list_markets() first to find the GID for the market you want.
+    Requires 'read_markets' OAuth scope.
+    """
+    query = """
+    query getMarket($id: ID!) {
+      market(id: $id) {
+        id
+        name
+        handle
+        enabled
+        primary
+        createdAt
+        updatedAt
+        regions(first: 50) {
+          nodes {
+            __typename
+            ... on MarketRegionCountry {
+              name
+              code
+            }
+          }
+        }
+        webPresence {
+          domain { host sslEnabled }
+          subfolderSuffix
+          defaultLocale
+          alternateLocales
+          rootUrls { locale url }
+        }
+        currencySettings {
+          baseCurrency { currencyCode currencyName }
+          localCurrencies
+          autoRate
+          conversionRateToPresentmentCurrency
+        }
+      }
+    }
+    """
+    result = _graphql(query, {"id": market_gid})
+    return result.get("data", {}).get("market", {})
+
+
+def audit_markets() -> dict:
+    """
+    Run a full health audit of all Shopify Markets.
+
+    Checks performed:
+      1. Primary market exists and is enabled
+      2. No enabled market has zero regions assigned
+      3. No disabled market has regions (orphaned regions)
+      4. Every enabled market has a web presence (domain or subfolder)
+      5. Every enabled non-primary market has SSL enabled on its domain
+      6. No region (country code) appears in more than one market
+      7. Currency settings are explicitly set on each market
+
+    Returns:
+      - passed (bool): True only if ALL critical checks pass
+      - markets_audited: count of markets checked
+      - critical_issues: count of critical findings
+      - warnings: count of warning-level findings
+      - issues: list of {severity, market, message} dicts
+      - summary: human-readable list of ✓/⚠/✗ findings
+      - duplicate_regions: list of country codes appearing in multiple markets
+    """
+    markets_data = list_markets()
+    markets = markets_data["markets"]
+
+    issues = []
+    summary = []
+
+    # ── Check 1: Primary market exists and is enabled ──
+    primary_markets = [m for m in markets if m["primary"]]
+    if not primary_markets:
+        issues.append({
+            "severity": "critical",
+            "market": "store",
+            "message": "No primary market found. Every Shopify store must have exactly one primary market.",
+        })
+    elif not primary_markets[0]["enabled"]:
+        issues.append({
+            "severity": "critical",
+            "market": primary_markets[0]["name"],
+            "message": f"Primary market '{primary_markets[0]['name']}' exists but is DISABLED. Customers may not be able to check out.",
+        })
+    else:
+        summary.append(f"✓ Primary market: '{primary_markets[0]['name']}' — enabled")
+
+    # ── Check 2: Enabled markets have at least one region ──
+    for m in markets:
+        if m["enabled"] and m["regions_count"] == 0:
+            issues.append({
+                "severity": "critical",
+                "market": m["name"],
+                "message": f"Market '{m['name']}' is enabled but has NO regions assigned. No customers will be routed to it.",
+            })
+        elif m["enabled"]:
+            region_names = ", ".join(r["name"] for r in m["regions"][:5])
+            extra = f" (+{m['regions_count'] - 5} more)" if m["regions_count"] > 5 else ""
+            summary.append(f"✓ '{m['name']}': {m['regions_count']} region(s) — {region_names}{extra}")
+
+    # ── Check 3: Disabled markets with regions (orphaned) ──
+    for m in markets:
+        if not m["enabled"] and m["regions_count"] > 0:
+            issues.append({
+                "severity": "warning",
+                "market": m["name"],
+                "message": (
+                    f"Market '{m['name']}' is DISABLED but still has {m['regions_count']} region(s) assigned. "
+                    "These regions are unreachable. Either enable the market or remove the regions."
+                ),
+            })
+
+    # ── Check 4: Enabled markets have a web presence ──
+    for m in markets:
+        if not m["enabled"]:
+            continue
+        wp = m["web_presence"]
+        has_domain = bool(wp.get("domain"))
+        has_subfolder = bool(wp.get("subfolder"))
+        if not has_domain and not has_subfolder:
+            issues.append({
+                "severity": "critical",
+                "market": m["name"],
+                "message": (
+                    f"Market '{m['name']}' is enabled but has NO web presence configured "
+                    "(no domain and no subfolder). Customers cannot reach this market's storefront."
+                ),
+            })
+        else:
+            presence = wp["domain"] if has_domain else f"/{wp['subfolder']}"
+            locale = wp.get("default_locale", "unknown locale")
+            summary.append(f"✓ '{m['name']}': web presence → {presence} ({locale})")
+
+    # ── Check 5: SSL on custom domains ──
+    for m in markets:
+        if not m["enabled"]:
+            continue
+        wp = m["web_presence"]
+        if wp.get("domain") and wp.get("ssl_enabled") is False:
+            issues.append({
+                "severity": "critical",
+                "market": m["name"],
+                "message": (
+                    f"Market '{m['name']}' uses domain '{wp['domain']}' but SSL is NOT enabled. "
+                    "Checkout will be blocked on this domain."
+                ),
+            })
+        elif wp.get("domain") and wp.get("ssl_enabled"):
+            summary.append(f"✓ '{m['name']}': SSL enabled on {wp['domain']}")
+
+    # ── Check 6: Duplicate regions across markets ──
+    region_market_map: dict = {}  # country_code → list of market names
+    for m in markets:
+        for region in m["regions"]:
+            code = region["code"]
+            if code not in region_market_map:
+                region_market_map[code] = []
+            region_market_map[code].append(m["name"])
+
+    duplicate_regions = []
+    for code, mkt_names in region_market_map.items():
+        if len(mkt_names) > 1:
+            duplicate_regions.append(code)
+            issues.append({
+                "severity": "warning",
+                "market": ", ".join(mkt_names),
+                "message": (
+                    f"Country '{code}' is assigned to multiple markets: {', '.join(mkt_names)}. "
+                    "Shopify uses the most specific match, but this may cause unexpected routing."
+                ),
+            })
+
+    if not duplicate_regions:
+        summary.append("✓ No duplicate country assignments across markets")
+
+    # ── Check 7: Currency settings explicitly configured ──
+    for m in markets:
+        if not m["enabled"]:
+            continue
+        if not m["currency"].get("base_currency"):
+            issues.append({
+                "severity": "warning",
+                "market": m["name"],
+                "message": (
+                    f"Market '{m['name']}' has no explicit base currency set. "
+                    "It will inherit the store's default currency, which may not be correct for this market."
+                ),
+            })
+        else:
+            currency = m["currency"]["base_currency"]
+            local = "local currencies ON" if m["currency"]["local_currencies_enabled"] else "local currencies OFF"
+            summary.append(f"✓ '{m['name']}': currency = {currency}, {local}")
+
+    # ── Result ──
+    critical_issues = [i for i in issues if i["severity"] == "critical"]
+    warning_issues = [i for i in issues if i["severity"] == "warning"]
+
+    return {
+        "passed": len(critical_issues) == 0,
+        "markets_audited": len(markets),
+        "critical_issues": len(critical_issues),
+        "warnings": len(warning_issues),
+        "issues": issues,
+        "summary": summary,
+        "duplicate_regions": duplicate_regions,
+    }
