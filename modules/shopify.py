@@ -4,7 +4,9 @@ Covers: Products, Orders, Customers, Inventory, Content (Pages/Blogs/Articles),
         Themes, Price Rules / Discounts, SEO meta patching,
         Fulfillments, Refunds, Webhooks, Abandoned Checkouts,
         Draft Orders, URL Redirects, Payouts (Shopify Payments),
-        Analytics / Reports, Store Events.
+        Analytics / Reports, Store Events,
+        Carrier Services / Shipping Rates,
+        Flow Automations (Shopify Flow).
 
 All calls use the Admin REST API v2026-04.
 Token is obtained (and auto-refreshed) via OAuth Client Credentials Grant
@@ -1154,3 +1156,217 @@ def event_count(subject_type: str = "") -> dict:
     if subject_type:
         params["filter"] = subject_type
     return _get("/events/count.json", params)
+
+
+# ─────────────────────────────────────────────
+# Carrier Services & Shipping Rates
+# ─────────────────────────────────────────────
+
+def list_carrier_services() -> dict:
+    """
+    List all custom carrier services registered with the store.
+    Carrier services power dynamic shipping rate callbacks to external URLs.
+    Requires 'write_shipping' scope.
+    """
+    data = _get("/carrier_services.json")
+    services = data.get("carrier_services", [])
+    return {
+        "count": len(services),
+        "carrier_services": [
+            {
+                "id": s["id"],
+                "name": s.get("name"),
+                "callback_url": s.get("callback_url"),
+                "service_discovery": s.get("service_discovery"),
+                "carrier_service_type": s.get("carrier_service_type"),
+                "active": s.get("active"),
+                "format": s.get("format"),
+            }
+            for s in services
+        ],
+    }
+
+
+def get_carrier_service(carrier_service_id: int) -> dict:
+    """Get a specific carrier service by ID."""
+    return _get(f"/carrier_services/{carrier_service_id}.json")
+
+
+def create_carrier_service(name: str, callback_url: str,
+                            service_discovery: bool = True,
+                            carrier_service_type: str = "api",
+                            format_: str = "json") -> dict:
+    """
+    Register a custom carrier service (dynamic rates via callback).
+    callback_url: HTTPS endpoint Shopify will POST checkout data to for rates.
+    service_discovery: if True, Shopify shows this carrier in the admin UI.
+    carrier_service_type: 'api' (dynamic) or 'legacy'.
+    Requires 'write_shipping' scope.
+    """
+    payload = {
+        "carrier_service": {
+            "name": name,
+            "callback_url": callback_url,
+            "service_discovery": service_discovery,
+            "carrier_service_type": carrier_service_type,
+            "format": format_,
+            "active": True,
+        }
+    }
+    return _post("/carrier_services.json", payload)
+
+
+def update_carrier_service(carrier_service_id: int, updates: dict) -> dict:
+    """
+    Update a carrier service (e.g. change callback_url or toggle active).
+    updates: dict of fields to change, e.g. {"active": False, "callback_url": "https://..."}
+    """
+    payload = {"carrier_service": {"id": carrier_service_id, **updates}}
+    return _put(f"/carrier_services/{carrier_service_id}.json", payload)
+
+
+def delete_carrier_service(carrier_service_id: int) -> dict:
+    """Delete a carrier service. This removes the dynamic rate integration entirely."""
+    return _delete(f"/carrier_services/{carrier_service_id}.json")
+
+
+def list_shipping_zones() -> dict:
+    """
+    List all shipping zones and their associated rates.
+    Each zone has price-based rates, weight-based rates, and carrier-calculated rates.
+    Useful for auditing or displaying shipping options to customers.
+    """
+    data = _get("/shipping_zones.json")
+    zones = data.get("shipping_zones", [])
+    return {
+        "count": len(zones),
+        "shipping_zones": [
+            {
+                "id": z["id"],
+                "name": z.get("name"),
+                "countries": [c.get("name") for c in z.get("countries", [])],
+                "price_based_shipping_rates": z.get("price_based_shipping_rates", []),
+                "weight_based_shipping_rates": z.get("weight_based_shipping_rates", []),
+                "carrier_shipping_rate_providers": z.get("carrier_shipping_rate_providers", []),
+            }
+            for z in zones
+        ],
+    }
+
+
+def shipping_rates_summary() -> dict:
+    """
+    Summarise all shipping rates across all zones.
+    Returns zone name, rate name, price, and min/max conditions for quick review.
+    """
+    data = _get("/shipping_zones.json")
+    zones = data.get("shipping_zones", [])
+    summary = []
+    for z in zones:
+        zone_name = z.get("name", "Unknown Zone")
+        for rate in z.get("price_based_shipping_rates", []):
+            summary.append({
+                "zone": zone_name,
+                "type": "price_based",
+                "name": rate.get("name"),
+                "price": rate.get("price"),
+                "min_order_subtotal": rate.get("min_order_subtotal"),
+                "max_order_subtotal": rate.get("max_order_subtotal"),
+            })
+        for rate in z.get("weight_based_shipping_rates", []):
+            summary.append({
+                "zone": zone_name,
+                "type": "weight_based",
+                "name": rate.get("name"),
+                "price": rate.get("price"),
+                "weight_low": rate.get("weight_low"),
+                "weight_high": rate.get("weight_high"),
+            })
+        for rate in z.get("carrier_shipping_rate_providers", []):
+            summary.append({
+                "zone": zone_name,
+                "type": "carrier_calculated",
+                "carrier_service_id": rate.get("carrier_service_id"),
+                "flat_modifier": rate.get("flat_modifier"),
+                "percent_modifier": rate.get("percent_modifier"),
+                "service_filter": rate.get("service_filter"),
+            })
+    return {"total_rates": len(summary), "rates": summary}
+
+
+# ─────────────────────────────────────────────
+# Flow Automations (Shopify Flow)
+# ─────────────────────────────────────────────
+# Shopify Flow is managed via the REST Admin API under /flow/ endpoints.
+# These require the 'read_shopify_payments_payouts' or higher scope depending
+# on plan. Flow is available on Shopify, Advanced, and Plus plans.
+# ─────────────────────────────────────────────
+
+def list_flows() -> dict:
+    """
+    List all Shopify Flow workflows.
+    Returns id, title, enabled state, and trigger type for each workflow.
+    Requires Shopify plan or higher (Flow not available on Basic).
+    """
+    data = _get("/flow/workflows.json")
+    workflows = data.get("workflows", [])
+    return {
+        "count": len(workflows),
+        "workflows": [
+            {
+                "id": w["id"],
+                "title": w.get("title"),
+                "enabled": w.get("enabled"),
+                "created_at": w.get("created_at"),
+                "updated_at": w.get("updated_at"),
+            }
+            for w in workflows
+        ],
+    }
+
+
+def get_flow(workflow_id: int) -> dict:
+    """Get full details of a specific Flow workflow by ID."""
+    return _get(f"/flow/workflows/{workflow_id}.json")
+
+
+def enable_flow(workflow_id: int) -> dict:
+    """Enable a paused/disabled Flow workflow."""
+    payload = {"workflow": {"id": workflow_id, "enabled": True}}
+    return _put(f"/flow/workflows/{workflow_id}.json", payload)
+
+
+def disable_flow(workflow_id: int) -> dict:
+    """Disable (pause) a running Flow workflow without deleting it."""
+    payload = {"workflow": {"id": workflow_id, "enabled": False}}
+    return _put(f"/flow/workflows/{workflow_id}.json", payload)
+
+
+def trigger_flow(workflow_id: int, payload: Optional[dict] = None) -> dict:
+    """
+    Trigger a Flow workflow that uses a 'trigger_run' or custom-trigger topic.
+    payload: optional dict of custom properties to pass into the workflow context.
+    Note: Only works for workflows with a compatible trigger type (e.g. custom trigger).
+    """
+    body: dict = {"workflow_trigger": {"workflow_id": workflow_id}}
+    if payload:
+        body["workflow_trigger"]["properties"] = payload
+    return _post("/flow/triggers.json", body)
+
+
+def list_flow_trigger_definitions() -> dict:
+    """
+    List all available Flow trigger definitions.
+    Useful for understanding what events can kick off a Flow (e.g. order_created,
+    customer_created, inventory_quantity_changed, custom).
+    """
+    return _get("/flow/trigger_definitions.json")
+
+
+def list_flow_action_definitions() -> dict:
+    """
+    List all available Flow action definitions.
+    Shows what actions are available in this store's Flow (e.g. add_tags,
+    send_http_request, add_to_segment, send_email via partner apps).
+    """
+    return _get("/flow/action_definitions.json")
