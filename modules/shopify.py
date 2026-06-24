@@ -1,7 +1,10 @@
 """
 Shopify Admin API module for GCP Bot.
 Covers: Products, Orders, Customers, Inventory, Content (Pages/Blogs/Articles),
-        Themes, Price Rules / Discounts, SEO meta patching.
+        Themes, Price Rules / Discounts, SEO meta patching,
+        Fulfillments, Refunds, Webhooks, Abandoned Checkouts,
+        Draft Orders, URL Redirects, Payouts (Shopify Payments),
+        Analytics / Reports, Store Events.
 
 All calls use the Admin REST API v2026-04.
 Token is obtained (and auto-refreshed) via OAuth Client Credentials Grant
@@ -52,12 +55,9 @@ class _TokenCache:
     """
     def __init__(self):
         self._lock = threading.Lock()
-        # Seed from env var if provided (assumed ~23h remaining at boot)
         _env_token = os.getenv("SHOPIFY_ADMIN_TOKEN", "")
         if _env_token:
             self._token: str = _env_token
-            # Assume token was just issued — set expiry to 23h from now
-            # so we refresh ~1h before the real 24h window closes
             self._expires_at: float = time.time() + (23 * 3600)
             logger.info("Shopify token seeded from SHOPIFY_ADMIN_TOKEN env var (assumed 23h TTL).")
         else:
@@ -163,8 +163,8 @@ def token_status() -> dict:
 def force_token_refresh() -> dict:
     """Force an immediate token refresh regardless of TTL."""
     with _token_cache._lock:
-        _token_cache._expires_at = 0.0  # force expiry
-    _token_cache.get()  # triggers refresh
+        _token_cache._expires_at = 0.0
+    _token_cache.get()
     return {"refreshed": True, **_token_cache.status()}
 
 
@@ -706,3 +706,451 @@ def update_product_image_alt(product_id: int, image_id: int, alt_text: str) -> d
 def list_product_images(product_id: int) -> dict:
     """List all images for a product, including alt text and src."""
     return _get(f"/products/{product_id}/images.json")
+
+
+# ─────────────────────────────────────────────
+# Fulfillments
+# ─────────────────────────────────────────────
+
+def list_fulfillments(order_id: int) -> dict:
+    """List all fulfillments for an order."""
+    data = _get(f"/orders/{order_id}/fulfillments.json")
+    fulfillments = data.get("fulfillments", [])
+    return {
+        "count": len(fulfillments),
+        "fulfillments": [
+            {
+                "id": f["id"],
+                "status": f.get("status"),
+                "tracking_company": f.get("tracking_company"),
+                "tracking_number": f.get("tracking_number"),
+                "tracking_url": f.get("tracking_url"),
+                "created_at": f.get("created_at"),
+                "updated_at": f.get("updated_at"),
+            }
+            for f in fulfillments
+        ],
+    }
+
+
+def create_fulfillment(order_id: int, location_id: int,
+                       line_items: Optional[list] = None,
+                       tracking_number: str = "",
+                       tracking_company: str = "",
+                       notify_customer: bool = True) -> dict:
+    """
+    Create a fulfillment for an order.
+    line_items: list of {id, quantity} dicts. If None, fulfills all items.
+    """
+    fulfillment_payload: dict = {
+        "location_id": location_id,
+        "notify_customer": notify_customer,
+    }
+    if tracking_number:
+        fulfillment_payload["tracking_info"] = {
+            "number": tracking_number,
+            "company": tracking_company,
+        }
+    if line_items:
+        fulfillment_payload["line_items_by_fulfillment_order"] = line_items
+    return _post(f"/orders/{order_id}/fulfillments.json", {"fulfillment": fulfillment_payload})
+
+
+def cancel_fulfillment(order_id: int, fulfillment_id: int) -> dict:
+    """Cancel a pending fulfillment."""
+    return _post(f"/orders/{order_id}/fulfillments/{fulfillment_id}/cancel.json", {})
+
+
+def update_fulfillment_tracking(order_id: int, fulfillment_id: int,
+                                 tracking_number: str,
+                                 tracking_company: str = "",
+                                 notify_customer: bool = True) -> dict:
+    """Update tracking info on an existing fulfillment."""
+    payload = {
+        "fulfillment": {
+            "tracking_info": {
+                "number": tracking_number,
+                "company": tracking_company,
+            },
+            "notify_customer": notify_customer,
+        }
+    }
+    return _put(f"/orders/{order_id}/fulfillments/{fulfillment_id}.json", payload)
+
+
+# ─────────────────────────────────────────────
+# Refunds
+# ─────────────────────────────────────────────
+
+def list_refunds(order_id: int) -> dict:
+    """List all refunds for an order."""
+    data = _get(f"/orders/{order_id}/refunds.json")
+    refunds = data.get("refunds", [])
+    return {
+        "count": len(refunds),
+        "refunds": [
+            {
+                "id": r["id"],
+                "note": r.get("note"),
+                "created_at": r.get("created_at"),
+                "transactions": r.get("transactions", []),
+                "refund_line_items": r.get("refund_line_items", []),
+            }
+            for r in refunds
+        ],
+    }
+
+
+def calculate_refund(order_id: int, line_items: Optional[list] = None,
+                     shipping: Optional[dict] = None) -> dict:
+    """
+    Calculate refund amounts before issuing.
+    line_items: list of {line_item_id, quantity, restock_type} dicts.
+    shipping: {full_refund: bool} or {amount: str}.
+    """
+    payload: dict = {}
+    if line_items:
+        payload["refund_line_items"] = [
+            {"line_item_id": li["line_item_id"],
+             "quantity": li["quantity"],
+             "restock_type": li.get("restock_type", "no_restock")}
+            for li in line_items
+        ]
+    if shipping:
+        payload["shipping"] = shipping
+    return _post(f"/orders/{order_id}/refunds/calculate.json", {"refund": payload})
+
+
+def create_refund(order_id: int, note: str = "",
+                  line_items: Optional[list] = None,
+                  shipping: Optional[dict] = None,
+                  transactions: Optional[list] = None) -> dict:
+    """
+    Issue a refund on an order.
+    Recommended: run calculate_refund first to get exact amounts.
+    transactions: list of {parent_id, amount, kind, gateway} dicts.
+    """
+    payload: dict = {"note": note, "notify": True}
+    if line_items:
+        payload["refund_line_items"] = line_items
+    if shipping:
+        payload["shipping"] = shipping
+    if transactions:
+        payload["transactions"] = transactions
+    return _post(f"/orders/{order_id}/refunds.json", {"refund": payload})
+
+
+# ─────────────────────────────────────────────
+# Draft Orders
+# ─────────────────────────────────────────────
+
+def list_draft_orders(limit: int = 50, status: str = "any") -> dict:
+    """List draft orders. status: open / invoice_sent / completed / any."""
+    data = _get("/draft_orders.json", {"limit": limit, "status": status})
+    drafts = data.get("draft_orders", [])
+    return {
+        "count": len(drafts),
+        "draft_orders": [
+            {
+                "id": d["id"],
+                "name": d.get("name"),
+                "email": d.get("email"),
+                "total_price": d.get("total_price"),
+                "status": d.get("status"),
+                "created_at": d.get("created_at"),
+            }
+            for d in drafts
+        ],
+    }
+
+
+def get_draft_order(draft_order_id: int) -> dict:
+    """Get full draft order detail."""
+    return _get(f"/draft_orders/{draft_order_id}.json")
+
+
+def create_draft_order(line_items: list,
+                       email: str = "",
+                       customer_id: Optional[int] = None,
+                       note: str = "",
+                       tags: str = "") -> dict:
+    """
+    Create a draft order.
+    line_items: list of {variant_id, quantity} dicts.
+    """
+    payload: dict = {
+        "draft_order": {
+            "line_items": line_items,
+            "note": note,
+            "tags": tags,
+        }
+    }
+    if email:
+        payload["draft_order"]["email"] = email
+    if customer_id:
+        payload["draft_order"]["customer"] = {"id": customer_id}
+    return _post("/draft_orders.json", payload)
+
+
+def send_draft_order_invoice(draft_order_id: int,
+                              from_email: str = "",
+                              subject: str = "Your invoice from our store",
+                              custom_message: str = "") -> dict:
+    """Send the invoice email for a draft order."""
+    payload = {
+        "draft_order_invoice": {
+            "to": "",
+            "from": from_email,
+            "subject": subject,
+            "custom_message": custom_message,
+        }
+    }
+    return _post(f"/draft_orders/{draft_order_id}/send_invoice.json", payload)
+
+
+def complete_draft_order(draft_order_id: int, payment_pending: bool = False) -> dict:
+    """Mark a draft order as complete (converts to a real order)."""
+    return _put(
+        f"/draft_orders/{draft_order_id}/complete.json",
+        {"payment_pending": payment_pending},
+    )
+
+
+def delete_draft_order(draft_order_id: int) -> dict:
+    """Delete a draft order."""
+    return _delete(f"/draft_orders/{draft_order_id}.json")
+
+
+# ─────────────────────────────────────────────
+# Webhooks
+# ─────────────────────────────────────────────
+
+def list_webhooks() -> dict:
+    """List all registered webhooks."""
+    data = _get("/webhooks.json")
+    hooks = data.get("webhooks", [])
+    return {
+        "count": len(hooks),
+        "webhooks": [
+            {
+                "id": h["id"],
+                "topic": h.get("topic"),
+                "address": h.get("address"),
+                "format": h.get("format"),
+                "created_at": h.get("created_at"),
+            }
+            for h in hooks
+        ],
+    }
+
+
+def create_webhook(topic: str, address: str, format_: str = "json") -> dict:
+    """
+    Register a new webhook.
+    topic examples: 'orders/create', 'products/update', 'customers/create'
+    address: your HTTPS endpoint URL.
+    """
+    payload = {
+        "webhook": {
+            "topic": topic,
+            "address": address,
+            "format": format_,
+        }
+    }
+    return _post("/webhooks.json", payload)
+
+
+def delete_webhook(webhook_id: int) -> dict:
+    """Delete a webhook by ID."""
+    return _delete(f"/webhooks/{webhook_id}.json")
+
+
+def get_webhook(webhook_id: int) -> dict:
+    """Get a single webhook by ID."""
+    return _get(f"/webhooks/{webhook_id}.json")
+
+
+# ─────────────────────────────────────────────
+# Abandoned Checkouts
+# ─────────────────────────────────────────────
+
+def list_abandoned_checkouts(limit: int = 50,
+                               since_id: Optional[int] = None) -> dict:
+    """
+    List abandoned checkouts.
+    Useful for re-engagement campaigns.
+    """
+    params: dict = {"limit": limit}
+    if since_id:
+        params["since_id"] = since_id
+    data = _get("/checkouts.json", params)
+    checkouts = data.get("checkouts", [])
+    return {
+        "count": len(checkouts),
+        "checkouts": [
+            {
+                "id": c["id"],
+                "token": c.get("token"),
+                "email": c.get("email"),
+                "total_price": c.get("total_price"),
+                "abandoned_checkout_url": c.get("abandoned_checkout_url"),
+                "created_at": c.get("created_at"),
+                "updated_at": c.get("updated_at"),
+            }
+            for c in checkouts
+        ],
+    }
+
+
+# ─────────────────────────────────────────────
+# URL Redirects
+# ─────────────────────────────────────────────
+
+def list_redirects(limit: int = 50) -> dict:
+    """List all URL redirects."""
+    data = _get("/redirects.json", {"limit": limit})
+    redirects = data.get("redirects", [])
+    return {
+        "count": len(redirects),
+        "redirects": [
+            {
+                "id": r["id"],
+                "path": r.get("path"),
+                "target": r.get("target"),
+            }
+            for r in redirects
+        ],
+    }
+
+
+def create_redirect(path: str, target: str) -> dict:
+    """Create a 301 URL redirect."""
+    payload = {"redirect": {"path": path, "target": target}}
+    return _post("/redirects.json", payload)
+
+
+def delete_redirect(redirect_id: int) -> dict:
+    """Delete a URL redirect."""
+    return _delete(f"/redirects/{redirect_id}.json")
+
+
+def count_redirects() -> dict:
+    """Total redirect count."""
+    return _get("/redirects/count.json")
+
+
+# ─────────────────────────────────────────────
+# Shopify Payments — Payouts
+# ─────────────────────────────────────────────
+
+def list_payouts(limit: int = 50, status: str = "paid") -> dict:
+    """
+    List Shopify Payments payouts.
+    status: scheduled / in_transit / paid / failed / cancelled.
+    Only available on stores using Shopify Payments.
+    """
+    data = _get("/shopify_payments/payouts.json", {"limit": limit, "status": status})
+    payouts = data.get("payouts", [])
+    return {
+        "count": len(payouts),
+        "payouts": [
+            {
+                "id": p["id"],
+                "status": p.get("status"),
+                "currency": p.get("currency"),
+                "amount": p.get("amount"),
+                "payout_date": p.get("date"),
+            }
+            for p in payouts
+        ],
+    }
+
+
+def payout_transactions(payout_id: int, limit: int = 50) -> dict:
+    """List all balance transactions in a payout."""
+    return _get("/shopify_payments/balance/transactions.json",
+                {"payout_id": payout_id, "limit": limit})
+
+
+def payments_balance() -> dict:
+    """Get current Shopify Payments account balance."""
+    return _get("/shopify_payments/balance.json")
+
+
+# ─────────────────────────────────────────────
+# Analytics / Reports
+# ─────────────────────────────────────────────
+
+def list_reports(limit: int = 50) -> dict:
+    """List all saved reports (requires Shopify Analytics access)."""
+    data = _get("/reports.json", {"limit": limit})
+    reports = data.get("reports", [])
+    return {
+        "count": len(reports),
+        "reports": [
+            {
+                "id": r["id"],
+                "name": r.get("name"),
+                "shopify_ql": r.get("shopify_ql"),
+                "updated_at": r.get("updated_at"),
+            }
+            for r in reports
+        ],
+    }
+
+
+def get_report(report_id: int) -> dict:
+    """Get a specific saved report."""
+    return _get(f"/reports/{report_id}.json")
+
+
+def create_report(name: str, shopify_ql: str) -> dict:
+    """
+    Create a custom ShopifyQL report.
+    Example shopify_ql: 'SHOW total_sales BY day FROM 2024-01-01 TO 2024-12-31'
+    """
+    payload = {"report": {"name": name, "shopify_ql": shopify_ql}}
+    return _post("/reports.json", payload)
+
+
+# ─────────────────────────────────────────────
+# Store Events (Activity Log)
+# ─────────────────────────────────────────────
+
+def list_events(limit: int = 50,
+                verb: str = "",
+                subject_type: str = "") -> dict:
+    """
+    List store events (audit log).
+    verb examples: 'create', 'update', 'delete', 'publish'.
+    subject_type: 'Order', 'Product', 'Customer', 'Collection', 'Page', etc.
+    """
+    params: dict = {"limit": limit}
+    if verb:
+        params["verb"] = verb
+    if subject_type:
+        params["filter"] = subject_type
+    data = _get("/events.json", params)
+    events = data.get("events", [])
+    return {
+        "count": len(events),
+        "events": [
+            {
+                "id": e["id"],
+                "subject_type": e.get("subject_type"),
+                "subject_id": e.get("subject_id"),
+                "verb": e.get("verb"),
+                "message": e.get("message"),
+                "created_at": e.get("created_at"),
+            }
+            for e in events
+        ],
+    }
+
+
+def event_count(subject_type: str = "") -> dict:
+    """Count store events, optionally filtered by subject_type."""
+    params: dict = {}
+    if subject_type:
+        params["filter"] = subject_type
+    return _get("/events/count.json", params)
