@@ -6,9 +6,11 @@ Covers: Products, Orders, Customers, Inventory, Content (Pages/Blogs/Articles),
         Draft Orders, URL Redirects, Payouts (Shopify Payments),
         Analytics / Reports, Store Events,
         Carrier Services / Shipping Rates,
-        Flow Automations (Shopify Flow).
+        Flow Automations (Shopify Flow),
+        Shipping Profiles / Delivery Profiles (GraphQL only).
 
-All calls use the Admin REST API v2026-04.
+All REST calls use the Admin REST API v2026-04.
+All GraphQL calls use the Admin GraphQL API v2026-04.
 Token is obtained (and auto-refreshed) via OAuth Client Credentials Grant
 using SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET env vars.
 
@@ -41,6 +43,7 @@ SHOPIFY_CLIENT_ID: str = os.getenv("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET: str = os.getenv("SHOPIFY_CLIENT_SECRET", "")
 API_VERSION = "2026-04"
 BASE_URL = f"https://{SHOPIFY_STORE_DOMAIN}/admin/api/{API_VERSION}"
+GRAPHQL_URL = f"https://{SHOPIFY_STORE_DOMAIN}/admin/api/{API_VERSION}/graphql.json"
 OAUTH_URL = f"https://{SHOPIFY_STORE_DOMAIN}/admin/oauth/access_token"
 
 # How many seconds before expiry to proactively refresh
@@ -151,6 +154,50 @@ def _delete(path: str) -> dict:
     r = requests.delete(url, headers=_headers(), timeout=30)
     r.raise_for_status()
     return {"deleted": True, "status_code": r.status_code}
+
+
+# ─────────────────────────────────────────────
+# GraphQL Client
+# ─────────────────────────────────────────────
+
+def _graphql(query: str, variables: Optional[dict] = None) -> dict:
+    """
+    Execute a Shopify Admin GraphQL query or mutation.
+
+    Args:
+        query:     GraphQL query/mutation string.
+        variables: Optional dict of GraphQL variables.
+
+    Returns:
+        The full parsed JSON response from Shopify (includes 'data' and
+        optionally 'errors' keys). Raises requests.HTTPError on HTTP failures
+        and RuntimeError if the response contains GraphQL-level errors.
+
+    Notes:
+        - Uses the same token cache as REST calls (_token_cache.get()).
+        - All GraphQL calls share the same API_VERSION as REST (2026-04).
+        - Shopify GraphQL is subject to cost-based rate limiting (query cost
+          system). For bulk operations, use the bulkOperationRunQuery pattern
+          instead of paginating with this function.
+    """
+    payload: dict = {"query": query}
+    if variables:
+        payload["variables"] = variables
+
+    r = requests.post(
+        GRAPHQL_URL,
+        headers=_headers(),
+        json=payload,
+        timeout=30,
+    )
+    r.raise_for_status()
+    data = r.json()
+
+    if "errors" in data:
+        logger.error("GraphQL errors: %s", data["errors"])
+        raise RuntimeError(f"Shopify GraphQL errors: {data['errors']}")
+
+    return data
 
 
 # ─────────────────────────────────────────────
@@ -1370,3 +1417,401 @@ def list_flow_action_definitions() -> dict:
     send_http_request, add_to_segment, send_email via partner apps).
     """
     return _get("/flow/action_definitions.json")
+
+
+# ─────────────────────────────────────────────
+# Shipping Profiles / Delivery Profiles (GraphQL)
+# ─────────────────────────────────────────────
+# DeliveryProfile is GraphQL-only — not available on the REST Admin API.
+# These functions use _graphql() and require the 'read_shipping' scope.
+#
+# What a DeliveryProfile tells you:
+#   - Profile name + whether it is the store's default (General) profile
+#   - Which products are assigned to this profile (profileItems)
+#   - Which locations fulfil orders from this profile (locationGroups)
+#   - Which shipping zones + countries those locations cover
+#   - Which shipping methods (rates) are active in each zone
+#
+# Audit checklist the bot runs automatically in audit_shipping_profiles():
+#   ✓ Every active product is assigned to at least one profile
+#   ✓ No product appears in multiple profiles (duplicate assignment)
+#   ✓ Every profile has at least one active shipping method per zone
+#   ✓ Every profile has at least one fulfillment location attached
+#   ✓ The default (General) profile exists
+# ─────────────────────────────────────────────
+
+_DELIVERY_PROFILES_QUERY = """
+query deliveryProfiles($first: Int!, $after: String) {
+  deliveryProfiles(first: $first, after: $after) {
+    pageInfo {
+      hasNextPage
+      endCursor
+    }
+    nodes {
+      id
+      name
+      default
+      profileLocationGroups {
+        locationGroup {
+          locations(first: 20) {
+            nodes {
+              id
+              name
+              isActive
+            }
+          }
+        }
+        locationGroupZones(first: 20) {
+          nodes {
+            zone {
+              id
+              name
+              countries {
+                name
+                code {
+                  countryCode
+                }
+              }
+            }
+            methodDefinitions(first: 20) {
+              nodes {
+                id
+                name
+                active
+                rateProvider {
+                  ... on DeliveryRateDefinition {
+                    price {
+                      amount
+                      currencyCode
+                    }
+                  }
+                  ... on DeliveryParticipant {
+                    participantService {
+                      name
+                    }
+                    fixedFee {
+                      amount
+                      currencyCode
+                    }
+                    percentageFee
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+      profileItems(first: 50) {
+        nodes {
+          product {
+            id
+            title
+            status
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+
+def list_shipping_profiles(profiles_per_page: int = 10) -> dict:
+    """
+    List all delivery profiles using the GraphQL Admin API.
+
+    Returns a structured dict with:
+      - count: total number of profiles fetched
+      - profiles: list of profiles, each with:
+          - id, name, default (bool)
+          - locations: active fulfillment locations attached to this profile
+          - zones: shipping zones with countries and active method counts
+          - products: products assigned to this profile (up to 50 per profile)
+
+    Automatically paginates through all profiles.
+    Requires 'read_shipping' OAuth scope.
+    """
+    profiles = []
+    cursor = None
+    has_next = True
+
+    while has_next:
+        variables: dict = {"first": profiles_per_page}
+        if cursor:
+            variables["after"] = cursor
+
+        result = _graphql(_DELIVERY_PROFILES_QUERY, variables)
+        connection = result["data"]["deliveryProfiles"]
+        page_info = connection["pageInfo"]
+
+        for node in connection["nodes"]:
+            # Flatten locations from all location groups
+            locations = []
+            zones = []
+            for lg in node.get("profileLocationGroups", []):
+                for loc in lg["locationGroup"]["locations"]["nodes"]:
+                    locations.append({
+                        "id": loc["id"],
+                        "name": loc["name"],
+                        "is_active": loc["isActive"],
+                    })
+                for lgz in lg["locationGroupZones"]["nodes"]:
+                    zone = lgz["zone"]
+                    methods = lgz["methodDefinitions"]["nodes"]
+                    active_methods = [m for m in methods if m.get("active")]
+                    zones.append({
+                        "id": zone["id"],
+                        "name": zone["name"],
+                        "countries": [
+                            c["name"] for c in zone.get("countries", [])
+                        ],
+                        "total_methods": len(methods),
+                        "active_methods": len(active_methods),
+                        "method_names": [m["name"] for m in active_methods],
+                    })
+
+            # Flatten assigned products
+            products = [
+                {
+                    "id": item["product"]["id"],
+                    "title": item["product"]["title"],
+                    "status": item["product"]["status"],
+                }
+                for item in node["profileItems"]["nodes"]
+                if item.get("product")
+            ]
+
+            profiles.append({
+                "id": node["id"],
+                "name": node["name"],
+                "is_default": node.get("default", False),
+                "locations": locations,
+                "zones": zones,
+                "assigned_products": products,
+                "assigned_products_count": len(products),
+            })
+
+        has_next = page_info["hasNextPage"]
+        cursor = page_info.get("endCursor")
+
+    return {
+        "count": len(profiles),
+        "profiles": profiles,
+    }
+
+
+def audit_shipping_profiles() -> dict:
+    """
+    Run a full health audit of all delivery profiles.
+
+    Checks performed:
+      1. Default (General) profile exists
+      2. Every profile has at least one active fulfillment location
+      3. Every profile has at least one shipping zone configured
+      4. Every zone in every profile has at least one active rate method
+      5. No product appears assigned to multiple profiles (duplicate detection)
+      6. Active products not assigned to any profile (unshipped products)
+
+    Returns:
+      - passed (bool): True only if ALL checks pass
+      - summary: human-readable list of findings
+      - issues: structured list of {severity, profile, message} dicts
+      - profiles_audited: count of profiles checked
+      - unassigned_active_products: list of active product titles with no profile
+      - duplicate_assignments: list of product titles in more than one profile
+    """
+    profiles_data = list_shipping_profiles()
+    profiles = profiles_data["profiles"]
+
+    issues = []
+    summary = []
+
+    # ── Check 1: Default profile exists ──
+    default_profiles = [p for p in profiles if p["is_default"]]
+    if not default_profiles:
+        issues.append({
+            "severity": "critical",
+            "profile": "store",
+            "message": "No default (General) shipping profile found. Every store must have one.",
+        })
+    else:
+        summary.append(f"✓ Default profile exists: '{default_profiles[0]['name']}'")
+
+    # ── Check 2: Every profile has at least one active location ──
+    for p in profiles:
+        active_locs = [l for l in p["locations"] if l["is_active"]]
+        if not active_locs:
+            issues.append({
+                "severity": "critical",
+                "profile": p["name"],
+                "message": f"Profile '{p['name']}' has no active fulfillment locations attached.",
+            })
+        else:
+            summary.append(
+                f"✓ '{p['name']}': {len(active_locs)} active location(s) — "
+                + ", ".join(l["name"] for l in active_locs)
+            )
+
+    # ── Check 3: Every profile has at least one zone ──
+    for p in profiles:
+        if not p["zones"]:
+            issues.append({
+                "severity": "warning",
+                "profile": p["name"],
+                "message": f"Profile '{p['name']}' has no shipping zones configured.",
+            })
+        else:
+            summary.append(f"✓ '{p['name']}': {len(p['zones'])} zone(s) configured")
+
+    # ── Check 4: Every zone has at least one active rate ──
+    for p in profiles:
+        for z in p["zones"]:
+            if z["active_methods"] == 0:
+                issues.append({
+                    "severity": "critical",
+                    "profile": p["name"],
+                    "message": (
+                        f"Zone '{z['name']}' in profile '{p['name']}' "
+                        f"has {z['total_methods']} rate(s) but NONE are active. "
+                        "Customers in this zone will see no shipping options at checkout."
+                    ),
+                })
+            else:
+                summary.append(
+                    f"✓ '{p['name']}' → zone '{z['name']}': "
+                    f"{z['active_methods']} active rate(s): {', '.join(z['method_names'])}"
+                )
+
+    # ── Check 5: Duplicate product assignments ──
+    product_profile_map: dict = {}  # product_id → list of profile names
+    for p in profiles:
+        for prod in p["assigned_products"]:
+            pid = prod["id"]
+            if pid not in product_profile_map:
+                product_profile_map[pid] = {"title": prod["title"], "profiles": []}
+            product_profile_map[pid]["profiles"].append(p["name"])
+
+    duplicates = [
+        v for v in product_profile_map.values()
+        if len(v["profiles"]) > 1
+    ]
+    if duplicates:
+        for dup in duplicates:
+            issues.append({
+                "severity": "warning",
+                "profile": ", ".join(dup["profiles"]),
+                "message": (
+                    f"Product '{dup['title']}' is assigned to multiple profiles: "
+                    + ", ".join(dup["profiles"])
+                    + ". Only the most specific profile will apply."
+                ),
+            })
+    else:
+        summary.append("✓ No duplicate product-to-profile assignments detected")
+
+    # ── Check 6: Active products not in any profile ──
+    # Pull active products from REST and cross-reference
+    try:
+        active_products_data = _get("/products.json", {"status": "active", "limit": 250})
+        active_products = active_products_data.get("products", [])
+        assigned_gids = {prod["id"] for prod in product_profile_map}
+
+        # Shopify GID format: "gid://shopify/Product/123456789"
+        unassigned = []
+        for ap in active_products:
+            gid = f"gid://shopify/Product/{ap['id']}"
+            if gid not in assigned_gids:
+                unassigned.append(ap["title"])
+
+        if unassigned:
+            issues.append({
+                "severity": "warning",
+                "profile": "General (default)",
+                "message": (
+                    f"{len(unassigned)} active product(s) have no explicit profile assignment "
+                    "and will fall back to the General profile. "
+                    f"Products: {', '.join(unassigned[:10])}"
+                    + (" (+ more)" if len(unassigned) > 10 else "")
+                ),
+            })
+            summary.append(
+                f"⚠ {len(unassigned)} active product(s) rely on General profile fallback"
+            )
+        else:
+            summary.append("✓ All active products have explicit profile assignments")
+    except Exception as e:
+        logger.warning("Could not cross-reference active products: %s", e)
+        unassigned = []
+
+    # ── Result ──
+    critical_issues = [i for i in issues if i["severity"] == "critical"]
+    warning_issues = [i for i in issues if i["severity"] == "warning"]
+
+    return {
+        "passed": len(critical_issues) == 0,
+        "profiles_audited": len(profiles),
+        "critical_issues": len(critical_issues),
+        "warnings": len(warning_issues),
+        "issues": issues,
+        "summary": summary,
+        "unassigned_active_products": unassigned,
+        "duplicate_assignments": [d["title"] for d in duplicates],
+    }
+
+
+def get_shipping_profile(profile_gid: str) -> dict:
+    """
+    Get full detail for a single delivery profile by its GraphQL GID.
+    profile_gid format: 'gid://shopify/DeliveryProfile/123456789'
+
+    Use list_shipping_profiles() first to find the GID for the profile you want.
+    """
+    query = """
+    query getDeliveryProfile($id: ID!) {
+      deliveryProfile(id: $id) {
+        id
+        name
+        default
+        profileLocationGroups {
+          locationGroup {
+            locations(first: 20) {
+              nodes { id name isActive }
+            }
+          }
+          locationGroupZones(first: 20) {
+            nodes {
+              zone {
+                id
+                name
+                countries { name code { countryCode } }
+              }
+              methodDefinitions(first: 20) {
+                nodes {
+                  id
+                  name
+                  active
+                  rateProvider {
+                    ... on DeliveryRateDefinition {
+                      price { amount currencyCode }
+                    }
+                    ... on DeliveryParticipant {
+                      participantService { name }
+                      fixedFee { amount currencyCode }
+                      percentageFee
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        profileItems(first: 50) {
+          nodes {
+            product { id title status }
+          }
+        }
+      }
+    }
+    """
+    result = _graphql(query, {"id": profile_gid})
+    return result.get("data", {}).get("deliveryProfile", {})
