@@ -20,9 +20,18 @@ import hashlib
 import json
 import logging
 import requests
+import threading
 
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+
+# SFTP invoice uploader — runs in background thread on payment.captured
+try:
+    from sftp.sftp_upload import upload_invoice
+    SFTP_ENABLED = True
+except ImportError:
+    SFTP_ENABLED = False
+    logging.getLogger(__name__).warning("sftp_upload module not found — SFTP uploads disabled")
 
 app = Flask(__name__)
 
@@ -426,7 +435,31 @@ def webhook():
         order_id   = payment.get("order_id")
         amount     = payment.get("amount", 0)
         log.info(f"Payment captured: {payment_id} | order={order_id} | ₹{amount/100:.2f}")
-        # Future: trigger SFTP invoice upload Cloud Function here
+
+        # Trigger SFTP invoice upload in background thread
+        # (non-blocking — webhook must return 200 quickly to avoid Razorpay retry)
+        if SFTP_ENABLED:
+            invoice_payload = [{
+                "payment_id":         payment_id,
+                "order_id":           order_id,
+                "amount_paise":       int(amount),
+                "currency":           payment.get("currency", "INR"),
+                "status":             "captured",
+                "method":             payment.get("method", ""),
+                "email":              payment.get("email", ""),
+                "contact":            payment.get("contact", ""),
+                "description":        payment.get("description", "Legendary Branding"),
+                "created_at":         payment.get("created_at", 0),
+                "merchant_order_id":  payment.get("notes", {}).get("merchant_order_id", ""),
+                "shopify_order_name": payment.get("notes", {}).get("shopify_order_name", ""),
+            }]
+            def _sftp_upload():
+                try:
+                    filename = upload_invoice(invoice_payload)
+                    log.info(f"SFTP invoice uploaded: {filename}")
+                except Exception as sftp_err:
+                    log.error(f"SFTP upload error (non-fatal): {sftp_err}")
+            threading.Thread(target=_sftp_upload, daemon=True).start()
 
     elif event_type == "payment.failed":
         payment = payload.get("payment", {}).get("entity", {})
