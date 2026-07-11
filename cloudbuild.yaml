@@ -1,0 +1,48 @@
+steps:
+  # ── Build the container image ──
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "build"
+      - "-t"
+      - "us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/hub-backend/app:${SHORT_SHA}"
+      - "-t"
+      - "us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/hub-backend/app:latest"
+      - "."
+
+  # ── Push to Artifact Registry ──
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/hub-backend/app:${SHORT_SHA}"
+      - "us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/hub-backend/app:latest"
+
+  # ── Deploy to Cloud Run ──
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "deploy"
+      - "hub-backend"
+      - "--image=us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/hub-backend/app:${SHORT_SHA}"
+      - "--region=us-central1"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--set-env-vars=GCP_PROJECT_ID=${_GCP_PROJECT_ID},DEBUG=false"
+      - "--add-cloudsql-instances=${_GCP_PROJECT_ID}:us-central1:hub-db"
+      - "--service-account=hub-backend-sa@${_GCP_PROJECT_ID}.iam.gserviceaccount.com"
+      - "--min-instances=0"
+      - "--max-instances=5"
+      - "--concurrency=80"
+      - "--cpu=1"
+      - "--memory=512Mi"
+      - "--timeout=300"
+
+substitutions:
+  _GCP_PROJECT_ID: "your-gcp-project-id"
+
+images:
+  - "us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/hub-backend/app:${SHORT_SHA}"
+  - "us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/hub-backend/app:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY
