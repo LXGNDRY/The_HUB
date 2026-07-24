@@ -128,7 +128,12 @@ def _handle_product_created(payload: dict):
             import requests as _requests
             resp = _requests.post(
                 "https://api.indexnow.org/indexnow",
-                json={"host": SITE_DOMAIN, "key": indexnow_key, "urlList": [product_url]},
+                json={
+                    "host": SITE_DOMAIN,
+                    "key": indexnow_key,
+                    "keyLocation": f"https://{SITE_DOMAIN}/pages/{indexnow_key}",
+                    "urlList": [product_url],
+                },
                 timeout=10,
             )
             resp.raise_for_status()
