@@ -76,6 +76,7 @@ All jobs run as APScheduler background threads inside the Cloud Run container (t
 | `gmc_disapproval_check` | Daily 10:00 | Alert on GMC disapprovals and critical data quality issues |
 | `gmc_shipping_drift_check` | Wednesday 08:00 | Alert when Shopify and GMC shipping configs diverge |
 | `klaviyo_flow_health` | Tuesday 08:00 | Alert if any critical email flow is paused or missing a template |
+| `gmc_title_rotation` | Wednesday 10:00 | CTR-based A/B title rotation for GMC free listings; saves state to GCS |
 
 Control jobs at runtime:
 
@@ -171,6 +172,7 @@ All routes require `X-API-Key: <DASHBOARD_API_KEY>` except `GET /health`.
 | `/api/pagespeed` | PageSpeed Insights |
 | `/api/scheduler` | Scheduler control |
 | `/health` | Health check (unauthenticated) |
+| `/webhooks` | Shopify webhook receiver (HMAC-verified, no API key) |
 
 ---
 
@@ -203,6 +205,7 @@ All routes require `X-API-Key: <DASHBOARD_API_KEY>` except `GET /health`.
 | `GMC_MERCHANT_ID` | — | Google Merchant Center account/merchant ID |
 | `INDEXNOW_API_KEY` | — | IndexNow API key for search engine pings |
 | `SITE_DOMAIN` | `legendary-branding.com` | Public storefront domain |
+| `SHOPIFY_WEBHOOK_SECRET` | — | Secret for verifying Shopify HMAC webhook signatures |
 
 ---
 
