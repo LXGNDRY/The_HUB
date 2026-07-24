@@ -1,190 +1,237 @@
-# GCP Bot
+# The HUB — GCP Bot
 
-Custom Google Cloud Platform automation bot for **Legendary Branding**.
-Built in Python using official Google Cloud client libraries.
+Autonomous GCP management and e-commerce operations bot for **Legendary Branding**.
+Deployed as a FastAPI service on Google Cloud Run (`gcp-bot`, region `us-central1`).
 
 ---
 
-## Agents
+## Architecture
 
-| Agent | File | Status |
+```
+The_HUB/
+├── api/                  # FastAPI app — entry point: api/main.py
+│   ├── middleware/auth.py # X-API-Key guard
+│   └── routers/          # One router per domain
+├── agents/               # Multi-step orchestration agents
+├── modules/              # Thin SDK wrappers (GCP + third-party)
+├── scheduler/            # APScheduler background jobs
+├── auth/credentials.py   # 3-layer credential resolution
+├── config.py             # Env config, safe_execute(), retry_with_backoff()
+├── cli.py                # Click CLI for manual operations
+├── scripts/              # One-shot GitHub Actions workflow scripts
+├── klaviyo_templates/    # Email template HTML + build pipeline
+└── razorpay-backend/     # Separate Cloud Run service (Razorpay payments)
+```
+
+### Layering convention
+
+| Layer | Location | Rule |
 |---|---|---|
-| Theme Deployment | `agents/theme_deployment_agent.py` | ✅ Live |
-| Compute Manager | `agents/compute_agent.py` | ✅ Live |
-| Billing Monitor | `agents/billing_agent.py` | ✅ Live |
-| Scheduler | `scheduler/jobs.py` | ✅ Live |
-| Storage Agent | `agents/storage_agent.py` | 🔜 Next |
-| BigQuery Agent | `agents/bigquery_agent.py` | 🔜 Planned |
-| Discord Bot Interface | `interfaces/discord_bot.py` | 🔜 Planned |
-| Web Dashboard | `interfaces/dashboard/` | 🔜 Planned |
+| SDK wrappers | `modules/` | Never import from `api/` or `agents/` |
+| HTTP routes | `api/routers/` | Call `modules/` only; protected by `X-API-Key` |
+| Orchestration | `agents/` | May call multiple modules; use `safe_execute()` |
+
+---
+
+## Modules
+
+| Module | Description |
+|---|---|
+| `modules/shopify.py` | Shopify Admin REST + GraphQL v2026-04 |
+| `modules/klaviyo.py` | Klaviyo email API |
+| `modules/gemini.py` | Google Gemini / Vertex AI |
+| `modules/sheets.py` | Google Sheets read/write |
+| `modules/indexing.py` | Google Search Indexing API |
+| `modules/tag_manager.py` | Google Tag Manager |
+| `modules/storage.py` | Google Cloud Storage |
+| `modules/compute.py` | Compute Engine (VMs, snapshots) |
+| `modules/billing.py` | Cloud Billing + Budget alerts |
+| `modules/monitoring.py` | Cloud Monitoring metrics |
+| `modules/cloud_logging.py` | Cloud Logging |
+| `modules/secret_manager.py` | Secret Manager CRUD |
+| `modules/higgsfield.py` | Higgsfield AI video generation |
+| `modules/nvidia_vision.py` | NVIDIA vision/image AI |
+
+---
+
+## Scheduler jobs
+
+All jobs run as APScheduler background threads inside the Cloud Run container (timezone: `America/Chicago`).
+
+| Job ID | Schedule | Description |
+|---|---|---|
+| `daily_cost_check` | Daily 08:00 | Billing alert |
+| `weekly_snapshot_cleanup` | Monday 09:00 | Delete snapshots >30 days |
+| `vm_health_pulse` | Every 15 min | VM health check |
+| `nightly_idle_shutdown` | Daily 00:00 | Stop idle VMs |
+| `monthly_report` | 1st of month 07:00 | Monthly GCP usage report |
+| `weekly_storage_audit` | Sunday 06:00 | Storage bucket audit |
+| `quota_check` | Every 6 hours | Quota usage check (alert at 80%) |
+| `daily_indexing_submission` | Daily 06:00 | Submit sitemap URLs to Indexing API |
+| `daily_sheets_refresh` | Daily 07:00 | Refresh Google Sheets dashboard |
+| `error_log_monitor` | Every 6 hours | Monitor Cloud Run error logs |
+
+Control jobs at runtime:
+
+```
+GET  /api/scheduler/jobs
+POST /api/scheduler/jobs/{job_id}/pause
+POST /api/scheduler/jobs/{job_id}/resume
+POST /api/scheduler/jobs/{job_id}/run
+```
 
 ---
 
 ## Setup
 
-### 1. Clone & install dependencies
+### 1. Install dependencies
+
 ```bash
-git clone https://github.com/LXGNDRY/gcp-bot.git
-cd gcp-bot
 python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 2. Add credentials
-- Create a **Service Account** in GCP IAM with the required roles (see each agent's docstring)
-- Download the JSON key → save to `auth/service_account.json`
-- `auth/service_account.json` is gitignored — never commit it
+### 2. Configure environment
 
-### 3. Configure environment
 ```bash
+# Create .env and fill in values (see Environment Variables below)
 cp .env.example .env
-# Edit .env with your GCP project ID, bucket, billing account, Shopify credentials
 ```
 
-### 4. Create your GCS theme bucket (one-time)
-```bash
-gcloud storage buckets create gs://legendary-branding-themes --location=us-central1
-```
+Set `DRY_RUN=true` in `.env` to prevent real GCP mutations during development.
 
----
-
-## Theme Deployment Agent
+### 3. Run locally
 
 ```bash
-# Deploy theme to GCS
-python cli.py deploy --dir ./my-theme --label "summer-drop-v2"
+# API server
+uvicorn api.main:app --reload --port 8080
 
-# List versions
-python cli.py versions
-
-# Rollback
-python cli.py rollback --version 20240517T120000Z
-
-# Download live snapshot
-python cli.py download --dest ./downloaded-theme
-
-# Push to Shopify directly
-python cli.py push-shopify --dir ./my-theme --theme-id 123456789
-
-# Diff two versions
-python cli.py diff --a 20240517T120000Z --b 20240518T090000Z
-```
-
----
-
-## Compute Agent
-
-Required IAM: `roles/compute.instanceAdmin.v1`, `roles/compute.viewer`
-
-```bash
-# List VMs
+# CLI
 python cli.py list-vms --zone us-central1-a
-python cli.py list-all-vms
 
-# Control VMs
-python cli.py start-vm   --zone us-central1-a --name my-vm
-python cli.py stop-vm    --zone us-central1-a --name my-vm
-python cli.py restart-vm --zone us-central1-a --name my-vm
-python cli.py delete-vm  --zone us-central1-a --name my-vm --confirm
-
-# Create a VM
-python cli.py create-vm --zone us-central1-a --name dev-server --machine e2-micro --disk 20
-
-# Snapshots
-python cli.py list-snapshots
-python cli.py cleanup-snapshots --days 30 --dry-run
-
-# Auto-stop idle VMs (avg CPU < 5% over last hour)
-python cli.py auto-stop-idle --zone us-central1-a --cpu 5.0
-```
-
----
-
-## Billing Agent
-
-Required IAM: `roles/billing.viewer`  
-For BQ spend queries: enable [Billing Export to BigQuery](https://cloud.google.com/billing/docs/how-to/export-data-bigquery) in GCP Console.
-
-```bash
-# Project billing info
-python cli.py billing-info
-
-# List budgets
-python cli.py budgets
-
-# Check budget vs threshold
-python cli.py budget-check
-
-# Spend report by service (requires BQ export)
-python cli.py spend --dataset billing_export --table gcp_billing_export_v1_XXXX --days 30 --export reports/spend.csv
-
-# Detect cost spikes >20% day-over-day
-python cli.py spikes --dataset billing_export --table gcp_billing_export_v1_XXXX
-
-# Full daily check (runs all of the above)
-python cli.py billing-check --dataset billing_export --table gcp_billing_export_v1_XXXX
-```
-
----
-
-## Scheduler
-
-Runs automated jobs continuously. Keep alive on a VM, or deploy to Cloud Run Jobs.
-
-```bash
+# Scheduler standalone
 python scheduler/jobs.py
 ```
 
-| Job | Schedule |
-|---|---|
-| Billing daily check | Every day @ 08:00 |
-| Snapshot cleanup (>30 days) | Every Monday @ 09:00 |
-| Idle VM auto-stop (<5% CPU) | Every day @ 23:00 |
-
 ---
 
-## GCS Bucket Structure
+## CLI reference
 
+```bash
+# Theme deployment
+python cli.py deploy --dir ./my-theme --label "summer-drop-v2"
+python cli.py versions
+python cli.py rollback --version 20240517T120000Z
+python cli.py push-shopify --dir ./my-theme --theme-id 123456789
+
+# VM management
+python cli.py list-vms --zone us-central1-a
+python cli.py list-all-vms
+python cli.py start-vm   --zone us-central1-a --name my-vm
+python cli.py stop-vm    --zone us-central1-a --name my-vm
+python cli.py delete-vm  --zone us-central1-a --name my-vm --confirm
+python cli.py auto-stop-idle --zone us-central1-a --cpu 5.0
+
+# Billing
+python cli.py billing-info
+python cli.py budget-check
+python cli.py spend --dataset billing_export --table gcp_billing_export_v1_XXXX --days 30
 ```
-gs://legendary-branding-themes/
-    live/                          ← current live snapshot
-    versions/
-        20240517T120000Z/
-            assets/
-            meta.json
-        20240518T090000Z/
-            ...
-```
 
 ---
 
-## Required IAM Roles Summary
+## API
 
-| Agent | Required Role |
+All routes require `X-API-Key: <DASHBOARD_API_KEY>` except `GET /health`.
+
+| Prefix | Domain |
 |---|---|
-| Theme Deployment | `roles/storage.objectAdmin` |
-| Compute Agent | `roles/compute.instanceAdmin.v1`, `roles/compute.viewer` |
-| Billing Agent | `roles/billing.viewer` |
-| Billing (BQ) | `roles/bigquery.dataViewer` |
-| Auto-stop idle VMs | `roles/monitoring.viewer` |
+| `/api/compute` | Compute Engine |
+| `/api/storage` | Cloud Storage |
+| `/api/billing` | Billing |
+| `/api/monitoring` | Cloud Monitoring |
+| `/api/shopify` | Shopify |
+| `/api/klaviyo` | Klaviyo |
+| `/api/gemini` | Gemini AI |
+| `/api/sheets` | Google Sheets |
+| `/api/indexing` | Search Indexing |
+| `/api/gtm` | Google Tag Manager |
+| `/api/secrets` | Secret Manager |
+| `/api/logs` | Cloud Logging |
+| `/api/higgsfield` | Higgsfield AI |
+| `/api/seo` | SEO utilities |
+| `/api/analytics` | Google Analytics |
+| `/api/pagespeed` | PageSpeed Insights |
+| `/api/scheduler` | Scheduler control |
+| `/health` | Health check (unauthenticated) |
 
 ---
 
-## Security Notes
+## Environment variables
 
-- **Never commit** `auth/service_account.json` or `.env`
-- Service account should have **minimum required roles** only
-- Enable **Cloud Audit Logs** in GCP for full API call history
-- Use **Workload Identity Federation** in production instead of JSON keys
-- `delete-vm` requires explicit `--confirm` flag — no accidental deletions
+| Variable | Default | Description |
+|---|---|---|
+| `GCP_PROJECT_ID` | — | GCP project ID |
+| `DASHBOARD_API_KEY` | — | API key for all protected routes |
+| `DRY_RUN` | `false` | Set `true` to disable all destructive actions |
+| `GCP_SA_KEY_JSON` | — | Raw JSON service account key |
+| `GCP_ZONES` | `us-central1-a,us-central1-b` | Compute zones |
+| `BUDGET_THRESHOLD` | `100` | Billing alert threshold (USD) |
+| `IDLE_CPU_THRESHOLD` | `2.0` | CPU % threshold for idle VM detection |
+| `QUOTA_ALERT_PERCENT` | `80` | Quota usage % to trigger alert |
+| `SNAPSHOT_MAX_AGE_DAYS` | `30` | Max snapshot age before cleanup |
+| `SHOPIFY_STORE_DOMAIN` | `lngndny.myshopify.com` | Shopify store domain |
+| `SHOPIFY_CLIENT_ID` | — | Shopify OAuth client ID |
+| `SHOPIFY_CLIENT_SECRET` | — | Shopify OAuth client secret |
+| `SHOPIFY_ADMIN_TOKEN` | — | Bootstrap token (auto-refreshed via OAuth) |
+| `KLAVIYO_API_KEY` | — | Klaviyo private API key |
+| `GOOGLE_API_KEY` | — | Google API key (PageSpeed, etc.) |
+| `GA4_PROPERTY_ID` | — | Google Analytics 4 property |
+| `PAGESPEED_URL` | — | Target URL for PageSpeed audits |
+| `PAGESPEED_API_KEY` | — | PageSpeed Insights API key |
+| `HIGGSFIELD_API_KEY_ID` | — | Higgsfield AI key ID |
+| `HIGGSFIELD_API_KEY_SECRET` | — | Higgsfield AI key secret |
+| `NVIDIA_API_KEY` | — | NVIDIA API key |
+| `GSC_TOKEN_JSON` | — | Google Search Console OAuth token JSON |
 
 ---
 
-## Roadmap
+## CI/CD
 
-- [ ] Storage agent (bucket CRUD, file sync)
-- [ ] BigQuery agent (dataset management, query runner)
-- [ ] Discord bot interface (control bot from phone)
-- [ ] Web dashboard (FastAPI + custom UI)
-- [ ] Shopify ↔ BigQuery order sync
+Deploys to Cloud Run on push to `main` via `.github/workflows/deploy.yml`.
+
+**Pipeline:**
+1. Lint (`flake8`, max line 120, fatal on `E9,F63,F7,F82`) + `pytest` if tests exist
+2. Build Docker image → `gcr.io/<PROJECT>/gcp-bot:<sha>`
+3. Deploy scalar env vars via `gcloud run deploy --clear-secrets`
+4. Inject `GCP_SA_KEY_JSON` + `GSC_TOKEN_JSON` as plain env vars via `gcloud run services replace`
+5. Health check `GET /health`
+
+**Required GitHub secrets:** `GCP_SA_KEY`, `GCP_PROJECT_ID`, `DASHBOARD_API_KEY`, `GA4_PROPERTY_ID`, `GOOGLE_API_KEY`, `BUDGET_THRESHOLD`, `IDLE_CPU_THRESHOLD`, `QUOTA_ALERT_PERCENT`, `PAGESPEED_URL`, `PAGESPEED_API_KEY`, `HIGGSFIELD_API_KEY_ID`, `HIGGSFIELD_API_KEY_SECRET`, `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_ADMIN_TOKEN`, `KLAVIYO_API_KEY`, `NVIDIA_API_KEY`, `GSC_TOKEN_JSON`
+
+---
+
+## IAM roles
+
+| Module / Agent | Required Role |
+|---|---|
+| Storage | `roles/storage.objectAdmin` |
+| Compute | `roles/compute.instanceAdmin.v1`, `roles/compute.viewer` |
+| Billing | `roles/billing.viewer` |
+| Billing (BigQuery) | `roles/bigquery.dataViewer` |
+| Monitoring | `roles/monitoring.viewer` |
+| Cloud Logging | `roles/logging.viewer` |
+| Secret Manager | `roles/secretmanager.secretAccessor` |
+| Google Tag Manager | GTM account-level read/edit/publish |
+| Indexing API | Delegated SA on Google Search Console property |
+
+---
+
+## Security
+
+- **Never commit** `auth/service_account.json`, `.env`, or any credential file
+- All routes except `GET /health` require `X-API-Key`
+- Destructive CLI commands require `--confirm`
+- Use `DRY_RUN=true` in development — all destructive actions are no-ops
+- Credentials resolved in priority order: `GCP_SA_KEY_JSON` env var → `GOOGLE_APPLICATION_CREDENTIALS` file → Application Default Credentials
