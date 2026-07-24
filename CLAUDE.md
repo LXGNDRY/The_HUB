@@ -105,6 +105,12 @@ APScheduler runs as a background thread in the same Cloud Run container.
 | `daily_indexing_submission` | Daily 06:00 CT | Submit sitemap URLs to Indexing API |
 | `daily_sheets_refresh` | Daily 07:00 CT | Refresh Google Sheets dashboard |
 | `error_log_monitor` | Every 6 hours | Monitor Cloud Run error logs |
+| `indexnow_new_products` | Daily 06:15 CT | Ping IndexNow for products published in last 24h |
+| `alt_text_auto_patch` | Daily 06:30 CT | Auto-fill missing image alt text (idempotent) |
+| `shopify_product_health` | Daily 09:00 CT | Audit product SKU/barcode/type coverage; alert on gaps |
+| `gmc_disapproval_check` | Daily 10:00 CT | Alert on GMC disapprovals and critical data quality issues |
+| `gmc_shipping_drift_check` | Wednesday 08:00 CT | Alert when Shopify and GMC shipping are out of sync |
+| `klaviyo_flow_health` | Tuesday 08:00 CT | Alert if any of the 7 critical email flows are paused or missing a template |
 
 Compute-dependent jobs (`vm_health_pulse`, `nightly_idle_shutdown`, `weekly_snapshot_cleanup`)
 self-check API availability at runtime and skip gracefully — do not remove them if Compute
@@ -207,6 +213,9 @@ GitHub Actions pipeline. Secrets are injected via Secret Manager at deploy time.
 | `NVIDIA_API_KEY` | NVIDIA API key |
 | `GSC_TOKEN_JSON` | Google Search Console OAuth token JSON |
 | `GCP_ZONES` | Comma-separated Compute zones (default `us-central1-a,us-central1-b`) |
+| `GMC_MERCHANT_ID` | Google Merchant Center account/merchant ID |
+| `INDEXNOW_API_KEY` | IndexNow API key for real-time search engine pings |
+| `SITE_DOMAIN` | Public storefront domain (default `legendary-branding.com`) |
 
 ---
 

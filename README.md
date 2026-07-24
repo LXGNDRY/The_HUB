@@ -70,6 +70,12 @@ All jobs run as APScheduler background threads inside the Cloud Run container (t
 | `daily_indexing_submission` | Daily 06:00 | Submit sitemap URLs to Indexing API |
 | `daily_sheets_refresh` | Daily 07:00 | Refresh Google Sheets dashboard |
 | `error_log_monitor` | Every 6 hours | Monitor Cloud Run error logs |
+| `indexnow_new_products` | Daily 06:15 | Ping IndexNow for products published in last 24h |
+| `alt_text_auto_patch` | Daily 06:30 | Auto-fill missing product image alt text |
+| `shopify_product_health` | Daily 09:00 | Audit SKU/barcode/product-type coverage; alert on gaps |
+| `gmc_disapproval_check` | Daily 10:00 | Alert on GMC disapprovals and critical data quality issues |
+| `gmc_shipping_drift_check` | Wednesday 08:00 | Alert when Shopify and GMC shipping configs diverge |
+| `klaviyo_flow_health` | Tuesday 08:00 | Alert if any critical email flow is paused or missing a template |
 
 Control jobs at runtime:
 
@@ -194,6 +200,9 @@ All routes require `X-API-Key: <DASHBOARD_API_KEY>` except `GET /health`.
 | `HIGGSFIELD_API_KEY_SECRET` | — | Higgsfield AI key secret |
 | `NVIDIA_API_KEY` | — | NVIDIA API key |
 | `GSC_TOKEN_JSON` | — | Google Search Console OAuth token JSON |
+| `GMC_MERCHANT_ID` | — | Google Merchant Center account/merchant ID |
+| `INDEXNOW_API_KEY` | — | IndexNow API key for search engine pings |
+| `SITE_DOMAIN` | `legendary-branding.com` | Public storefront domain |
 
 ---
 

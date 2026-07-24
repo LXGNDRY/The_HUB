@@ -27,6 +27,12 @@ from scheduler.jobs import (
     indexing_submission_job,
     sheets_refresh_job,
     error_log_monitor_job,
+    shopify_product_health_job,
+    gmc_disapproval_check_job,
+    gmc_shipping_drift_check_job,
+    klaviyo_flow_health_job,
+    alt_text_auto_patch_job,
+    indexnow_new_products_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -141,6 +147,66 @@ class BotScheduler:
             IntervalTrigger(hours=6),
             id="error_log_monitor",
             name="Cloud Run Error Log Monitor",
+            replace_existing=True,
+        )
+
+        # ── Shopify & E-commerce Jobs ────────────────────────────────────────
+
+        # Daily 09:00 — Shopify product data quality audit
+        self.scheduler.add_job(
+            shopify_product_health_job,
+            CronTrigger(hour=9, minute=0),
+            id="shopify_product_health",
+            name="Shopify Product Health Check (SKU/barcode/type)",
+            replace_existing=True,
+        )
+
+        # Daily 06:15 — IndexNow ping for products published in last 24h
+        self.scheduler.add_job(
+            indexnow_new_products_job,
+            CronTrigger(hour=6, minute=15),
+            id="indexnow_new_products",
+            name="IndexNow: Ping New Products",
+            replace_existing=True,
+        )
+
+        # Daily 06:30 — Auto-fill missing image alt text
+        self.scheduler.add_job(
+            alt_text_auto_patch_job,
+            CronTrigger(hour=6, minute=30),
+            id="alt_text_auto_patch",
+            name="Alt Text Auto-Patch (images)",
+            replace_existing=True,
+        )
+
+        # ── GMC Jobs ─────────────────────────────────────────────────────────
+
+        # Daily 10:00 — GMC disapproval + data quality alert
+        self.scheduler.add_job(
+            gmc_disapproval_check_job,
+            CronTrigger(hour=10, minute=0),
+            id="gmc_disapproval_check",
+            name="GMC Disapproval & Data Quality Check",
+            replace_existing=True,
+        )
+
+        # Wednesday 08:00 — GMC × Shopify shipping drift (alert only)
+        self.scheduler.add_job(
+            gmc_shipping_drift_check_job,
+            CronTrigger(day_of_week="wed", hour=8, minute=0),
+            id="gmc_shipping_drift_check",
+            name="GMC × Shopify Shipping Drift Check",
+            replace_existing=True,
+        )
+
+        # ── Klaviyo Jobs ──────────────────────────────────────────────────────
+
+        # Tuesday 08:00 — Klaviyo flow health check
+        self.scheduler.add_job(
+            klaviyo_flow_health_job,
+            CronTrigger(day_of_week="tue", hour=8, minute=0),
+            id="klaviyo_flow_health",
+            name="Klaviyo Flow Health Check",
             replace_existing=True,
         )
 

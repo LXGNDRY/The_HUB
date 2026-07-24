@@ -493,3 +493,414 @@ def error_log_monitor_job():
     except Exception as e:
         logger.error("[error_log_monitor_job] Failed: %s", e)
         send_alert(f"❌ error_log_monitor_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 11 — Shopify Product Health Check  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def shopify_product_health_job():
+    """
+    Audits all active Shopify products for data quality gaps:
+    missing SKUs, missing barcodes, blank product types.
+    Sends an alert summary only when gaps are found.
+    """
+    logger.info("[shopify_product_health_job] Running...")
+    try:
+        from modules.shopify import _graphql
+
+        query = """
+        query($cursor: String) {
+          products(first: 50, after: $cursor, query: "status:active") {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              title
+              productType
+              variants(first: 10) {
+                nodes { sku barcode }
+              }
+            }
+          }
+        }
+        """
+
+        all_products = []
+        cursor = None
+        while True:
+            data = _graphql(query, {"cursor": cursor})
+            page_data = data["products"]
+            all_products.extend(page_data["nodes"])
+            if not page_data["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page_data["pageInfo"]["endCursor"]
+
+        no_product_type = []
+        no_sku_products = []
+        no_barcode_products = []
+
+        for p in all_products:
+            title = p["title"]
+            if not (p.get("productType") or "").strip():
+                no_product_type.append(title)
+            variants = p["variants"]["nodes"]
+            if any(not (v.get("sku") or "").strip() for v in variants):
+                no_sku_products.append(title)
+            if any(not (v.get("barcode") or "").strip() for v in variants):
+                no_barcode_products.append(title)
+
+        total = len(all_products)
+        has_gaps = no_product_type or no_sku_products or no_barcode_products
+
+        if has_gaps:
+            lines = [f"🛍️ *Shopify Product Health — {total} active products*"]
+            if no_product_type:
+                lines.append(f"\n*Missing Product Type ({len(no_product_type)}):*")
+                lines.extend([f"  • {t}" for t in no_product_type[:10]])
+                if len(no_product_type) > 10:
+                    lines.append(f"  … and {len(no_product_type) - 10} more")
+            if no_sku_products:
+                lines.append(f"\n*Missing SKU ({len(no_sku_products)}):*")
+                lines.extend([f"  • {t}" for t in no_sku_products[:5]])
+                if len(no_sku_products) > 5:
+                    lines.append(f"  … and {len(no_sku_products) - 5} more")
+            if no_barcode_products:
+                lines.append(f"\n*Missing Barcode/GTIN ({len(no_barcode_products)}):*")
+                lines.extend([f"  • {t}" for t in no_barcode_products[:5]])
+                if len(no_barcode_products) > 5:
+                    lines.append(f"  … and {len(no_barcode_products) - 5} more")
+            send_alert("\n".join(lines))
+            logger.warning("[shopify_product_health_job] Gaps found — %d no-type, %d no-sku, %d no-barcode",
+                           len(no_product_type), len(no_sku_products), len(no_barcode_products))
+        else:
+            logger.info("[shopify_product_health_job] All %d products OK.", total)
+
+    except Exception as e:
+        logger.error("[shopify_product_health_job] Failed: %s", e)
+        send_alert(f"❌ shopify_product_health_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 12 — GMC Disapproval Check  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def gmc_disapproval_check_job():
+    """
+    Checks Google Merchant Center for disapproved products and active
+    data quality flags. Alerts if any disapprovals or critical issues are found.
+    Requires: GCP_PROJECT_ID, GCP_SA_KEY_JSON (or ADC), GMC_MERCHANT_ID env vars.
+    """
+    import os
+    logger.info("[gmc_disapproval_check_job] Running...")
+
+    merchant_id = os.getenv("GMC_MERCHANT_ID", "")
+    if not merchant_id:
+        logger.warning("[gmc_disapproval_check_job] GMC_MERCHANT_ID not set — skipping.")
+        return
+
+    try:
+        from googleapiclient.discovery import build
+        from auth.credentials import get_credentials
+
+        creds = get_credentials()
+        service = build("content", "v2.1", credentials=creds, cache_discovery=False)
+
+        # Fetch product statuses (summary level — fast, no per-product detail)
+        statuses = service.productstatuses().list(
+            merchantId=merchant_id,
+            maxResults=250,
+        ).execute()
+
+        disapproved = []
+        flagged = []
+
+        for item in statuses.get("resources", []):
+            product_id = item.get("productId", "")
+            title = item.get("title", product_id)
+            dest_statuses = item.get("destinationStatuses", [])
+
+            for ds in dest_statuses:
+                if ds.get("status") == "disapproved":
+                    disapproved.append(title)
+                    break
+
+            for issue in item.get("itemLevelIssues", []):
+                if issue.get("severity") == "error":
+                    flagged.append((title, issue.get("description", "")))
+                    break
+
+        if disapproved or flagged:
+            lines = [f"🚫 *GMC Product Health Check*"]
+            if disapproved:
+                lines.append(f"\n*Disapproved ({len(disapproved)}):*")
+                lines.extend([f"  • {t}" for t in disapproved[:10]])
+                if len(disapproved) > 10:
+                    lines.append(f"  … and {len(disapproved) - 10} more")
+            if flagged:
+                lines.append(f"\n*Critical Issues ({len(flagged)}):*")
+                for title, desc in flagged[:5]:
+                    lines.append(f"  • {title}: {desc}")
+                if len(flagged) > 5:
+                    lines.append(f"  … and {len(flagged) - 5} more")
+            send_alert("\n".join(lines))
+            logger.warning("[gmc_disapproval_check_job] %d disapproved, %d flagged.",
+                           len(disapproved), len(flagged))
+        else:
+            logger.info("[gmc_disapproval_check_job] All products approved.")
+
+    except Exception as e:
+        logger.error("[gmc_disapproval_check_job] Failed: %s", e)
+        send_alert(f"❌ gmc_disapproval_check_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 13 — GMC × Shopify Shipping Drift Check  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def gmc_shipping_drift_check_job():
+    """
+    Compares Shopify shipping zones against GMC shipping services.
+    Alerts if any country present in Shopify zones is missing from GMC shipping,
+    or if free-shipping thresholds differ. Does NOT auto-fix — alert only.
+    Requires: GMC_MERCHANT_ID, GCP_SA_KEY_JSON (or ADC).
+    """
+    import os
+    logger.info("[gmc_shipping_drift_check_job] Running...")
+
+    merchant_id = os.getenv("GMC_MERCHANT_ID", "")
+    if not merchant_id:
+        logger.warning("[gmc_shipping_drift_check_job] GMC_MERCHANT_ID not set — skipping.")
+        return
+
+    try:
+        from googleapiclient.discovery import build
+        from auth.credentials import get_credentials
+        from modules.shopify import shipping_rates_summary
+
+        creds = get_credentials()
+        service = build("content", "v2.1", credentials=creds, cache_discovery=False)
+
+        # Shopify: collect all countries with active rates
+        shopify_zones = shipping_rates_summary()
+        shopify_countries = set()
+        for zone in shopify_zones.get("zones", []):
+            for country in zone.get("countries", []):
+                code = country.get("code") or country.get("country_code")
+                if code:
+                    shopify_countries.add(code.upper())
+
+        # GMC: collect all countries with active shipping services
+        gmc_resp = service.shippingsettings().get(
+            merchantId=merchant_id, accountId=merchant_id
+        ).execute()
+        gmc_countries = set()
+        for svc in gmc_resp.get("services", []):
+            if svc.get("active", False):
+                for area in svc.get("deliveryCountries", []):
+                    gmc_countries.add(area.upper())
+
+        missing_from_gmc = shopify_countries - gmc_countries
+        missing_from_shopify = gmc_countries - shopify_countries
+
+        if missing_from_gmc or missing_from_shopify:
+            lines = ["⚠️ *GMC × Shopify Shipping Drift Detected*"]
+            if missing_from_gmc:
+                lines.append(f"\n*In Shopify but missing from GMC ({len(missing_from_gmc)}):*")
+                lines.append("  " + ", ".join(sorted(missing_from_gmc)))
+            if missing_from_shopify:
+                lines.append(f"\n*In GMC but missing from Shopify ({len(missing_from_shopify)}):*")
+                lines.append("  " + ", ".join(sorted(missing_from_shopify)))
+            lines.append("\nRun the sync-gmc-shipping workflow to fix.")
+            send_alert("\n".join(lines))
+            logger.warning("[gmc_shipping_drift_check_job] Drift: %d missing from GMC, %d from Shopify",
+                           len(missing_from_gmc), len(missing_from_shopify))
+        else:
+            logger.info("[gmc_shipping_drift_check_job] Shipping in sync. %d countries matched.", len(shopify_countries))
+
+    except Exception as e:
+        logger.error("[gmc_shipping_drift_check_job] Failed: %s", e)
+        send_alert(f"❌ gmc_shipping_drift_check_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 14 — Klaviyo Flow Health Check  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def klaviyo_flow_health_job():
+    """
+    Checks that all 7 critical Legendary Branding email flows are:
+      - enabled (status == 'live')
+      - have a template assigned to their primary flow message
+    Alerts if any flow is paused or missing a template.
+    """
+    logger.info("[klaviyo_flow_health_job] Running...")
+
+    # Known critical flow message IDs (discovered May/June 2026)
+    CRITICAL_FLOW_MESSAGES = {
+        "UjfrVL": "Welcome Series",
+        "VjwdXC": "Customer Thank You",
+        "YkSXSX": "Abandoned Bag (Email 1)",
+        "Y5aXaT": "Browse Abandonment",
+        "YyydEG": "Shipping Confirmation",
+        "XVxb45": "Out for Delivery",
+        "Ridrhn": "Delivered + Review",
+    }
+
+    try:
+        from modules.klaviyo import KlaviyoModule
+        klv = KlaviyoModule()
+
+        issues = []
+
+        for msg_id, flow_name in CRITICAL_FLOW_MESSAGES.items():
+            try:
+                msg = klv.get_flow_message(msg_id)
+                if not msg.get("template_id"):
+                    issues.append(f"  • *{flow_name}*: no template assigned (message {msg_id})")
+            except Exception as e:
+                issues.append(f"  • *{flow_name}*: could not fetch message {msg_id} — {e}")
+
+        # Also check that all flows are live
+        try:
+            flows = klv.list_flows()
+            paused = [
+                f["name"] for f in flows.get("flows", [])
+                if f.get("status") not in ("live", "manual")
+            ]
+            for name in paused:
+                issues.append(f"  • Flow *{name}* is not live")
+        except Exception as e:
+            logger.warning("[klaviyo_flow_health_job] Could not check flow statuses: %s", e)
+
+        if issues:
+            send_alert("📧 *Klaviyo Flow Health Issues*\n" + "\n".join(issues))
+            logger.warning("[klaviyo_flow_health_job] %d issue(s) found.", len(issues))
+        else:
+            logger.info("[klaviyo_flow_health_job] All 7 flows healthy.")
+
+    except Exception as e:
+        logger.error("[klaviyo_flow_health_job] Failed: %s", e)
+        send_alert(f"❌ klaviyo_flow_health_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 15 — Alt Text Auto-Patch  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def alt_text_auto_patch_job():
+    """
+    Scans all active product images and fills any missing alt text.
+    Pattern: "{Title} — {Product Type} | Legendary Branding"
+    Only writes when alt is blank — safe to run daily.
+    """
+    logger.info("[alt_text_auto_patch_job] Running...")
+    try:
+        import time
+        from modules.shopify import list_products, list_product_images, update_product_image_alt
+
+        products = list_products(limit=250, status="active")
+        patched = 0
+        skipped = 0
+
+        for product in products.get("products", []):
+            pid = product["id"]
+            title = product.get("title", "")
+            ptype = product.get("product_type", "")
+            tags = product.get("tags", "")
+
+            images = list_product_images(pid)
+            for idx, img in enumerate(images.get("images", []), start=1):
+                if img.get("alt"):
+                    skipped += 1
+                    continue
+
+                # Build SEO-friendly alt text
+                ptype_part = f" — {ptype}" if ptype else ""
+                detail = f" Detail View {idx}" if idx > 1 else ""
+                alt = f"{title}{ptype_part}{detail} | Legendary Branding"[:255]
+
+                if not DRY_RUN:
+                    result = safe_execute(
+                        f"update_image_alt:{pid}:{img['id']}",
+                        update_product_image_alt,
+                        pid, img["id"], alt,
+                    )
+                    if result is not None:
+                        patched += 1
+                else:
+                    patched += 1
+
+                time.sleep(0.55)  # ~1.8 req/s — within Shopify's 2/s REST limit
+
+        msg = f"🖼️ *Alt Text Auto-Patch* — {patched} filled, {skipped} already set"
+        if DRY_RUN:
+            msg = f"[DRY RUN] {msg}"
+        if patched > 0:
+            send_alert(msg)
+        logger.info("[alt_text_auto_patch_job] Done. Patched: %d, skipped: %d", patched, skipped)
+
+    except Exception as e:
+        logger.error("[alt_text_auto_patch_job] Failed: %s", e)
+        send_alert(f"❌ alt_text_auto_patch_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 16 — IndexNow: Ping New Products  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def indexnow_new_products_job():
+    """
+    Finds Shopify products published in the last 25 hours and pings
+    IndexNow for each new URL so search engines index them immediately.
+    Requires: INDEXNOW_API_KEY env var.
+    """
+    import os
+    logger.info("[indexnow_new_products_job] Running...")
+
+    api_key = os.getenv("INDEXNOW_API_KEY", "")
+    store_domain = os.getenv("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
+    site_domain = os.getenv("SITE_DOMAIN", "legendary-branding.com")
+
+    if not api_key:
+        logger.warning("[indexnow_new_products_job] INDEXNOW_API_KEY not set — skipping.")
+        return
+
+    try:
+        import requests as _requests
+        from datetime import datetime, timezone, timedelta
+        from modules.shopify import _get
+
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=25)
+        cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+        # Shopify REST: products published after cutoff
+        data = _get(f"/products.json?status=active&published_at_min={cutoff_str}&limit=50&fields=id,handle,published_at")
+        products = data.get("products", [])
+
+        if not products:
+            logger.info("[indexnow_new_products_job] No new products in last 25h.")
+            return
+
+        urls = [f"https://{site_domain}/products/{p['handle']}" for p in products]
+
+        resp = _requests.post(
+            "https://api.indexnow.org/indexnow",
+            json={
+                "host": site_domain,
+                "key": api_key,
+                "urlList": urls,
+            },
+            timeout=15,
+        )
+        resp.raise_for_status()
+
+        send_alert(
+            f"🔎 *IndexNow: {len(urls)} new product(s) pinged*\n"
+            + "\n".join([f"  • {u}" for u in urls[:10]])
+            + (f"\n  … and {len(urls) - 10} more" if len(urls) > 10 else "")
+        )
+        logger.info("[indexnow_new_products_job] Pinged %d URLs.", len(urls))
+
+    except Exception as e:
+        logger.error("[indexnow_new_products_job] Failed: %s", e)
+        send_alert(f"❌ indexnow_new_products_job failed: {e}")
