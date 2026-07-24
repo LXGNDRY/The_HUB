@@ -111,6 +111,7 @@ APScheduler runs as a background thread in the same Cloud Run container.
 | `gmc_disapproval_check` | Daily 10:00 CT | Alert on GMC disapprovals and critical data quality issues |
 | `gmc_shipping_drift_check` | Wednesday 08:00 CT | Alert when Shopify and GMC shipping are out of sync |
 | `klaviyo_flow_health` | Tuesday 08:00 CT | Alert if any of the 7 critical email flows are paused or missing a template |
+| `gmc_title_rotation` | Wednesday 10:00 CT | CTR-based A/B title rotation for GMC free listings; saves rotation state to GCS |
 
 Compute-dependent jobs (`vm_health_pulse`, `nightly_idle_shutdown`, `weekly_snapshot_cleanup`)
 self-check API availability at runtime and skip gracefully — do not remove them if Compute
@@ -212,6 +213,10 @@ GitHub Actions pipeline. Secrets are injected via Secret Manager at deploy time.
 | `HIGGSFIELD_API_KEY_SECRET` | Higgsfield AI key secret |
 | `NVIDIA_API_KEY` | NVIDIA API key |
 | `GSC_TOKEN_JSON` | Google Search Console OAuth token JSON |
+| `GMC_MERCHANT_ID` | Google Merchant Center account/merchant ID |
+| `INDEXNOW_API_KEY` | IndexNow API key for real-time search engine URL pings |
+| `SITE_DOMAIN` | Public storefront domain (default `legendary-branding.com`) |
+| `SHOPIFY_WEBHOOK_SECRET` | Secret for verifying Shopify HMAC webhook signatures |
 | `GCP_ZONES` | Comma-separated Compute zones (default `us-central1-a,us-central1-b`) |
 | `GMC_MERCHANT_ID` | Google Merchant Center account/merchant ID |
 | `INDEXNOW_API_KEY` | IndexNow API key for real-time search engine pings |

@@ -904,3 +904,96 @@ def indexnow_new_products_job():
     except Exception as e:
         logger.error("[indexnow_new_products_job] Failed: %s", e)
         send_alert(f"❌ indexnow_new_products_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 17 — GMC Title Rotation  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def gmc_title_rotation_job():
+    """
+    Runs the GMC A/B title rotation engine. For each active product:
+    - Fetches 14-day free listing CTR from GMC reports.search
+    - Decides whether to rotate, lock, unlock, or cool down based on CTR thresholds
+    - Saves updated rotation state to GCS (lb-feed-state/title_rotation_state.json)
+    Requires: GMC_MERCHANT_ID, GCP_SA_KEY_JSON env vars.
+    The actual supplemental feed CSV rebuild (gmc_supplemental_feed.py) is a
+    separate GitHub Actions workflow that uses this state file; this job only
+    advances the rotation state.
+    """
+    import os
+    import sys
+    logger.info("[gmc_title_rotation_job] Running...")
+
+    sa_key_json = os.getenv("GCP_SA_KEY_JSON", "")
+    merchant_id = os.getenv("GMC_MERCHANT_ID", "")
+
+    if not sa_key_json or not merchant_id:
+        logger.warning("[gmc_title_rotation_job] GCP_SA_KEY_JSON or GMC_MERCHANT_ID not set — skipping.")
+        return
+
+    try:
+        from datetime import date
+
+        # Add scripts/ to path so title_rotation_module is importable
+        scripts_dir = os.path.join(os.path.dirname(__file__), "..", "scripts")
+        if scripts_dir not in sys.path:
+            sys.path.insert(0, scripts_dir)
+
+        from title_rotation_module import (
+            load_state,
+            save_state,
+            fetch_free_listing_performance,
+            decide_rotation,
+        )
+
+        today = date.today().isoformat()
+
+        # 1. Load existing rotation state from GCS
+        state = load_state(sa_key_json)
+        products_state = state.setdefault("products", {})
+
+        # 2. Fetch 14-day GMC free listing performance
+        perf_data = fetch_free_listing_performance(sa_key_json)
+
+        # 3. Iterate over tracked products and advance rotation decisions
+        from modules.shopify import _get
+        data = _get("/products.json?status=active&limit=250&fields=id,handle,product_type,variants")
+        products = data.get("products", [])
+
+        rotated = locked = cooled = no_pool = 0
+        for product in products:
+            handle = product.get("handle", "")
+            category = product.get("product_type", "")
+            variants = product.get("variants", [])
+            if not handle or not category:
+                continue
+
+            _, reason = decide_rotation(handle, category, variants, perf_data, state, today)
+            if reason == "ROTATE":
+                rotated += 1
+            elif reason == "LOCKED":
+                locked += 1
+            elif reason in ("COOLING", "UNLOCK_ROTATE"):
+                cooled += 1
+            elif reason == "NO_POOL":
+                no_pool += 1
+
+        # 4. Save updated state back to GCS
+        state["last_run"] = today
+        save_state(state, sa_key_json)
+
+        summary = (
+            f"🔄 *GMC Title Rotation complete*\n"
+            f"  Rotated: {rotated} | Locked: {locked} | Cooling: {cooled} | No pool: {no_pool}\n"
+            f"  State saved to GCS. Run gmc_supplemental_feed.py to rebuild the feed CSV."
+        )
+        send_alert(summary)
+        logger.info(
+            "[gmc_title_rotation_job] Done. rotated=%d locked=%d cooled=%d no_pool=%d",
+            rotated, locked, cooled, no_pool,
+        )
+
+    except Exception as e:
+        logger.error("[gmc_title_rotation_job] Failed: %s", e)
+        send_alert(f"❌ gmc_title_rotation_job failed: {e}")

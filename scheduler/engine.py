@@ -33,6 +33,7 @@ from scheduler.jobs import (
     klaviyo_flow_health_job,
     alt_text_auto_patch_job,
     indexnow_new_products_job,
+    gmc_title_rotation_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -207,6 +208,17 @@ class BotScheduler:
             CronTrigger(day_of_week="tue", hour=8, minute=0),
             id="klaviyo_flow_health",
             name="Klaviyo Flow Health Check",
+            replace_existing=True,
+        )
+
+        # ── GMC Title Rotation ────────────────────────────────────────────────
+
+        # Wednesday 10:00 — GMC title A/B rotation (after shipping drift check)
+        self.scheduler.add_job(
+            gmc_title_rotation_job,
+            CronTrigger(day_of_week="wed", hour=10, minute=0),
+            id="gmc_title_rotation",
+            name="GMC Title Rotation (CTR-based A/B)",
             replace_existing=True,
         )
 
