@@ -888,6 +888,7 @@ def indexnow_new_products_job():
             json={
                 "host": site_domain,
                 "key": api_key,
+                "keyLocation": f"https://{site_domain}/pages/{api_key}",
                 "urlList": urls,
             },
             timeout=15,

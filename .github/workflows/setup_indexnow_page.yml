@@ -1,0 +1,25 @@
+name: 🔎 Setup IndexNow Key Page
+
+on:
+  workflow_dispatch:
+
+jobs:
+  setup:
+    name: Create IndexNow verification page on Shopify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+      - run: pip install -r requirements.txt --quiet
+      - name: Create IndexNow key page
+        env:
+          SHOPIFY_STORE_DOMAIN: lngndny.myshopify.com
+          SHOPIFY_ADMIN_TOKEN:  ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_CLIENT_ID:    ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          INDEXNOW_API_KEY: cc432adab3e14a9717af073e62381d975d001f99b014d669e032dbf62b09160e
+          SITE_DOMAIN: legendary-branding.com
+        run: python scripts/setup_indexnow_page.py
