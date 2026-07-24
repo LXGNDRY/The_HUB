@@ -1,12 +1,16 @@
 """
 setup_indexnow_page.py — One-shot: create the IndexNow key verification page on Shopify.
 
-Uses the Shopify Admin REST API directly with SHOPIFY_ADMIN_TOKEN to avoid the
-OAuth Client Credentials refresh flow which requires a storefront-installed app.
+Uses the Shopify Admin REST API directly with SHOPIFY_ADMIN_TOKEN.
+Requires the custom app to have 'write_content' scope (Online Store > Pages).
+
+If the REST Pages API returns 401/403, the script prints instructions for
+enabling the scope in the Shopify admin custom app settings.
 """
 
 import os
 import sys
+import json
 import requests
 
 INDEXNOW_KEY   = os.getenv("INDEXNOW_API_KEY", "")
@@ -32,23 +36,38 @@ HEADERS = {
 page_url = f"https://{SITE_DOMAIN}/pages/{INDEXNOW_KEY}"
 print(f"IndexNow key : {INDEXNOW_KEY}")
 print(f"Target URL   : {page_url}")
+print(f"Store        : {STORE_DOMAIN}")
 
 
 def shopify_get(path, params=None):
     r = requests.get(f"{BASE_URL}{path}", headers=HEADERS, params=params, timeout=15)
-    r.raise_for_status()
+    if not r.ok:
+        print(f"ERROR {r.status_code} on GET {path}: {r.text[:500]}")
+        if r.status_code in (401, 403):
+            print()
+            print("SCOPE FIX REQUIRED:")
+            print("  1. Go to Shopify Admin > Apps > Develop apps > your custom app")
+            print("  2. Click 'Configure Admin API scopes'")
+            print("  3. Enable 'write_content' (and 'read_content') under Online Store")
+            print("  4. Click Save, then reinstall the app to get a new token")
+            print("  5. Update the SHOPIFY_ADMIN_TOKEN secret in GitHub")
+        r.raise_for_status()
     return r.json()
 
 
 def shopify_post(path, body):
     r = requests.post(f"{BASE_URL}{path}", headers=HEADERS, json=body, timeout=15)
-    r.raise_for_status()
+    if not r.ok:
+        print(f"ERROR {r.status_code} on POST {path}: {r.text[:500]}")
+        r.raise_for_status()
     return r.json()
 
 
 def shopify_put(path, body):
     r = requests.put(f"{BASE_URL}{path}", headers=HEADERS, json=body, timeout=15)
-    r.raise_for_status()
+    if not r.ok:
+        print(f"ERROR {r.status_code} on PUT {path}: {r.text[:500]}")
+        r.raise_for_status()
     return r.json()
 
 
