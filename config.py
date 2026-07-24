@@ -25,6 +25,11 @@ SNAPSHOT_MAX_AGE_DAYS: int = int(os.getenv("SNAPSHOT_MAX_AGE_DAYS", "30"))
 QUOTA_ALERT_PERCENT: float = float(os.getenv("QUOTA_ALERT_PERCENT", "80.0"))
 STORAGE_INACTIVE_DAYS: int = int(os.getenv("STORAGE_INACTIVE_DAYS", "90"))
 
+# E-commerce automation
+GMC_MERCHANT_ID: str = os.getenv("GMC_MERCHANT_ID", "")
+INDEXNOW_API_KEY: str = os.getenv("INDEXNOW_API_KEY", "")
+SITE_DOMAIN: str = os.getenv("SITE_DOMAIN", "legendary-branding.com")
+
 if DRY_RUN:
     logger.warning("=== DRY RUN MODE ACTIVE — no destructive actions will execute ===")
 

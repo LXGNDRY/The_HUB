@@ -414,6 +414,21 @@ class KlaviyoModule:
     # Assign template to flow message
     # ------------------------------------------------------------------
 
+    def assign_template_to_flow_message(self, message_id: str, template_id: str) -> dict:
+        """
+        Assign a specific template to a flow message via
+        PATCH /api/flow-messages/{id}/relationships/template.
+        """
+        body = {
+            "data": {
+                "type": "template",
+                "id": template_id,
+            }
+        }
+        _patch(f"flow-messages/{message_id}/relationships/template", body)
+        logger.info("Assigned template %s to flow message %s", template_id, message_id)
+        return {"status": "assigned", "message_id": message_id, "template_id": template_id}
+
     def get_template_id_for_flow_message(self, message_id: str) -> str | None:
         """
         Returns the template ID currently linked to a flow message.

@@ -251,7 +251,7 @@ class ThemeDeploymentAgent:
             raise EnvironmentError("SHOPIFY_STORE and SHOPIFY_ADMIN_TOKEN must be set in .env")
 
         theme_path = Path(theme_dir)
-        base_url = f"https://{SHOPIFY_STORE}/admin/api/2024-01/themes/{shopify_theme_id}/assets.json"
+        base_url = f"https://{SHOPIFY_STORE}/admin/api/2026-04/themes/{shopify_theme_id}/assets.json"
         headers  = {
             "X-Shopify-Access-Token": SHOPIFY_TOKEN,
             "Content-Type": "application/json",
