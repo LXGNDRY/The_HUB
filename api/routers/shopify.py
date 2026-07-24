@@ -536,3 +536,326 @@ def set_metafield(req: SetMetafieldRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# Fulfillments
+# ─────────────────────────────────────────────
+
+class CreateFulfillmentRequest(BaseModel):
+    location_id: int
+    line_items: Optional[list] = None
+    tracking_number: str = ""
+    tracking_company: str = ""
+    notify_customer: bool = True
+
+
+class UpdateTrackingRequest(BaseModel):
+    tracking_number: str
+    tracking_company: str = ""
+    notify_customer: bool = True
+
+
+@router.get("/orders/{order_id}/fulfillments", summary="List fulfillments for an order")
+def list_fulfillments(order_id: int):
+    try:
+        return sh.list_fulfillments(order_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/orders/{order_id}/fulfillments", summary="Create a fulfillment")
+def create_fulfillment(order_id: int, req: CreateFulfillmentRequest):
+    try:
+        return sh.create_fulfillment(
+            order_id, req.location_id, req.line_items,
+            req.tracking_number, req.tracking_company, req.notify_customer,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/orders/{order_id}/fulfillments/{fulfillment_id}/cancel",
+             summary="Cancel a fulfillment")
+def cancel_fulfillment(order_id: int, fulfillment_id: int):
+    try:
+        return sh.cancel_fulfillment(order_id, fulfillment_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.put("/orders/{order_id}/fulfillments/{fulfillment_id}/tracking",
+            summary="Update fulfillment tracking info")
+def update_fulfillment_tracking(order_id: int, fulfillment_id: int,
+                                req: UpdateTrackingRequest):
+    try:
+        return sh.update_fulfillment_tracking(
+            order_id, fulfillment_id,
+            req.tracking_number, req.tracking_company, req.notify_customer,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# Refunds
+# ─────────────────────────────────────────────
+
+class CalculateRefundRequest(BaseModel):
+    line_items: Optional[list] = None
+    shipping: Optional[dict] = None
+
+
+class CreateRefundRequest(BaseModel):
+    note: str = ""
+    line_items: Optional[list] = None
+    shipping: Optional[dict] = None
+    transactions: Optional[list] = None
+
+
+@router.get("/orders/{order_id}/refunds", summary="List refunds for an order")
+def list_refunds(order_id: int):
+    try:
+        return sh.list_refunds(order_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/orders/{order_id}/refunds/calculate",
+             summary="Calculate refund amounts (preview only)")
+def calculate_refund(order_id: int, req: CalculateRefundRequest):
+    try:
+        return sh.calculate_refund(order_id, req.line_items, req.shipping)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/orders/{order_id}/refunds", summary="Issue a refund on an order")
+def create_refund(order_id: int, req: CreateRefundRequest):
+    try:
+        return sh.create_refund(
+            order_id, req.note, req.line_items, req.shipping, req.transactions,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# Draft Orders
+# ─────────────────────────────────────────────
+
+class CreateDraftOrderRequest(BaseModel):
+    line_items: list
+    email: str = ""
+    customer_id: Optional[int] = None
+    note: str = ""
+    tags: str = ""
+
+
+class SendInvoiceRequest(BaseModel):
+    from_email: str = ""
+    subject: str = "Your invoice from our store"
+    custom_message: str = ""
+
+
+@router.get("/draft_orders", summary="List draft orders")
+def list_draft_orders(
+    limit: int = Query(50, ge=1, le=250),
+    status: str = Query("any", description="open | invoice_sent | completed | any"),
+):
+    try:
+        return sh.list_draft_orders(limit=limit, status=status)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/draft_orders/{draft_order_id}", summary="Get draft order by ID")
+def get_draft_order(draft_order_id: int):
+    try:
+        return sh.get_draft_order(draft_order_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/draft_orders", summary="Create a draft order")
+def create_draft_order(req: CreateDraftOrderRequest):
+    try:
+        return sh.create_draft_order(
+            req.line_items, req.email, req.customer_id, req.note, req.tags,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/draft_orders/{draft_order_id}/send_invoice",
+             summary="Send invoice email for a draft order")
+def send_draft_order_invoice(draft_order_id: int, req: SendInvoiceRequest):
+    try:
+        return sh.send_draft_order_invoice(
+            draft_order_id, req.from_email, req.subject, req.custom_message,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/draft_orders/{draft_order_id}/complete",
+             summary="Complete a draft order (converts to real order)")
+def complete_draft_order(
+    draft_order_id: int,
+    payment_pending: bool = Query(False),
+):
+    try:
+        return sh.complete_draft_order(draft_order_id, payment_pending)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.delete("/draft_orders/{draft_order_id}", summary="Delete a draft order")
+def delete_draft_order(draft_order_id: int):
+    try:
+        return sh.delete_draft_order(draft_order_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# Webhooks (Shopify-side registration)
+# ─────────────────────────────────────────────
+
+class CreateWebhookRequest(BaseModel):
+    topic: str
+    address: str
+    format_: str = "json"
+
+
+@router.get("/webhooks", summary="List registered Shopify webhooks")
+def list_webhooks():
+    try:
+        return sh.list_webhooks()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/webhooks/{webhook_id}", summary="Get a webhook by ID")
+def get_webhook(webhook_id: int):
+    try:
+        return sh.get_webhook(webhook_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/webhooks", summary="Register a Shopify webhook")
+def create_webhook(req: CreateWebhookRequest):
+    try:
+        return sh.create_webhook(req.topic, req.address, req.format_)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.delete("/webhooks/{webhook_id}", summary="Delete a webhook")
+def delete_webhook(webhook_id: int):
+    try:
+        return sh.delete_webhook(webhook_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# Abandoned Checkouts
+# ─────────────────────────────────────────────
+
+@router.get("/checkouts/abandoned", summary="List abandoned checkouts")
+def list_abandoned_checkouts(
+    limit: int = Query(50, ge=1, le=250),
+    since_id: Optional[int] = Query(None),
+):
+    try:
+        return sh.list_abandoned_checkouts(limit=limit, since_id=since_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# URL Redirects
+# ─────────────────────────────────────────────
+
+class CreateRedirectRequest(BaseModel):
+    path: str
+    target: str
+
+
+@router.get("/redirects", summary="List URL redirects")
+def list_redirects(limit: int = Query(50, ge=1, le=250)):
+    try:
+        return sh.list_redirects(limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/redirects/count", summary="Total redirect count")
+def count_redirects():
+    try:
+        return sh.count_redirects()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/redirects", summary="Create a 301 URL redirect")
+def create_redirect(req: CreateRedirectRequest):
+    try:
+        return sh.create_redirect(req.path, req.target)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.delete("/redirects/{redirect_id}", summary="Delete a URL redirect")
+def delete_redirect(redirect_id: int):
+    try:
+        return sh.delete_redirect(redirect_id)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# Payments (Shopify Payments)
+# ─────────────────────────────────────────────
+
+@router.get("/payments/balance", summary="Shopify Payments account balance")
+def payments_balance():
+    try:
+        return sh.payments_balance()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/payments/payouts", summary="List Shopify Payments payouts")
+def list_payouts(
+    limit: int = Query(50, ge=1, le=250),
+    status: str = Query("paid",
+                        description="scheduled | in_transit | paid | failed | cancelled"),
+):
+    try:
+        return sh.list_payouts(limit=limit, status=status)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/payments/payouts/{payout_id}/transactions",
+            summary="Transactions in a payout")
+def payout_transactions(payout_id: int, limit: int = Query(50)):
+    try:
+        return sh.payout_transactions(payout_id, limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# Analytics / Reports
+# ─────────────────────────────────────────────
+
+@router.get("/reports", summary="List saved Shopify Analytics reports")
+def list_reports(limit: int = Query(50, ge=1, le=250)):
+    try:
+        return sh.list_reports(limit=limit)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
