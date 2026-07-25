@@ -998,3 +998,39 @@ def gmc_title_rotation_job():
     except Exception as e:
         logger.error("[gmc_title_rotation_job] Failed: %s", e)
         send_alert(f"❌ gmc_title_rotation_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 18 — Blog Writer  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def blog_writer_job():
+    """
+    Generate and publish one SEO blog post to the Shopify store.
+    Runs 3x daily (08:00, 12:00, 16:00 CT) for 3 posts per day.
+    Idempotent — skips topics already published.
+    """
+    logger.info("[blog_writer_job] Running...")
+    try:
+        from agents.blog_writer_agent import run_blog_writer, BLOG_POSTS_PER_RUN
+        result = run_blog_writer(posts_per_run=BLOG_POSTS_PER_RUN)
+
+        published = result.get("published", [])
+        skipped = result.get("skipped", [])
+        errors = result.get("errors", [])
+
+        if published:
+            titles = "\n".join(f"  • {t}" for t in published)
+            send_alert(f"✍️ *Blog Writer* — {len(published)} post(s) published:\n{titles}")
+        if errors:
+            send_alert(f"⚠️ *Blog Writer* — {len(errors)} error(s):\n" + "\n".join(errors))
+        if not published and not errors:
+            logger.info("[blog_writer_job] No new posts — all topics already published or skipped.")
+
+        logger.info(
+            "[blog_writer_job] Done. published=%d skipped=%d errors=%d",
+            len(published), len(skipped), len(errors),
+        )
+    except Exception as e:
+        logger.error("[blog_writer_job] Failed: %s", e)
+        send_alert(f"❌ blog_writer_job failed: {e}")

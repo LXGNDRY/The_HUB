@@ -112,6 +112,9 @@ APScheduler runs as a background thread in the same Cloud Run container.
 | `gmc_shipping_drift_check` | Wednesday 08:00 CT | Alert when Shopify and GMC shipping are out of sync |
 | `klaviyo_flow_health` | Tuesday 08:00 CT | Alert if any of the 7 critical email flows are paused or missing a template |
 | `gmc_title_rotation` | Wednesday 10:00 CT | CTR-based A/B title rotation for GMC free listings; saves rotation state to GCS |
+| `blog_writer_morning` | Daily 08:00 CT | Generate + publish one SEO blog post to Shopify |
+| `blog_writer_midday` | Daily 12:00 CT | Generate + publish one SEO blog post to Shopify |
+| `blog_writer_afternoon` | Daily 16:00 CT | Generate + publish one SEO blog post to Shopify |
 
 Compute-dependent jobs (`vm_health_pulse`, `nightly_idle_shutdown`, `weekly_snapshot_cleanup`)
 self-check API availability at runtime and skip gracefully — do not remove them if Compute
@@ -217,6 +220,9 @@ GitHub Actions pipeline. Secrets are injected via Secret Manager at deploy time.
 | `INDEXNOW_API_KEY` | IndexNow API key for real-time search engine URL pings |
 | `SITE_DOMAIN` | Public storefront domain (default `legendary-branding.com`) |
 | `SHOPIFY_WEBHOOK_SECRET` | Secret for verifying Shopify HMAC webhook signatures |
+| `BLOG_SHOPIFY_BLOG_ID` | Shopify blog ID to publish articles to (auto-detected if unset) |
+| `BLOG_POSTS_PER_RUN` | Number of posts per scheduler run (default `1`) |
+| `BLOG_AUTHOR` | Author name on published articles (default `Legendary Branding`) |
 | `GCP_ZONES` | Comma-separated Compute zones (default `us-central1-a,us-central1-b`) |
 | `GMC_MERCHANT_ID` | Google Merchant Center account/merchant ID |
 | `INDEXNOW_API_KEY` | IndexNow API key for real-time search engine pings |
