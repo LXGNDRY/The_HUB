@@ -12,7 +12,7 @@ from api.middleware.auth import verify_api_key
 from fastapi.staticfiles import StaticFiles
 from api.routers import compute, storage, billing, monitoring, seo, analytics, pagespeed
 from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs, higgsfield, shopify, klaviyo
-from api.routers import webhooks, oauth, app_dashboard, blog_writer
+from api.routers import webhooks, oauth, app_dashboard, blog_writer, vision
 from scheduler.engine import BotScheduler
 
 logging.basicConfig(
@@ -73,6 +73,7 @@ app.include_router(higgsfield.router,  prefix="/api/higgsfield",  tags=["Higgsfi
 app.include_router(shopify.router,     prefix="/api/shopify",     tags=["Shopify"],        **protected)
 app.include_router(klaviyo.router,      prefix="/api/klaviyo",      tags=["Klaviyo"],      **protected)
 app.include_router(blog_writer.router,  prefix="/api/blog-writer",  tags=["Blog Writer"],  **protected)
+app.include_router(vision.router,       prefix="/api/vision",       tags=["Vision AI"],    **protected)
 
 # Webhooks — unauthenticated; Shopify signs with HMAC instead of X-API-Key
 app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])

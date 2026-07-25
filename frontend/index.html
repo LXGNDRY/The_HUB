@@ -297,6 +297,21 @@ function klaviyoCard() {
   </div>`;
 }
 
+function visionCard() {
+  return `
+  <div class="card">
+    <div class="card-title">👁️ Vision AI (NVIDIA NIM)</div>
+    <p style="font-size:13px;color:#6d7175;margin-bottom:12px">
+      Audit product images and auto-generate alt text using NVIDIA NIM Vision.
+      Dry-run mode previews without writing.
+    </p>
+    <div class="row">
+      <button class="btn" onclick="visionAudit(this, true)">Preview Alt Text (Dry Run)</button>
+      <button class="btn btn-primary" onclick="visionQuality(this)">Photo Quality Audit</button>
+    </div>
+  </div>`;
+}
+
 function blogWriterCard() {
   return `
   <div class="card">
@@ -321,6 +336,37 @@ function gmcCard() {
   </div>`;
 }
 
+async function visionAudit(btn, dryRun) {
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  try {
+    const res = await api('/api/vision/alt-text/audit', {
+      method: 'POST',
+      body: JSON.stringify({ dry_run: dryRun }),
+    });
+    const updated = res.updated ?? res.results?.length ?? '—';
+    btn.textContent = `✓ ${updated} images`;
+  } catch {
+    btn.textContent = '✗ Error';
+  } finally {
+    setTimeout(() => { btn.textContent = dryRun ? 'Preview Alt Text (Dry Run)' : 'Apply Alt Text'; btn.disabled = false; }, 4000);
+  }
+}
+
+async function visionQuality(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Auditing…';
+  try {
+    const res = await api('/api/vision/quality/audit', { method: 'POST' });
+    const issues = res.issues_found ?? res.total_issues ?? '—';
+    btn.textContent = `✓ ${issues} issues`;
+  } catch {
+    btn.textContent = '✗ Error';
+  } finally {
+    setTimeout(() => { btn.textContent = 'Photo Quality Audit'; btn.disabled = false; }, 4000);
+  }
+}
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 async function buildDashboard() {
   const [healthRes, jobsRes, psRes] = await Promise.allSettled([
@@ -343,6 +389,7 @@ async function buildDashboard() {
       ${pagespeedCard(ps)}
       ${seoActionsCard()}
       ${productHealthCard()}
+      ${visionCard()}
       ${blogWriterCard()}
       ${klaviyoCard()}
       ${gmcCard()}
