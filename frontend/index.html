@@ -231,6 +231,7 @@ function pagespeedCard(ps) {
 
 function jobsCard(jobs) {
   const KEY_JOBS = [
+    { id: 'blog_writer_morning',      label: 'Blog Writer (publish 1 post)' },
     { id: 'alt_text_auto_patch',      label: 'Alt Text Auto-fill' },
     { id: 'shopify_product_health',   label: 'Product Health Audit' },
     { id: 'daily_indexing_submission',label: 'Submit Sitemap to Google' },
@@ -296,6 +297,18 @@ function klaviyoCard() {
   </div>`;
 }
 
+function blogWriterCard() {
+  return `
+  <div class="card">
+    <div class="card-title">✍️ Blog Writer</div>
+    <p style="font-size:13px;color:#6d7175;margin-bottom:12px">
+      Generate and publish one SEO-optimized blog post using Gemini AI.
+      Automatically submitted to Google Indexing API + IndexNow.
+    </p>
+    <button class="btn btn-primary" onclick="onRunJob(this,'blog_writer_morning')">Publish Blog Post Now</button>
+  </div>`;
+}
+
 function gmcCard() {
   return `
   <div class="card">
@@ -330,6 +343,7 @@ async function buildDashboard() {
       ${pagespeedCard(ps)}
       ${seoActionsCard()}
       ${productHealthCard()}
+      ${blogWriterCard()}
       ${klaviyoCard()}
       ${gmcCard()}
       ${jobsCard(jobs)}
