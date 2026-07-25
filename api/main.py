@@ -9,9 +9,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from api.middleware.auth import verify_api_key
+from fastapi.staticfiles import StaticFiles
 from api.routers import compute, storage, billing, monitoring, seo, analytics, pagespeed
 from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs, higgsfield, shopify, klaviyo
-from api.routers import webhooks, blog_writer
+from api.routers import webhooks, oauth, app_dashboard, blog_writer
 from scheduler.engine import BotScheduler
 
 logging.basicConfig(
@@ -75,6 +76,15 @@ app.include_router(blog_writer.router,  prefix="/api/blog-writer",  tags=["Blog 
 
 # Webhooks — unauthenticated; Shopify signs with HMAC instead of X-API-Key
 app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
+
+# OAuth — unauthenticated; handles Shopify install + callback redirect flow
+app.include_router(oauth.router, tags=["OAuth"])
+
+# App dashboard — serves the embedded store-ops UI at /app
+app.include_router(app_dashboard.router, tags=["App"])
+
+# Static assets (CSS, JS, images if needed by the frontend)
+app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 # -------------------------------------------------------------------------
 # Scheduler control routes

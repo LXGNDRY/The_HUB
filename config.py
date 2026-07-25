@@ -30,6 +30,7 @@ GMC_MERCHANT_ID: str = os.getenv("GMC_MERCHANT_ID", "")
 INDEXNOW_API_KEY: str = os.getenv("INDEXNOW_API_KEY", "")
 SITE_DOMAIN: str = os.getenv("SITE_DOMAIN", "legendary-branding.com")
 SHOPIFY_WEBHOOK_SECRET: str = os.getenv("SHOPIFY_WEBHOOK_SECRET", "")
+APP_URL: str = os.getenv("APP_URL", "")
 
 if DRY_RUN:
     logger.warning("=== DRY RUN MODE ACTIVE — no destructive actions will execute ===")
