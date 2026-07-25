@@ -34,6 +34,7 @@ from scheduler.jobs import (
     alt_text_auto_patch_job,
     indexnow_new_products_job,
     gmc_title_rotation_job,
+    blog_writer_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -219,6 +220,36 @@ class BotScheduler:
             CronTrigger(day_of_week="wed", hour=10, minute=0),
             id="gmc_title_rotation",
             name="GMC Title Rotation (CTR-based A/B)",
+            replace_existing=True,
+        )
+
+        # ── Blog Writer Jobs ──────────────────────────────────────────────────
+        # 3 posts/day spread across the day for SEO freshness signals
+
+        # 08:00 — Morning blog post
+        self.scheduler.add_job(
+            blog_writer_job,
+            CronTrigger(hour=8, minute=0),
+            id="blog_writer_morning",
+            name="Blog Writer — Morning Post (08:00 CT)",
+            replace_existing=True,
+        )
+
+        # 12:00 — Midday blog post
+        self.scheduler.add_job(
+            blog_writer_job,
+            CronTrigger(hour=12, minute=0),
+            id="blog_writer_midday",
+            name="Blog Writer — Midday Post (12:00 CT)",
+            replace_existing=True,
+        )
+
+        # 16:00 — Afternoon blog post
+        self.scheduler.add_job(
+            blog_writer_job,
+            CronTrigger(hour=16, minute=0),
+            id="blog_writer_afternoon",
+            name="Blog Writer — Afternoon Post (16:00 CT)",
             replace_existing=True,
         )
 
