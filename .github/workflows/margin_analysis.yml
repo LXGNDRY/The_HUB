@@ -1,0 +1,38 @@
+name: Margin Analysis
+
+on:
+  workflow_dispatch:
+    inputs:
+      note:
+        description: "Optional note (e.g. 'pre-Q3 review')"
+        required: false
+        default: ""
+
+jobs:
+  analyze:
+    name: Analyze product margins
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run margin analysis
+        env:
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_STORE_DOMAIN: ${{ secrets.SHOPIFY_STORE_DOMAIN || 'lngndny.myshopify.com' }}
+        run: python scripts/margin_analysis.py
+
+      - name: Upload CSV report
+        uses: actions/upload-artifact@v4
+        with:
+          name: margin-analysis-${{ github.run_id }}
+          path: reports/margin_analysis_*.csv
+          retention-days: 30
