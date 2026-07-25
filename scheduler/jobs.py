@@ -1020,8 +1020,11 @@ def blog_writer_job():
         errors = result.get("errors", [])
 
         if published:
-            titles = "\n".join(f"  • {t}" for t in published)
-            send_alert(f"✍️ *Blog Writer* — {len(published)} post(s) published:\n{titles}")
+            lines = "\n".join(
+                f"  • {p['title']}\n    {p['url']}" if isinstance(p, dict) else f"  • {p}"
+                for p in published
+            )
+            send_alert(f"✍️ *Blog Writer* — {len(published)} post(s) published:\n{lines}")
         if errors:
             send_alert(f"⚠️ *Blog Writer* — {len(errors)} error(s):\n" + "\n".join(errors))
         if not published and not errors:
