@@ -5,14 +5,21 @@ Generates and publishes SEO-optimized blog articles to the Legendary Branding
 Shopify store using Gemini AI. Designed to run 3x per day via the APScheduler,
 publishing one article per run (3 posts/day).
 
+After each publish the article URL is submitted to:
+  - Google Search Indexing API (immediate Google discovery)
+  - IndexNow (immediate Bing/Yandex/other-engine discovery)
+
 Env vars:
   BLOG_SHOPIFY_BLOG_ID  — Shopify blog ID (auto-detected if unset)
   BLOG_POSTS_PER_RUN    — Articles per scheduler run (default 1)
   BLOG_AUTHOR           — Article author name (default "Legendary Branding")
+  SITE_DOMAIN           — Public domain for URL construction (default "legendary-branding.com")
+  INDEXNOW_API_KEY      — IndexNow API key (skip IndexNow ping if unset)
 """
 
 import os
 import logging
+import requests as _requests
 
 from modules.gemini import GeminiModule
 from modules.shopify import list_blogs, list_articles, create_article, update_article
@@ -22,7 +29,9 @@ logger = logging.getLogger("gcp-bot.blog_writer")
 
 BLOG_AUTHOR = os.getenv("BLOG_AUTHOR", "Legendary Branding")
 BLOG_POSTS_PER_RUN = int(os.getenv("BLOG_POSTS_PER_RUN", "1"))
+SITE_DOMAIN = os.getenv("SITE_DOMAIN", "legendary-branding.com")
 _BLOG_ID_ENV = os.getenv("BLOG_SHOPIFY_BLOG_ID", "")
+_INDEXNOW_KEY = os.getenv("INDEXNOW_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # Curated topic list — 52 topics covering style guides, product deep-dives,
@@ -91,17 +100,32 @@ BLOG_TOPICS = [
 ]
 
 
-def _get_blog_id() -> int:
-    """Resolve blog ID from env var or auto-detect from first Shopify blog."""
-    if _BLOG_ID_ENV:
-        return int(_BLOG_ID_ENV)
+def _get_blog_info(blog_id_override: int = None) -> tuple[int, str]:
+    """
+    Resolve blog ID and URL handle.
+
+    Returns:
+        (blog_id, blog_handle) — handle is the URL slug (e.g. "news")
+    """
     data = list_blogs()
     blogs = data.get("blogs", [])
     if not blogs:
         raise RuntimeError("No Shopify blogs found. Create a blog in Shopify admin first.")
-    blog_id = blogs[0]["id"]
-    logger.info("[blog_writer] Auto-detected blog_id: %d (%s)", blog_id, blogs[0].get("title", ""))
-    return blog_id
+
+    if blog_id_override or _BLOG_ID_ENV:
+        target_id = blog_id_override or int(_BLOG_ID_ENV)
+        for b in blogs:
+            if b["id"] == target_id:
+                return target_id, b.get("handle", "news")
+        # ID from env not found in blog list — use it anyway, default handle "news"
+        logger.warning("[blog_writer] Blog id=%d not found in list; defaulting handle to 'news'", target_id)
+        return target_id, "news"
+
+    blog = blogs[0]
+    blog_id = blog["id"]
+    blog_handle = blog.get("handle", "news")
+    logger.info("[blog_writer] Auto-detected blog_id=%d handle=%s (%s)", blog_id, blog_handle, blog.get("title", ""))
+    return blog_id, blog_handle
 
 
 def _get_published_titles(blog_id: int) -> set[str]:
@@ -122,16 +146,53 @@ def _pick_topics(published_titles: set[str], count: int) -> list[dict]:
     return picks
 
 
+def _submit_to_google_indexing(url: str) -> None:
+    """Submit article URL to Google Search Indexing API. Non-fatal."""
+    try:
+        from modules.indexing import IndexingModule
+        from auth.credentials import get_credentials
+        indexing = IndexingModule(get_credentials())
+        indexing.submit_url(url, action="URL_UPDATED")
+        logger.info("[blog_writer] Google Indexing API: submitted %s", url)
+    except Exception as e:
+        logger.warning("[blog_writer] Google Indexing API submission failed (non-fatal): %s", e)
+
+
+def _submit_to_indexnow(url: str) -> None:
+    """Ping IndexNow for the article URL. Non-fatal. Skips if INDEXNOW_API_KEY unset."""
+    if not _INDEXNOW_KEY:
+        return
+    try:
+        resp = _requests.post(
+            "https://api.indexnow.org/indexnow",
+            json={
+                "host": SITE_DOMAIN,
+                "key": _INDEXNOW_KEY,
+                "keyLocation": f"https://{SITE_DOMAIN}/pages/{_INDEXNOW_KEY}",
+                "urlList": [url],
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        logger.info("[blog_writer] IndexNow: pinged %s (status %d)", url, resp.status_code)
+    except Exception as e:
+        logger.warning("[blog_writer] IndexNow ping failed (non-fatal): %s", e)
+
+
 def run_blog_writer(blog_id: int = None, posts_per_run: int = None) -> dict:
     """
-    Generate and publish blog posts to Shopify.
+    Generate and publish blog posts to Shopify, then submit each URL for indexing.
 
     Args:
         blog_id:       Shopify blog ID. Defaults to BLOG_SHOPIFY_BLOG_ID env var or auto-detect.
         posts_per_run: Number of articles to publish. Defaults to BLOG_POSTS_PER_RUN env var.
 
     Returns:
-        {"published": [list of published titles], "skipped": [already live], "errors": [list of error strings]}
+        {
+            "published": [{"title": str, "url": str}, ...],
+            "skipped":   [topic strings already live],
+            "errors":    [error strings]
+        }
     """
     if posts_per_run is None:
         posts_per_run = BLOG_POSTS_PER_RUN
@@ -139,9 +200,9 @@ def run_blog_writer(blog_id: int = None, posts_per_run: int = None) -> dict:
     result = {"published": [], "skipped": [], "errors": []}
 
     try:
-        resolved_blog_id = blog_id or _get_blog_id()
+        resolved_blog_id, blog_handle = _get_blog_info(blog_id)
     except Exception as e:
-        result["errors"].append(f"Could not resolve blog_id: {e}")
+        result["errors"].append(f"Could not resolve blog: {e}")
         return result
 
     published_titles = _get_published_titles(resolved_blog_id)
@@ -173,8 +234,9 @@ def run_blog_writer(blog_id: int = None, posts_per_run: int = None) -> dict:
         meta_description = post.get("meta_description", "")
 
         if DRY_RUN:
-            logger.info("[blog_writer] [DRY RUN] Would publish: %s", title)
-            result["published"].append(f"[DRY RUN] {title}")
+            article_url = f"https://{SITE_DOMAIN}/blogs/{blog_handle}/[dry-run-handle]"
+            logger.info("[blog_writer] [DRY RUN] Would publish: %s → %s", title, article_url)
+            result["published"].append({"title": f"[DRY RUN] {title}", "url": article_url})
             continue
 
         try:
@@ -186,16 +248,24 @@ def run_blog_writer(blog_id: int = None, posts_per_run: int = None) -> dict:
                 tags=tags,
                 published=True,
             )
-            article_id = article_data["article"]["id"]
-            logger.info("[blog_writer] Published article id=%d: %s", article_id, title)
+            article = article_data["article"]
+            article_id = article["id"]
+            article_handle = article.get("handle", "")
+            article_url = f"https://{SITE_DOMAIN}/blogs/{blog_handle}/{article_handle}"
+            logger.info("[blog_writer] Published article id=%d: %s → %s", article_id, title, article_url)
 
-            # Patch SEO meta via update_article
+            # Patch SEO meta
             update_article(resolved_blog_id, article_id, {
                 "metafields_global_title_tag": meta_title,
                 "metafields_global_description_tag": meta_description,
             })
             logger.info("[blog_writer] SEO meta patched for article id=%d", article_id)
-            result["published"].append(title)
+
+            # Submit to search engine indexing
+            _submit_to_google_indexing(article_url)
+            _submit_to_indexnow(article_url)
+
+            result["published"].append({"title": title, "url": article_url})
 
         except Exception as e:
             logger.error("[blog_writer] Shopify publish failed for '%s': %s", title, e)
