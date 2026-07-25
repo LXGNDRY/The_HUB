@@ -12,7 +12,7 @@ Endpoints:
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 
@@ -21,10 +21,9 @@ from agents.vision_agent import (
     run_quality_audit,
     run_description_gen,
 )
-from auth.middleware import verify_api_key  # existing HUB auth pattern
 
-logger = APIRouter()
-router = APIRouter(prefix="/api/vision", tags=["vision"])
+logger = logging.getLogger("gcp-bot.routers.vision")
+router = APIRouter()
 
 
 # ─────────────────────────────────────────────
@@ -57,7 +56,7 @@ def vision_status():
     }
 
 
-@router.post("/alt-text/audit", dependencies=[Depends(verify_api_key)])
+@router.post("/alt-text/audit", )
 def alt_text_audit(req: AltTextRequest):
     """
     Audit all product images for missing alt text.
@@ -72,7 +71,7 @@ def alt_text_audit(req: AltTextRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/alt-text/apply", dependencies=[Depends(verify_api_key)])
+@router.post("/alt-text/apply", )
 def alt_text_apply():
     """
     Apply alt text to all products missing it. Writes directly to Shopify.
@@ -86,7 +85,7 @@ def alt_text_apply():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/quality/audit", dependencies=[Depends(verify_api_key)])
+@router.post("/quality/audit", )
 def quality_audit():
     """
     Audit all product images for photography quality issues.
@@ -100,7 +99,7 @@ def quality_audit():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/descriptions/gen", dependencies=[Depends(verify_api_key)])
+@router.post("/descriptions/gen", )
 def descriptions_gen(req: DescriptionRequest):
     """
     Generate product descriptions for given product IDs.
