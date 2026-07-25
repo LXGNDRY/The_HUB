@@ -27,7 +27,9 @@ jobs:
       - name: Run margin analysis
         env:
           SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
-          SHOPIFY_STORE_DOMAIN: ${{ secrets.SHOPIFY_STORE_DOMAIN || 'lngndny.myshopify.com' }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          SHOPIFY_STORE_DOMAIN: lngndny.myshopify.com
         run: python scripts/margin_analysis.py
 
       - name: Upload CSV report
