@@ -306,6 +306,59 @@ class GeminiModule:
         logger.info("[gemini] Generating blog outline for: %s", topic)
         return self.generate(prompt, temperature=0.7)
 
+    def generate_blog_post(self, topic: str, target_keywords: list[str] = None) -> dict:
+        """
+        Generate a full SEO blog post for Legendary Branding's Shopify store.
+
+        Args:
+            topic:           Blog post topic (e.g. "How to Style a Heavyweight Hoodie")
+            target_keywords: SEO keywords to weave in naturally.
+
+        Returns:
+            {
+                "title": str,            # H1 / article title
+                "body_html": str,        # Full HTML body (1200-1800 words), Shopify-ready
+                "tags": str,             # Comma-separated SEO tags
+                "meta_title": str,       # ≤60 chars
+                "meta_description": str  # ≤160 chars
+            }
+        """
+        kw_str = ", ".join(target_keywords) if target_keywords else topic
+        prompt = (
+            f"You are an SEO content writer for Legendary Branding, a premium streetwear brand.\n"
+            f"Write a complete, publish-ready blog article for their Shopify store.\n"
+            f"\n"
+            f"Topic: {topic}\n"
+            f"Primary SEO keywords: {kw_str}\n"
+            f"\n"
+            f"Rules:\n"
+            f"- title: compelling H1 headline, under 65 characters, include primary keyword\n"
+            f"- body_html: 1200-1800 words of HTML using <h2>, <p>, <ul>, <li> only — NO <html>, <head>, <body> tags\n"
+            f"  Structure: intro hook → 4-5 <h2> sections with content → closing CTA paragraph\n"
+            f"  CTA must mention legendary-branding.com naturally\n"
+            f"  Weave in keywords naturally (2-3% density) — never keyword-stuff\n"
+            f"  Tone: bold, authentic, knowledgeable — premium streetwear culture\n"
+            f"- tags: 6-8 comma-separated SEO tags (no #, just words/phrases)\n"
+            f"- meta_title: ≤60 chars, include primary keyword + 'Legendary Branding' at end\n"
+            f"- meta_description: 150-160 chars, include CTA verb, primary keyword\n"
+            f"\n"
+            f"Respond ONLY as valid JSON with exactly these 5 keys: title, body_html, tags, meta_title, meta_description"
+        )
+        logger.info("[gemini] Generating blog post for: %s", topic)
+        raw = self.generate(prompt, temperature=0.75, max_tokens=4096)
+        try:
+            cleaned = raw.strip().strip("```json").strip("```").strip()
+            return json.loads(cleaned)
+        except Exception:
+            logger.warning("[gemini] Blog post JSON parse failed, returning raw content")
+            return {
+                "title": topic,
+                "body_html": f"<p>{raw}</p>",
+                "tags": kw_str,
+                "meta_title": topic[:60],
+                "meta_description": topic[:160],
+            }
+
     def generate_daily_quote(self, theme: str = "motivation", brand_voice: str = "streetwear") -> str:
         """
         Generate a short inspirational/brand quote for daily social posting.
