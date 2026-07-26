@@ -347,7 +347,9 @@ class GeminiModule:
         logger.info("[gemini] Generating blog post for: %s", topic)
         raw = self.generate(prompt, temperature=0.75, max_tokens=4096)
         try:
-            cleaned = raw.strip().strip("```json").strip("```").strip()
+            import re as _re
+            cleaned = _re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=_re.IGNORECASE)
+            cleaned = _re.sub(r"\s*```$", "", cleaned.strip())
             return json.loads(cleaned)
         except Exception:
             logger.warning("[gemini] Blog post JSON parse failed, returning raw content")
