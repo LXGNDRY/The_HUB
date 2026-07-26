@@ -21,6 +21,7 @@ Endpoints:
   GET  /templates/{id}                    — get a single template
   POST /flow-messages/{id}/assign-template — assign a template to a flow message
   POST /assign-lb-templates               — bulk assign all LB branded templates to flows
+  GET  /sending-domain-check              — audit Klaviyo sending domain + DNS for DMARC alignment
 """
 
 import logging
@@ -236,6 +237,25 @@ def klaviyo_assign_lb_templates():
         return _module().assign_lb_templates()
     except Exception as exc:
         logger.error("klaviyo assign_lb_templates error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get(
+    "/sending-domain-check",
+    summary="Check Klaviyo sending domain and DNS records for DMARC alignment",
+)
+def klaviyo_sending_domain_check(
+    domain: str = Query("legendary-branding.com", description="Domain to audit"),
+):
+    """
+    Checks whether the custom sending domain is registered and verified in Klaviyo,
+    and whether the required DKIM/return-path DNS records are in place.
+    Returns a plain-English action list of anything missing.
+    """
+    try:
+        return _module().check_sending_domain(domain=domain)
+    except Exception as exc:
+        logger.error("klaviyo sending_domain_check error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
 
