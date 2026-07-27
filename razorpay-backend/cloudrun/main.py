@@ -495,24 +495,25 @@ def create_order():
     customer_name  = data.get("customer_name", "")
     cart_items     = data.get("cart_items", [])
 
-    # --- Pre-create Shopify draft order to get the true tax-inclusive total ---
-    # Creating a real draft order (not draftOrderCalculate) ensures Shopify runs
-    # its full tax/duties engine — including GST, India market rules, etc.
-    # The same draft order is completed after payment rather than creating a new one.
-    pending_draft  = None
+    # --- Pre-create Shopify draft order for ORDER LINKING only ---
+    # Creates the Shopify draft now so the same draft is completed after payment
+    # (avoids a second create, guarantees amounts match). We do NOT use the draft
+    # order total for the Razorpay amount — the Admin API returns prices in the shop
+    # base currency (USD) using its own FX rate, which diverges from both the live
+    # FX rate and the store's India market INR prices. The frontend cart total is
+    # always authoritative for what the customer should be charged.
     draft_order_id = None
 
     if cart_items:
         try:
             pending_draft  = _create_pending_draft_order(cart_items, customer_email, customer_name)
             draft_order_id = pending_draft["draft_id"]
-            cart_amount_base = pending_draft["total_usd"]
-            cart_currency    = "USD"
         except Exception as e:
-            log.warning(f"Pre-create draft order failed — falling back to frontend subtotal (taxes excluded): {e}")
-            cart_amount_base = cart_amount_subunits / 100.0
-    else:
-        cart_amount_base = cart_amount_subunits / 100.0
+            log.warning(f"Pre-create draft order failed — will create after payment: {e}")
+
+    # Always use the frontend-provided cart total for the Razorpay charge.
+    # cart_currency stays as provided: "INR" for India market, "USD" for other markets.
+    cart_amount_base = cart_amount_subunits / 100.0
 
     # Always settle in INR — Razorpay Import Flow settles in INR regardless
     if cart_currency == "INR":
@@ -545,7 +546,7 @@ def create_order():
             "customer_email":        customer_email,
             "customer_name":         customer_name,
             "cart_currency":         cart_currency,
-            "cart_amount_usd":       str(cart_amount_base),
+            "cart_amount_base":      str(cart_amount_base),
             "cart_items_json":       cart_items_json,
             "shipping_address_json": shipping_addr_json,
             "draft_order_id":        draft_order_id or "",
