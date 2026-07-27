@@ -1098,3 +1098,39 @@ def push_razorpay_button():
     except Exception as exc:
         logger.error("push_razorpay_button error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
+
+
+# ─────────────────────────────────────────────
+# Razorpay backend deployment trigger
+# ─────────────────────────────────────────────
+
+@router.post("/deploy-razorpay-backend", summary="Trigger GitHub Actions deploy of lb-razorpay-backend")
+def deploy_razorpay_backend():
+    """
+    Triggers the 'Razorpay Backend — Deploy' GitHub Actions workflow via
+    workflow_dispatch. Requires GITHUB_TOKEN env var with repo workflow scope.
+    """
+    import os
+    import requests as _requests
+
+    token = os.environ.get("GITHUB_TOKEN", "")
+    if not token:
+        raise HTTPException(status_code=500, detail="GITHUB_TOKEN env var not set")
+
+    resp = _requests.post(
+        "https://api.github.com/repos/LXGNDRY/The_HUB/actions/workflows/deploy-razorpay-backend.yml/dispatches",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        json={"ref": "main"},
+        timeout=15,
+    )
+
+    if resp.status_code == 204:
+        logger.info("Razorpay backend deploy triggered via workflow_dispatch")
+        return {"status": "triggered", "workflow": "deploy-razorpay-backend.yml", "ref": "main"}
+
+    logger.error("workflow_dispatch failed: %s %s", resp.status_code, resp.text)
+    raise HTTPException(status_code=502, detail=f"GitHub API error {resp.status_code}: {resp.text}")
