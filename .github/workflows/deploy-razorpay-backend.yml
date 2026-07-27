@@ -1,0 +1,122 @@
+# ============================================================
+# Razorpay Backend — Deploy to Cloud Run (project: idx-lngndny)
+#
+# Trigger: manual (workflow_dispatch) or push to main when
+#          files under razorpay-backend/ change.
+#
+# What this does:
+#   1. Loads 5 secrets into GCP Secret Manager (idempotent)
+#   2. Grants the Cloud Run SA access to each secret
+#   3. Runs gcloud builds submit → cloudbuild.yaml builds the image
+#      and deploys to lb-razorpay-backend Cloud Run service
+#   4. Prints the live service URL
+# ============================================================
+
+name: 🔵 Razorpay Backend — Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'razorpay-backend/**'
+
+env:
+  PROJECT_ID: idx-lngndny
+  SERVICE_NAME: lb-razorpay-backend
+  REGION: us-central1
+
+jobs:
+  deploy:
+    name: 🚀 Deploy lb-razorpay-backend
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      # ── Step 1: Load secrets into GCP Secret Manager ──────────────
+      - name: Load secrets into Secret Manager
+        env:
+          RAZORPAY_KEY_ID:           ${{ secrets.RAZORPAY_KEY_ID }}
+          RAZORPAY_KEY_SECRET:       ${{ secrets.RAZORPAY_KEY_SECRET }}
+          WEBHOOK_SECRET:            ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
+          SHOPIFY_ADMIN_TOKEN:       ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          RAZORPAY_SFTP_PRIVATE_KEY: ${{ secrets.RAZORPAY_SFTP_PRIVATE_KEY }}
+        run: |
+          gcloud services enable secretmanager.googleapis.com \
+            --project=${{ env.PROJECT_ID }} --quiet
+
+          load_secret() {
+            local NAME="$1" VALUE="$2"
+            if gcloud secrets describe "$NAME" \
+                --project=${{ env.PROJECT_ID }} &>/dev/null; then
+              echo -n "$VALUE" | gcloud secrets versions add "$NAME" \
+                --data-file=- --project=${{ env.PROJECT_ID }} --quiet
+            else
+              echo -n "$VALUE" | gcloud secrets create "$NAME" \
+                --data-file=- --replication-policy=automatic \
+                --project=${{ env.PROJECT_ID }} --quiet
+            fi
+            echo "✓ $NAME loaded"
+          }
+
+          load_secret "RAZORPAY_KEY_ID"           "$RAZORPAY_KEY_ID"
+          load_secret "RAZORPAY_KEY_SECRET"        "$RAZORPAY_KEY_SECRET"
+          load_secret "WEBHOOK_SECRET"             "$WEBHOOK_SECRET"
+          load_secret "SHOPIFY_ADMIN_TOKEN"        "$SHOPIFY_ADMIN_TOKEN"
+          load_secret "RAZORPAY_SFTP_PRIVATE_KEY"  "$RAZORPAY_SFTP_PRIVATE_KEY"
+
+      # ── Step 2: Grant Cloud Run SA access to secrets ──────────────
+      - name: Set Secret Manager IAM bindings
+        run: |
+          SA_EMAIL=$(gcloud iam service-accounts list \
+            --project=${{ env.PROJECT_ID }} \
+            --filter="displayName:Compute Engine default" \
+            --format="value(email)" 2>/dev/null \
+            || echo "${{ env.PROJECT_ID }}@appspot.gserviceaccount.com")
+
+          echo "Service account: $SA_EMAIL"
+
+          for SECRET in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET WEBHOOK_SECRET \
+                        SHOPIFY_ADMIN_TOKEN RAZORPAY_SFTP_PRIVATE_KEY; do
+            gcloud secrets add-iam-policy-binding "$SECRET" \
+              --member="serviceAccount:$SA_EMAIL" \
+              --role="roles/secretmanager.secretAccessor" \
+              --project=${{ env.PROJECT_ID }} --quiet 2>/dev/null || true
+            echo "✓ IAM binding set for $SECRET"
+          done
+
+      # ── Step 3: Build & deploy via Cloud Build ────────────────────
+      - name: Build and deploy via Cloud Build
+        working-directory: razorpay-backend
+        run: |
+          gcloud builds submit \
+            --config cloudbuild.yaml \
+            --project=${{ env.PROJECT_ID }} \
+            .
+
+      # ── Step 4: Print live URL ────────────────────────────────────
+      - name: Print service URL
+        run: |
+          URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
+            --region=${{ env.REGION }} \
+            --project=${{ env.PROJECT_ID }} \
+            --format="value(status.url)")
+          echo ""
+          echo "============================================"
+          echo "  ✅ lb-razorpay-backend is live"
+          echo "  URL: $URL"
+          echo "============================================"
+          echo ""
+          echo "Next step: paste this URL into Shopify theme customizer"
+          echo "  → Online Store → Themes → Customize → search 'Razorpay'"
+          echo "  → Razorpay backend URL: $URL"
