@@ -54,11 +54,16 @@ SHOPIFY_DOMAIN  = os.environ.get("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com"
 WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
 
 RAZORPAY_ORDERS_URL = "https://api.razorpay.com/v1/orders"
-SHOPIFY_GRAPHQL_URL = f"https://{SHOPIFY_DOMAIN}/admin/api/2025-01/graphql.json"
+SHOPIFY_GRAPHQL_URL = f"https://{SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json"
 
 # Exchange rate fallback — if live fetch fails, use this floor
-# Update this periodically or wire in a live FX API post-launch
 USD_TO_INR_FALLBACK = 84.0
+
+# Idempotency guard — prevents duplicate Shopify orders on network retries.
+# In-memory set is sufficient: duplicate calls arrive within the same request
+# lifecycle or milliseconds apart. Does not survive restarts, but Razorpay
+# only retries webhooks, not /verify-payment frontend calls.
+_processed_payment_ids: set = set()
 
 
 # ---------------------------------------------------------------------------
@@ -310,6 +315,12 @@ def verify_payment():
         return jsonify({"error": "Payment verification failed"}), 400
 
     log.info(f"Signature verified: order={order_id} payment={payment_id}")
+
+    # --- Idempotency check — prevent duplicate Shopify orders ---
+    if payment_id in _processed_payment_ids:
+        log.warning(f"Duplicate verify-payment call for payment_id={payment_id}, skipping order creation")
+        return jsonify({"error": "Payment already processed"}), 409
+    _processed_payment_ids.add(payment_id)
 
     # --- Step 2: Build Shopify Draft Order ---
     cart_items = data.get("cart_items", [])
