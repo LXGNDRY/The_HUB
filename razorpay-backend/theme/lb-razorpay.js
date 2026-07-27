@@ -39,8 +39,14 @@
   // ── Helpers ───────────────────────────────────────────────────────────────
 
   function showError(msg) {
+    console.error('[lb-razorpay]', msg);
     errEl.textContent = msg;
     errEl.style.display = 'block';
+    // Ensure the error element is visible even if wrapper was removed from DOM
+    if (!document.contains(errEl)) {
+      errEl.style.cssText += 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);z-index:99999;background:#fff;padding:12px 20px;border-radius:6px;box-shadow:0 2px 12px rgba(0,0,0,.2);';
+      document.body.appendChild(errEl);
+    }
   }
 
   function clearError() {
@@ -49,17 +55,30 @@
   }
 
   function setLoading(loading) {
-    btn.disabled = loading;
-    btn.querySelector('span').textContent = loading ? 'Processing…' : cfg.btnLabel || 'Pay with Razorpay';
+    try {
+      btn.disabled = loading;
+      const span = btn.querySelector('span') || btn;
+      span.textContent = loading ? 'Processing…' : cfg.btnLabel || 'Pay with Razorpay / UPI';
+    } catch (e) {
+      // best-effort; don't let button-text update crash the payment flow
+    }
   }
 
   function loadRazorpayScript() {
     return new Promise((resolve, reject) => {
       if (window.Razorpay) { resolve(); return; }
+      // Check if a script tag is already being loaded (e.g. added by liquid template)
+      const existing = document.querySelector('script[src*="checkout.razorpay.com"]');
+      if (existing) {
+        // Wait for it to finish loading
+        const check = setInterval(() => { if (window.Razorpay) { clearInterval(check); resolve(); } }, 100);
+        setTimeout(() => { clearInterval(check); reject(new Error('Razorpay checkout timed out')); }, 10000);
+        return;
+      }
       const s = document.createElement('script');
       s.src = 'https://checkout.razorpay.com/v1/checkout.js';
-      s.onload = resolve;
-      s.onerror = () => reject(new Error('Failed to load Razorpay checkout'));
+      s.onload = () => { if (window.Razorpay) resolve(); else reject(new Error('Razorpay checkout.js loaded but window.Razorpay not defined')); };
+      s.onerror = () => reject(new Error('Failed to load Razorpay checkout — check your browser console and theme CSP settings'));
       document.head.appendChild(s);
     });
   }
@@ -303,6 +322,7 @@
       rzp.open();
 
     } catch (err) {
+      console.error('[lb-razorpay] checkout error:', err);
       showError(err.message || 'Something went wrong. Please try again.');
       setLoading(false);
     }
