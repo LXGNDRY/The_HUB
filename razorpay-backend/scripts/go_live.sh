@@ -47,14 +47,15 @@ load_secret() {
   echo "  ✓ $NAME saved"
 }
 
-load_secret "RAZORPAY_KEY_ID"     "Razorpay Live Key ID (rzp_live_...)"
-load_secret "RAZORPAY_KEY_SECRET" "Razorpay Live Key Secret"
-load_secret "WEBHOOK_SECRET"      "Razorpay Webhook Secret (from Dashboard → Webhooks)"
-load_secret "SHOPIFY_ADMIN_TOKEN" "Shopify Admin Token (shpat_... from lb-razorpay-backend app)"
+load_secret "RAZORPAY_KEY_ID"          "Razorpay Live Key ID (rzp_live_...)"
+load_secret "RAZORPAY_KEY_SECRET"      "Razorpay Live Key Secret"
+load_secret "WEBHOOK_SECRET"           "Razorpay Webhook Secret (from Dashboard → Webhooks)"
+load_secret "SHOPIFY_ADMIN_TOKEN"      "Shopify Admin Token (shpat_... from lb-razorpay-backend app)"
+load_secret "RAZORPAY_SFTP_PRIVATE_KEY" "SFTP Private Key (paste PEM contents, end with blank line then Ctrl-D)"
 
 # Grant Cloud Run SA access
 SA_EMAIL=$(gcloud iam service-accounts list --project=$PROJECT_ID --filter="displayName:Compute Engine default" --format="value(email)" 2>/dev/null || echo "${PROJECT_ID}@appspot.gserviceaccount.com")
-for SECRET in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET WEBHOOK_SECRET SHOPIFY_ADMIN_TOKEN; do
+for SECRET in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET WEBHOOK_SECRET SHOPIFY_ADMIN_TOKEN RAZORPAY_SFTP_PRIVATE_KEY; do
   gcloud secrets add-iam-policy-binding "$SECRET" \
     --member="serviceAccount:$SA_EMAIL" \
     --role="roles/secretmanager.secretAccessor" \
