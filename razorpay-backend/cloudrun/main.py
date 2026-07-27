@@ -206,6 +206,8 @@ mutation draftOrderCreate($input: DraftOrderInput!) {
     draftOrder {
       id
       name
+      subtotalPrice
+      totalTax
       totalPrice
       invoiceUrl
     }
@@ -237,29 +239,6 @@ mutation draftOrderComplete($id: ID!, $paymentPending: Boolean) {
 }
 """
 
-DRAFT_ORDER_CALCULATE = """
-mutation draftOrderCalculate($input: DraftOrderInput!) {
-  draftOrderCalculate(input: $input) {
-    calculatedDraftOrder {
-      subtotalPrice
-      totalTax
-      totalPrice
-      availableShippingRates {
-        handle
-        title
-        price {
-          amount
-          currencyCode
-        }
-      }
-    }
-    userErrors {
-      field
-      message
-    }
-  }
-}
-"""
 
 
 def _create_shopify_order(
@@ -269,13 +248,33 @@ def _create_shopify_order(
     customer_email: str,
     customer_name: str,
     shipping_addr: dict,
-    shipping_line: dict = None
+    shipping_line: dict = None,
+    draft_order_id: str = None
 ) -> dict:
     """Create and complete a Shopify Draft Order for a captured Razorpay payment.
+
+    If draft_order_id is provided (pre-created at /create-order time), the existing
+    draft is completed directly — no new order is created and the amount matches
+    what Razorpay charged exactly.
 
     Returns the Shopify order dict with keys: id, name, statusUrl, confirmationNumber.
     Raises on any failure.
     """
+    # Fast path: complete the pre-created draft order
+    if draft_order_id:
+        log.info(f"Completing pre-created draft {draft_order_id} for payment {payment_id}")
+        complete_result = shopify_graphql(
+            DRAFT_ORDER_COMPLETE,
+            {"id": draft_order_id, "paymentPending": False}
+        )
+        complete_errors = complete_result.get("data", {}).get("draftOrderComplete", {}).get("userErrors", [])
+        if complete_errors:
+            raise RuntimeError(f"Shopify draft complete errors: {complete_errors}")
+        order = complete_result["data"]["draftOrderComplete"]["draftOrder"]["order"]
+        log.info(f"Order from existing draft: {order['name']} | {order['id']}")
+        return order
+
+    # Fallback path: create a new draft order and complete it
     name_parts = customer_name.strip().split(" ", 1)
     first_name = name_parts[0] if name_parts else ""
     last_name  = name_parts[1] if len(name_parts) > 1 else ""
@@ -361,15 +360,26 @@ def _create_shopify_order(
     return order
 
 
-def _get_shopify_calculated_total(cart_items: list, customer_email: str = "") -> dict:
+def _create_pending_draft_order(
+    cart_items: list,
+    customer_email: str = "",
+    customer_name: str = ""
+) -> dict:
     """
-    Call draftOrderCalculate with a placeholder India address to get Shopify's
-    tax-inclusive total. Returns a breakdown dict, or None on failure.
+    Create an incomplete Shopify draft order with a placeholder India address
+    so Shopify runs its full tax/duties engine and returns the correct total.
+    The draft is completed (not re-created) in _create_shopify_order once payment
+    is verified — avoiding a second order and ensuring the amount matches exactly.
 
-    The placeholder India address (Mumbai, Maharashtra) gives accurate GST
-    estimates — GST rates are uniform across India; only CGST/SGST vs IGST
-    split differs by state, not the total rate.
+    GST rates in India are uniform by product category regardless of state, so
+    the Mumbai placeholder address gives the correct total for any Indian customer.
+
+    Returns {draft_id, total_usd, subtotal_usd, tax_usd} or raises.
     """
+    name_parts = (customer_name or "").strip().split(" ", 1)
+    first_name = name_parts[0] if name_parts else "India"
+    last_name  = name_parts[1] if len(name_parts) > 1 else "Customer"
+
     line_items = []
     for item in cart_items:
         variant_id = item.get("variant_id", "")
@@ -381,72 +391,46 @@ def _get_shopify_calculated_total(cart_items: list, customer_email: str = "") ->
         })
 
     if not line_items:
-        return None
+        raise ValueError("No line items")
 
     draft_input = {
+        "email": customer_email or "",
         "lineItems": line_items,
         "shippingAddress": {
-            "firstName": "India",
-            "lastName": "Customer",
-            "address1": "123 MG Road",
-            "city": "Mumbai",
-            "province": "Maharashtra",
-            "country": "IN",
-            "zip": "400001"
-        }
+            "firstName": first_name,
+            "lastName":  last_name,
+            "address1":  "123 MG Road",
+            "city":      "Mumbai",
+            "province":  "Maharashtra",
+            "country":   "IN",
+            "zip":       "400001"
+        },
+        "note": "RAZORPAY_PENDING — auto-completes on payment, do not process manually",
+        "tags": "razorpay,india,pending"
     }
-    if customer_email:
-        draft_input["email"] = customer_email
 
-    try:
-        result = shopify_graphql(DRAFT_ORDER_CALCULATE, {"input": draft_input})
-        calc_data = result.get("data", {}).get("draftOrderCalculate", {})
-        errors = calc_data.get("userErrors", [])
-        if errors:
-            log.warning(f"draftOrderCalculate userErrors: {errors}")
-            return None
+    result = shopify_graphql(DRAFT_ORDER_CREATE, {"input": draft_input})
+    errors = result.get("data", {}).get("draftOrderCreate", {}).get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"Shopify draft order errors: {errors}")
 
-        co = calc_data.get("calculatedDraftOrder") or {}
+    draft        = result["data"]["draftOrderCreate"]["draftOrder"]
+    draft_id     = draft["id"]
+    subtotal_usd = float(draft.get("subtotalPrice") or 0)
+    tax_usd      = float(draft.get("totalTax") or 0)
+    total_usd    = float(draft.get("totalPrice") or 0)
 
-        subtotal = float(co.get("subtotalPrice") or 0)
-        tax      = float(co.get("totalTax") or 0)
+    log.info(
+        f"Pending draft {draft_id}: "
+        f"subtotal=${subtotal_usd:.2f} + tax=${tax_usd:.2f} = total=${total_usd:.2f}"
+    )
 
-        # Pick cheapest available shipping rate (free if available)
-        rates = co.get("availableShippingRates") or []
-        shipping_price  = 0.0
-        shipping_title  = "Free Shipping"
-        shipping_handle = None
-        if rates:
-            def _rate_price(r):
-                try:
-                    return float((r.get("price") or {}).get("amount", 0))
-                except Exception:
-                    return 999.0
-            best = min(rates, key=_rate_price)
-            shipping_price  = float((best.get("price") or {}).get("amount", 0))
-            shipping_title  = best.get("title") or "Standard Shipping"
-            shipping_handle = best.get("handle")
-
-        total = subtotal + tax + shipping_price
-
-        log.info(
-            f"draftOrderCalculate: subtotal=${subtotal:.2f} tax=${tax:.2f} "
-            f"shipping=${shipping_price:.2f} ({shipping_title}) total=${total:.2f}"
-        )
-
-        return {
-            "subtotal_usd":      subtotal,
-            "tax_usd":           tax,
-            "shipping_usd":      shipping_price,
-            "total_usd":         total,
-            "shipping_title":    shipping_title,
-            "shipping_price_usd": shipping_price,
-            "shipping_handle":   shipping_handle,
-        }
-
-    except Exception as e:
-        log.error(f"draftOrderCalculate failed: {e}")
-        return None
+    return {
+        "draft_id":     draft_id,
+        "total_usd":    total_usd,
+        "subtotal_usd": subtotal_usd,
+        "tax_usd":      tax_usd,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -511,28 +495,23 @@ def create_order():
     customer_name  = data.get("customer_name", "")
     cart_items     = data.get("cart_items", [])
 
-    # --- Ask Shopify for the tax-inclusive total ---
-    # draftOrderCalculate returns subtotal + GST + shipping, ensuring the
-    # customer is charged the correct amount (not just the cart subtotal).
-    shopify_calc   = _get_shopify_calculated_total(cart_items, customer_email) if cart_items else None
-    shipping_line  = None
+    # --- Pre-create Shopify draft order to get the true tax-inclusive total ---
+    # Creating a real draft order (not draftOrderCalculate) ensures Shopify runs
+    # its full tax/duties engine — including GST, India market rules, etc.
+    # The same draft order is completed after payment rather than creating a new one.
+    pending_draft  = None
+    draft_order_id = None
 
-    if shopify_calc:
-        cart_amount_base = shopify_calc["total_usd"]
-        cart_currency    = "USD"
-        shipping_line    = {
-            "title": shopify_calc["shipping_title"],
-            "price": f"{shopify_calc['shipping_price_usd']:.2f}"
-        }
-        log.info(
-            f"Using Shopify-calculated total: ${cart_amount_base:.2f} "
-            f"(subtotal ${shopify_calc['subtotal_usd']:.2f} + "
-            f"tax ${shopify_calc['tax_usd']:.2f} + "
-            f"shipping ${shopify_calc['shipping_usd']:.2f})"
-        )
+    if cart_items:
+        try:
+            pending_draft  = _create_pending_draft_order(cart_items, customer_email, customer_name)
+            draft_order_id = pending_draft["draft_id"]
+            cart_amount_base = pending_draft["total_usd"]
+            cart_currency    = "USD"
+        except Exception as e:
+            log.warning(f"Pre-create draft order failed — falling back to frontend subtotal (taxes excluded): {e}")
+            cart_amount_base = cart_amount_subunits / 100.0
     else:
-        # Fallback: use cart subtotal provided by frontend
-        log.warning("draftOrderCalculate unavailable — falling back to frontend-provided subtotal (taxes/shipping excluded)")
         cart_amount_base = cart_amount_subunits / 100.0
 
     # Always settle in INR — Razorpay Import Flow settles in INR regardless
@@ -546,11 +525,10 @@ def create_order():
     if amount_inr_paise < 100:  # Razorpay minimum: ₹1
         return jsonify({"error": "Amount below minimum"}), 400
 
-    # Serialize cart items and shipping address into notes for webhook fallback.
+    # Serialize cart items + draft_order_id into notes for webhook fallback.
     # Razorpay notes: up to 15 keys, values capped at 512 chars each.
     cart_items_json    = json.dumps(cart_items, separators=(",", ":"))
     shipping_addr_json = json.dumps(data.get("shipping_address", {}), separators=(",", ":"))
-    shipping_line_json = json.dumps(shipping_line, separators=(",", ":")) if shipping_line else ""
 
     if len(cart_items_json) > 512:
         log.warning(f"cart_items_json too large ({len(cart_items_json)} chars) — webhook fallback may not reconstruct order")
@@ -570,7 +548,7 @@ def create_order():
             "cart_amount_usd":       str(cart_amount_base),
             "cart_items_json":       cart_items_json,
             "shipping_address_json": shipping_addr_json,
-            "shipping_line_json":    shipping_line_json,
+            "draft_order_id":        draft_order_id or "",
         }
     }
 
@@ -593,11 +571,11 @@ def create_order():
     log.info(f"Order created: {order['id']} | ₹{amount_inr_paise/100:.2f} | receipt={receipt}")
 
     return jsonify({
-        "id": order["id"],
-        "amount": order["amount"],
-        "currency": order["currency"],
+        "id":             order["id"],
+        "amount":         order["amount"],
+        "currency":       order["currency"],
         "amount_display": f"₹{amount_inr_paise/100:.2f}",
-        "shipping_line": shipping_line  # forwarded to /verify-payment by frontend
+        "draft_order_id": draft_order_id  # forwarded to /verify-payment by frontend
     }), 200
 
 
@@ -654,7 +632,7 @@ def verify_payment():
             customer_email=data.get("customer_email", ""),
             customer_name=data.get("customer_name", ""),
             shipping_addr=data.get("shipping_address", {}),
-            shipping_line=data.get("shipping_line")
+            draft_order_id=data.get("draft_order_id")
         )
     except Exception as e:
         log.error(f"Shopify order creation exception: {e}")
@@ -725,17 +703,17 @@ def webhook():
                     rzp_resp.raise_for_status()
                     notes = rzp_resp.json().get("notes", {})
 
-                    cart_items_raw     = notes.get("cart_items_json", "")
-                    shipping_addr_raw  = notes.get("shipping_address_json", "")
-                    shipping_line_raw  = notes.get("shipping_line_json", "")
+                    cart_items_raw    = notes.get("cart_items_json", "")
+                    shipping_addr_raw = notes.get("shipping_address_json", "")
+                    draft_order_id_wb = notes.get("draft_order_id", "")
 
-                    if not cart_items_raw:
-                        log.warning(f"Webhook fallback: missing cart_items in notes for order {order_id} — cannot create Shopify order")
+                    # Use pre-created draft if available; else reconstruct from cart items
+                    if not draft_order_id_wb and not cart_items_raw:
+                        log.warning(f"Webhook fallback: no draft_order_id and no cart_items in notes for order {order_id} — cannot create Shopify order")
                         return
 
-                    cart_items    = json.loads(cart_items_raw)
+                    cart_items    = json.loads(cart_items_raw) if cart_items_raw else []
                     shipping_addr = json.loads(shipping_addr_raw) if shipping_addr_raw else {}
-                    shipping_line = json.loads(shipping_line_raw) if shipping_line_raw else None
 
                     _create_shopify_order(
                         payment_id=payment_id,
@@ -744,7 +722,7 @@ def webhook():
                         customer_email=notes.get("customer_email", ""),
                         customer_name=notes.get("customer_name", ""),
                         shipping_addr=shipping_addr,
-                        shipping_line=shipping_line
+                        draft_order_id=draft_order_id_wb or None
                     )
                     log.info(f"Webhook fallback: Shopify order created for payment {payment_id}")
                 except Exception as err:
