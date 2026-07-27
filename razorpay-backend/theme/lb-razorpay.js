@@ -216,15 +216,20 @@
         return;
       }
 
-      // 4. Create Razorpay order on backend
+      // 4. Create Razorpay order on backend.
+      // cart_items and shipping_address are stored in Razorpay order notes so
+      // the webhook can reconstruct the Shopify order if this browser session
+      // drops before /verify-payment is called.
       const orderResp = await fetch(`${GCP_BASE}/create-order`, {
         method:  'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amount:         cartTotal,
-          currency:       cartCurrency,
-          customer_email: customerEmail,
-          customer_name:  customerName
+          amount:           cartTotal,
+          currency:         cartCurrency,
+          customer_email:   customerEmail,
+          customer_name:    customerName,
+          cart_items:       cartItems,
+          shipping_address: shippingAddress
         })
       });
 

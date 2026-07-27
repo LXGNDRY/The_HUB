@@ -110,14 +110,16 @@ class _ShopifyTokenCache:
 
 _shopify_token_cache = _ShopifyTokenCache()
 
-# Exchange rate fallback — if live fetch fails, use this floor
+# Exchange rate — cached for 5 minutes to avoid hammering open.er-api.com
 USD_TO_INR_FALLBACK = 84.0
+_FX_CACHE_TTL = 300
+_fx_cache: dict = {"rate": USD_TO_INR_FALLBACK, "ts": 0.0}
 
-# Idempotency guard — prevents duplicate Shopify orders on network retries.
-# In-memory set is sufficient: duplicate calls arrive within the same request
-# lifecycle or milliseconds apart. Does not survive restarts, but Razorpay
-# only retries webhooks, not /verify-payment frontend calls.
+# Idempotency guard — prevents duplicate Shopify orders on retries.
+# In-memory set; does not survive restarts or span multiple instances, but
+# it protects against same-instance double-calls (e.g. double-click, retries).
 _processed_payment_ids: set = set()
+_payment_lock = threading.Lock()
 
 
 # ---------------------------------------------------------------------------
@@ -125,17 +127,23 @@ _processed_payment_ids: set = set()
 # ---------------------------------------------------------------------------
 
 def get_usd_to_inr() -> float:
-    """Fetch live USD→INR rate. Falls back to USD_TO_INR_FALLBACK on error."""
+    """Fetch live USD→INR rate, cached for 5 minutes. Falls back on error."""
+    now = time.time()
+    if now - _fx_cache["ts"] < _FX_CACHE_TTL:
+        return _fx_cache["rate"]
     try:
         resp = requests.get(
             "https://open.er-api.com/v6/latest/USD",
             timeout=3
         )
         data = resp.json()
-        return float(data["rates"]["INR"])
+        rate = float(data["rates"]["INR"])
+        _fx_cache["rate"] = rate
+        _fx_cache["ts"] = now
+        return rate
     except Exception as e:
-        log.warning(f"FX fetch failed, using fallback rate: {e}")
-        return USD_TO_INR_FALLBACK
+        log.warning(f"FX fetch failed, using cached/fallback rate: {e}")
+        return _fx_cache["rate"]
 
 
 def verify_razorpay_signature(order_id: str, payment_id: str, signature: str) -> bool:
@@ -176,6 +184,16 @@ def shopify_graphql(query: str, variables: dict) -> dict:
     )
     resp.raise_for_status()
     return resp.json()
+
+
+def _try_claim_payment(payment_id: str) -> bool:
+    """Thread-safe idempotency check. Returns True if this caller claimed the
+    payment_id (i.e. first to process it). Returns False if already processed."""
+    with _payment_lock:
+        if payment_id in _processed_payment_ids:
+            return False
+        _processed_payment_ids.add(payment_id)
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -220,8 +238,85 @@ mutation draftOrderComplete($id: ID!, $paymentPending: Boolean) {
 """
 
 
+def _create_shopify_order(
+    payment_id: str,
+    order_id: str,
+    cart_items: list,
+    customer_email: str,
+    customer_name: str,
+    shipping_addr: dict
+) -> dict:
+    """Create and complete a Shopify Draft Order for a captured Razorpay payment.
+
+    Returns the Shopify order dict with keys: id, name, statusUrl, confirmationNumber.
+    Raises on any failure.
+    """
+    name_parts = customer_name.strip().split(" ", 1)
+    first_name = name_parts[0] if name_parts else ""
+    last_name  = name_parts[1] if len(name_parts) > 1 else ""
+
+    line_items = []
+    for item in cart_items:
+        variant_id = item.get("variant_id", "")
+        if not str(variant_id).startswith("gid://"):
+            variant_id = f"gid://shopify/ProductVariant/{variant_id}"
+        line_items.append({
+            "variantId": variant_id,
+            "quantity": int(item.get("quantity", 1))
+        })
+
+    draft_input = {
+        "email": customer_email,
+        "lineItems": line_items,
+        "shippingAddress": {
+            "firstName":  shipping_addr.get("first_name", first_name),
+            "lastName":   shipping_addr.get("last_name", last_name),
+            "address1":   shipping_addr.get("address1", ""),
+            "city":       shipping_addr.get("city", ""),
+            "country":    shipping_addr.get("country", "IN"),
+            "zip":        shipping_addr.get("zip", ""),
+            "phone":      shipping_addr.get("phone", "")
+        },
+        "billingAddress": {
+            "firstName":  shipping_addr.get("first_name", first_name),
+            "lastName":   shipping_addr.get("last_name", last_name),
+            "address1":   shipping_addr.get("address1", ""),
+            "city":       shipping_addr.get("city", ""),
+            "country":    shipping_addr.get("country", "IN"),
+            "zip":        shipping_addr.get("zip", ""),
+        },
+        "note": f"Razorpay | order_id={order_id} | payment_id={payment_id}",
+        "tags": "razorpay,upi,india",
+        "customAttributes": [
+            {"key": "razorpay_order_id",   "value": order_id},
+            {"key": "razorpay_payment_id", "value": payment_id}
+        ]
+    }
+
+    result = shopify_graphql(DRAFT_ORDER_CREATE, {"input": draft_input})
+    errors = result.get("data", {}).get("draftOrderCreate", {}).get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"Shopify draft order errors: {errors}")
+
+    draft = result["data"]["draftOrderCreate"]["draftOrder"]
+    draft_id = draft["id"]
+    log.info(f"Draft order created: {draft_id}")
+
+    complete_result = shopify_graphql(
+        DRAFT_ORDER_COMPLETE,
+        {"id": draft_id, "paymentPending": False}
+    )
+    complete_errors = complete_result.get("data", {}).get("draftOrderComplete", {}).get("userErrors", [])
+    if complete_errors:
+        raise RuntimeError(f"Shopify draft complete errors: {complete_errors}")
+
+    order = complete_result["data"]["draftOrderComplete"]["draftOrder"]["order"]
+    log.info(f"Shopify order created: {order['name']} | {order['id']}")
+    return order
+
+
 # ---------------------------------------------------------------------------
-# Route: POST /health
+# Route: GET /health
 # ---------------------------------------------------------------------------
 @app.route("/health", methods=["GET"])
 def health():
@@ -256,10 +351,12 @@ def create_order():
     Creates a Razorpay order.
 
     Request body (JSON):
-      amount        int    — cart total in subunits (Shopify cents, e.g. 6400 for $64)
-      currency      str    — cart currency ISO code (e.g. 'USD') — used for INR conversion
-      customer_email str   — prefill
-      customer_name  str   — prefill
+      amount              int    — cart total in subunits (Shopify cents, e.g. 6400 for $64)
+      currency            str    — cart currency ISO code (e.g. 'USD') — used for INR conversion
+      customer_email      str    — prefill
+      customer_name       str    — prefill
+      cart_items          list   — [{variant_id, quantity, price}] stored in notes for webhook fallback
+      shipping_address    dict   — {first_name, last_name, address1, city, zip, country, phone}
 
     Returns:
       id            str    — Razorpay order_id  (MUST pass to frontend checkout options)
@@ -291,17 +388,31 @@ def create_order():
     if amount_inr_paise < 100:  # Razorpay minimum: ₹1
         return jsonify({"error": "Amount below minimum"}), 400
 
-    # Build Razorpay order payload
+    # Serialize cart items and shipping address into notes for webhook fallback.
+    # Razorpay notes: up to 15 keys, values capped at 512 chars each.
+    customer_email = data.get("customer_email", "")
+    customer_name  = data.get("customer_name", "")
+    cart_items_json    = json.dumps(data.get("cart_items", []), separators=(",", ":"))
+    shipping_addr_json = json.dumps(data.get("shipping_address", {}), separators=(",", ":"))
+
+    if len(cart_items_json) > 512:
+        log.warning(f"cart_items_json too large ({len(cart_items_json)} chars) — webhook fallback may not reconstruct order")
+        cart_items_json = cart_items_json[:512]
+    if len(shipping_addr_json) > 512:
+        shipping_addr_json = shipping_addr_json[:512]
+
     receipt = f"lb_{os.urandom(4).hex()}"
     payload = {
         "amount": amount_inr_paise,
         "currency": "INR",
         "receipt": receipt,
         "notes": {
-            "customer_email": data.get("customer_email", ""),
-            "customer_name": data.get("customer_name", ""),
-            "cart_currency": cart_currency,
-            "cart_amount_usd": str(cart_amount_base)
+            "customer_email":       customer_email,
+            "customer_name":        customer_name,
+            "cart_currency":        cart_currency,
+            "cart_amount_usd":      str(cart_amount_base),
+            "cart_items_json":      cart_items_json,
+            "shipping_address_json": shipping_addr_json,
         }
     }
 
@@ -370,90 +481,26 @@ def verify_payment():
 
     log.info(f"Signature verified: order={order_id} payment={payment_id}")
 
-    # --- Idempotency check — prevent duplicate Shopify orders ---
-    if payment_id in _processed_payment_ids:
-        log.warning(f"Duplicate verify-payment call for payment_id={payment_id}, skipping order creation")
+    # --- Idempotency check ---
+    if not _try_claim_payment(payment_id):
+        log.warning(f"Duplicate verify-payment call for payment_id={payment_id}, skipping")
         return jsonify({"error": "Payment already processed"}), 409
-    _processed_payment_ids.add(payment_id)
 
-    # --- Step 2: Build Shopify Draft Order ---
-    cart_items = data.get("cart_items", [])
-    customer_email = data.get("customer_email", "")
-    customer_name  = data.get("customer_name", "")
-    shipping_addr  = data.get("shipping_address", {})
-
-    # Parse name into first/last
-    name_parts = customer_name.strip().split(" ", 1)
-    first_name = name_parts[0] if name_parts else ""
-    last_name  = name_parts[1] if len(name_parts) > 1 else ""
-
-    # Line items — Shopify expects variantId as GID
-    line_items = []
-    for item in cart_items:
-        variant_id = item.get("variant_id", "")
-        # Accept both numeric and GID format
-        if not str(variant_id).startswith("gid://"):
-            variant_id = f"gid://shopify/ProductVariant/{variant_id}"
-        line_items.append({
-            "variantId": variant_id,
-            "quantity": int(item.get("quantity", 1))
-        })
-
-    draft_input = {
-        "email": customer_email,
-        "lineItems": line_items,
-        "shippingAddress": {
-            "firstName":  shipping_addr.get("first_name", first_name),
-            "lastName":   shipping_addr.get("last_name", last_name),
-            "address1":   shipping_addr.get("address1", ""),
-            "city":       shipping_addr.get("city", ""),
-            "country":    shipping_addr.get("country", "IN"),
-            "zip":        shipping_addr.get("zip", ""),
-            "phone":      shipping_addr.get("phone", "")
-        },
-        "billingAddress": {
-            "firstName":  shipping_addr.get("first_name", first_name),
-            "lastName":   shipping_addr.get("last_name", last_name),
-            "address1":   shipping_addr.get("address1", ""),
-            "city":       shipping_addr.get("city", ""),
-            "country":    shipping_addr.get("country", "IN"),
-            "zip":        shipping_addr.get("zip", ""),
-        },
-        "note": f"Razorpay | order_id={order_id} | payment_id={payment_id}",
-        "tags": "razorpay,upi,india",
-        "customAttributes": [
-            {"key": "razorpay_order_id",   "value": order_id},
-            {"key": "razorpay_payment_id", "value": payment_id}
-        ]
-    }
-
+    # --- Step 2: Create Shopify order ---
     try:
-        # Step 2a: Create draft order
-        result = shopify_graphql(DRAFT_ORDER_CREATE, {"input": draft_input})
-        errors = result.get("data", {}).get("draftOrderCreate", {}).get("userErrors", [])
-        if errors:
-            log.error(f"Shopify draft order errors: {errors}")
-            return jsonify({"error": "Shopify order creation failed", "details": errors}), 502
-
-        draft = result["data"]["draftOrderCreate"]["draftOrder"]
-        draft_id = draft["id"]
-        log.info(f"Draft order created: {draft_id}")
-
-        # Step 2b: Complete draft order (mark as paid — payment already captured by Razorpay)
-        complete_result = shopify_graphql(
-            DRAFT_ORDER_COMPLETE,
-            {"id": draft_id, "paymentPending": False}
+        order = _create_shopify_order(
+            payment_id=payment_id,
+            order_id=order_id,
+            cart_items=data.get("cart_items", []),
+            customer_email=data.get("customer_email", ""),
+            customer_name=data.get("customer_name", ""),
+            shipping_addr=data.get("shipping_address", {})
         )
-        complete_errors = complete_result.get("data", {}).get("draftOrderComplete", {}).get("userErrors", [])
-        if complete_errors:
-            log.error(f"Shopify draft complete errors: {complete_errors}")
-            return jsonify({"error": "Shopify order completion failed", "details": complete_errors}), 502
-
-        order = complete_result["data"]["draftOrderComplete"]["draftOrder"]["order"]
-        log.info(f"Shopify order created: {order['name']} | {order['id']}")
-
     except Exception as e:
         log.error(f"Shopify order creation exception: {e}")
+        # Release the claim so webhook fallback can retry
+        with _payment_lock:
+            _processed_payment_ids.discard(payment_id)
         return jsonify({"error": "Shopify order creation failed"}), 500
 
     return jsonify({
@@ -479,10 +526,13 @@ def webhook():
     payload_bytes = request.get_data()
     received_sig  = request.headers.get("X-Razorpay-Signature", "")
 
-    # Verify webhook authenticity
-    if WEBHOOK_SECRET and not verify_webhook_signature(payload_bytes, received_sig):
-        log.warning("Webhook signature verification failed")
-        return jsonify({"error": "Invalid signature"}), 400
+    # Verify webhook authenticity — WEBHOOK_SECRET must be set in production
+    if WEBHOOK_SECRET:
+        if not verify_webhook_signature(payload_bytes, received_sig):
+            log.warning("Webhook signature verification failed")
+            return jsonify({"error": "Invalid signature"}), 400
+    else:
+        log.warning("WEBHOOK_SECRET not set — skipping signature verification (insecure)")
 
     try:
         event = json.loads(payload_bytes)
@@ -501,8 +551,49 @@ def webhook():
         amount     = payment.get("amount", 0)
         log.info(f"Payment captured: {payment_id} | order={order_id} | ₹{amount/100:.2f}")
 
-        # Trigger SFTP invoice upload in background thread
-        # (non-blocking — webhook must return 200 quickly to avoid Razorpay retry)
+        # Fallback order creation: if /verify-payment never fired (browser crash,
+        # network drop), create the Shopify order here using cart data stored in
+        # the Razorpay order notes at /create-order time.
+        if payment_id and _try_claim_payment(payment_id):
+            def _webhook_order_fallback():
+                try:
+                    rzp_resp = requests.get(
+                        f"{RAZORPAY_ORDERS_URL}/{order_id}",
+                        auth=(RZP_KEY_ID, RZP_KEY_SECRET),
+                        timeout=10
+                    )
+                    rzp_resp.raise_for_status()
+                    notes = rzp_resp.json().get("notes", {})
+
+                    cart_items_raw    = notes.get("cart_items_json", "")
+                    shipping_addr_raw = notes.get("shipping_address_json", "")
+
+                    if not cart_items_raw or not shipping_addr_raw:
+                        log.warning(f"Webhook fallback: missing cart data in notes for order {order_id} — cannot create Shopify order")
+                        return
+
+                    cart_items    = json.loads(cart_items_raw)
+                    shipping_addr = json.loads(shipping_addr_raw)
+
+                    _create_shopify_order(
+                        payment_id=payment_id,
+                        order_id=order_id,
+                        cart_items=cart_items,
+                        customer_email=notes.get("customer_email", ""),
+                        customer_name=notes.get("customer_name", ""),
+                        shipping_addr=shipping_addr
+                    )
+                    log.info(f"Webhook fallback: Shopify order created for payment {payment_id}")
+                except Exception as err:
+                    log.error(f"Webhook fallback order creation failed for {payment_id}: {err}")
+                    with _payment_lock:
+                        _processed_payment_ids.discard(payment_id)
+
+            threading.Thread(target=_webhook_order_fallback, daemon=True).start()
+        else:
+            log.info(f"Webhook: payment {payment_id} already handled by /verify-payment — skipping fallback")
+
+        # SFTP invoice upload (non-blocking)
         if SFTP_ENABLED:
             invoice_payload = [{
                 "payment_id":         payment_id,
