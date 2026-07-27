@@ -1073,3 +1073,28 @@ def get_market(market_gid: str):
         return sh.get_market(market_gid)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+# ─────────────────────────────────────────────
+# Razorpay cart button deployment
+# ─────────────────────────────────────────────
+
+@router.post("/push-razorpay-button", summary="Push lb-razorpay.js to the live Shopify theme")
+def push_razorpay_button():
+    """
+    Deploys assets/lb-razorpay.js to the live Shopify theme.
+    Reads RAZORPAY_BACKEND_URL and RAZORPAY_KEY_ID from Cloud Run env vars.
+    Idempotent — safe to re-run.
+    """
+    import os
+    from scripts.push_razorpay_cart_button import push_razorpay_button as _push
+    try:
+        result = _push(
+            razorpay_backend_url=os.environ.get("RAZORPAY_BACKEND_URL", ""),
+            razorpay_key_id=os.environ.get("RAZORPAY_KEY_ID", ""),
+            dry_run=False,
+        )
+        return result
+    except Exception as exc:
+        logger.error("push_razorpay_button error: %s", exc)
+        raise HTTPException(status_code=500, detail=str(exc))
