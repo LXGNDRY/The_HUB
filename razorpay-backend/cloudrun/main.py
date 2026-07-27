@@ -265,27 +265,40 @@ def _create_shopify_order(
             "quantity": int(item.get("quantity", 1))
         })
 
+    # shipping_address is optional — Razorpay collects contact info in its modal.
+    # If absent, we still create the order; merchant follows up for shipping details.
+    addr_first   = shipping_addr.get("first_name", first_name)
+    addr_last    = shipping_addr.get("last_name", last_name)
+    addr_address = shipping_addr.get("address1", "Pending — collected via Razorpay")
+    addr_city    = shipping_addr.get("city", "Pending")
+    addr_country = shipping_addr.get("country", "IN")
+    addr_zip     = shipping_addr.get("zip", "000000")
+    addr_phone   = shipping_addr.get("phone", "")
+
+    has_address = bool(shipping_addr.get("address1"))
+    note_suffix = "" if has_address else " | Shipping address: to be confirmed with customer"
+
     draft_input = {
         "email": customer_email,
         "lineItems": line_items,
         "shippingAddress": {
-            "firstName":  shipping_addr.get("first_name", first_name),
-            "lastName":   shipping_addr.get("last_name", last_name),
-            "address1":   shipping_addr.get("address1", ""),
-            "city":       shipping_addr.get("city", ""),
-            "country":    shipping_addr.get("country", "IN"),
-            "zip":        shipping_addr.get("zip", ""),
-            "phone":      shipping_addr.get("phone", "")
+            "firstName": addr_first,
+            "lastName":  addr_last,
+            "address1":  addr_address,
+            "city":      addr_city,
+            "country":   addr_country,
+            "zip":       addr_zip,
+            "phone":     addr_phone,
         },
         "billingAddress": {
-            "firstName":  shipping_addr.get("first_name", first_name),
-            "lastName":   shipping_addr.get("last_name", last_name),
-            "address1":   shipping_addr.get("address1", ""),
-            "city":       shipping_addr.get("city", ""),
-            "country":    shipping_addr.get("country", "IN"),
-            "zip":        shipping_addr.get("zip", ""),
+            "firstName": addr_first,
+            "lastName":  addr_last,
+            "address1":  addr_address,
+            "city":      addr_city,
+            "country":   addr_country,
+            "zip":       addr_zip,
         },
-        "note": f"Razorpay | order_id={order_id} | payment_id={payment_id}",
+        "note": f"Razorpay | order_id={order_id} | payment_id={payment_id}{note_suffix}",
         "tags": "razorpay,upi,india",
         "customAttributes": [
             {"key": "razorpay_order_id",   "value": order_id},
@@ -568,12 +581,12 @@ def webhook():
                     cart_items_raw    = notes.get("cart_items_json", "")
                     shipping_addr_raw = notes.get("shipping_address_json", "")
 
-                    if not cart_items_raw or not shipping_addr_raw:
-                        log.warning(f"Webhook fallback: missing cart data in notes for order {order_id} — cannot create Shopify order")
+                    if not cart_items_raw:
+                        log.warning(f"Webhook fallback: missing cart_items in notes for order {order_id} — cannot create Shopify order")
                         return
 
                     cart_items    = json.loads(cart_items_raw)
-                    shipping_addr = json.loads(shipping_addr_raw)
+                    shipping_addr = json.loads(shipping_addr_raw) if shipping_addr_raw else {}
 
                     _create_shopify_order(
                         payment_id=payment_id,
