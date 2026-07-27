@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy app
 COPY main.py .
+COPY sftp/ ./sftp/
 
 # Switch to non-root
 USER appuser
