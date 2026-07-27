@@ -61,6 +61,11 @@ SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_DOMAIN  = os.environ.get("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
 WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
 
+# India import tax rate applied on top of the INR cart total.
+# Default: 0.18 = 18% standard IGST for goods priced above ₹1,000.
+# Set INDIA_TAX_RATE=0 to disable (e.g. if you handle duties in product pricing).
+INDIA_TAX_RATE = float(os.environ.get("INDIA_TAX_RATE", "0.18"))
+
 RAZORPAY_ORDERS_URL = "https://api.razorpay.com/v1/orders"
 SHOPIFY_GRAPHQL_URL = f"https://{SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json"
 SHOPIFY_OAUTH_URL   = f"https://{SHOPIFY_DOMAIN}/admin/oauth/access_token"
@@ -363,18 +368,18 @@ def _create_shopify_order(
 def _create_pending_draft_order(
     cart_items: list,
     customer_email: str = "",
-    customer_name: str = ""
+    customer_name: str = "",
+    india_tax_inr: float = 0.0,
+    fx_rate: float = 84.0
 ) -> dict:
     """
-    Create an incomplete Shopify draft order with a placeholder India address
-    so Shopify runs its full tax/duties engine and returns the correct total.
-    The draft is completed (not re-created) in _create_shopify_order once payment
-    is verified — avoiding a second order and ensuring the amount matches exactly.
+    Create an incomplete Shopify draft order with a placeholder India address.
+    The draft is completed in _create_shopify_order once payment is verified.
 
-    GST rates in India are uniform by product category regardless of state, so
-    the Mumbai placeholder address gives the correct total for any Indian customer.
+    If india_tax_inr > 0, a custom "India Import Tax" line item is appended so
+    the Shopify order total matches the amount actually charged via Razorpay.
 
-    Returns {draft_id, total_usd, subtotal_usd, tax_usd} or raises.
+    Returns {draft_id} or raises.
     """
     name_parts = (customer_name or "").strip().split(" ", 1)
     first_name = name_parts[0] if name_parts else "India"
@@ -392,6 +397,19 @@ def _create_pending_draft_order(
 
     if not line_items:
         raise ValueError("No line items")
+
+    # Add a custom "Import Tax" line item so the Shopify order total matches
+    # what Razorpay actually charged — the Admin API uses shop currency (USD),
+    # so we convert the INR tax amount using the live FX rate.
+    if india_tax_inr > 0 and fx_rate > 0:
+        tax_usd = round(india_tax_inr / fx_rate, 2)
+        line_items.append({
+            "title": f"India Import Tax (IGST {int(round(INDIA_TAX_RATE * 100))}%)",
+            "quantity": 1,
+            "originalUnitPrice": str(tax_usd),
+            "requiresShipping": False,
+            "taxable": False
+        })
 
     draft_input = {
         "email": customer_email or "",
@@ -414,23 +432,11 @@ def _create_pending_draft_order(
     if errors:
         raise RuntimeError(f"Shopify draft order errors: {errors}")
 
-    draft        = result["data"]["draftOrderCreate"]["draftOrder"]
-    draft_id     = draft["id"]
-    subtotal_usd = float(draft.get("subtotalPrice") or 0)
-    tax_usd      = float(draft.get("totalTax") or 0)
-    total_usd    = float(draft.get("totalPrice") or 0)
+    draft    = result["data"]["draftOrderCreate"]["draftOrder"]
+    draft_id = draft["id"]
+    log.info(f"Pending draft {draft_id} created (india_tax_inr={india_tax_inr:.2f})")
 
-    log.info(
-        f"Pending draft {draft_id}: "
-        f"subtotal=${subtotal_usd:.2f} + tax=${tax_usd:.2f} = total=${total_usd:.2f}"
-    )
-
-    return {
-        "draft_id":     draft_id,
-        "total_usd":    total_usd,
-        "subtotal_usd": subtotal_usd,
-        "tax_usd":      tax_usd,
-    }
+    return {"draft_id": draft_id}
 
 
 # ---------------------------------------------------------------------------
@@ -495,32 +501,42 @@ def create_order():
     customer_name  = data.get("customer_name", "")
     cart_items     = data.get("cart_items", [])
 
-    # --- Pre-create Shopify draft order to get the true tax-inclusive total ---
-    # Creating a real draft order (not draftOrderCalculate) ensures Shopify runs
-    # its full tax/duties engine — including GST, India market rules, etc.
-    # The same draft order is completed after payment rather than creating a new one.
-    pending_draft  = None
-    draft_order_id = None
+    # Always use the frontend-provided cart total for the Razorpay charge.
+    # cart_currency is "INR" for India market customers, "USD" otherwise.
+    cart_amount_base = cart_amount_subunits / 100.0
 
-    if cart_items:
-        try:
-            pending_draft  = _create_pending_draft_order(cart_items, customer_email, customer_name)
-            draft_order_id = pending_draft["draft_id"]
-            cart_amount_base = pending_draft["total_usd"]
-            cart_currency    = "USD"
-        except Exception as e:
-            log.warning(f"Pre-create draft order failed — falling back to frontend subtotal (taxes excluded): {e}")
-            cart_amount_base = cart_amount_subunits / 100.0
-    else:
-        cart_amount_base = cart_amount_subunits / 100.0
-
-    # Always settle in INR — Razorpay Import Flow settles in INR regardless
+    # Convert to INR paise for Razorpay
     if cart_currency == "INR":
-        amount_inr_paise = int(round(cart_amount_base * 100))
+        fx_rate = get_usd_to_inr()
+        base_inr = cart_amount_base
+        # Apply India import tax (IGST) on top of the product price.
+        # INDIA_TAX_RATE env var controls the rate (default 0.18 = 18% IGST).
+        india_tax_inr = round(base_inr * INDIA_TAX_RATE, 2)
+        total_inr = base_inr + india_tax_inr
+        amount_inr_paise = int(round(total_inr * 100))
+        log.info(f"INR cart: base=₹{base_inr:.2f} + tax=₹{india_tax_inr:.2f} "
+                 f"({int(INDIA_TAX_RATE*100)}%) = ₹{total_inr:.2f}")
     else:
         fx_rate = get_usd_to_inr()
         amount_inr = cart_amount_base * fx_rate
         amount_inr_paise = int(round(amount_inr * 100))
+        india_tax_inr = 0.0
+
+    # --- Pre-create Shopify draft order for ORDER LINKING ---
+    # Includes a custom "Import Tax" line item so the Shopify order total
+    # matches what Razorpay charged. We don't use the draft total for the
+    # amount — the cart total above is authoritative.
+    draft_order_id = None
+
+    if cart_items:
+        try:
+            pending_draft  = _create_pending_draft_order(
+                cart_items, customer_email, customer_name,
+                india_tax_inr=india_tax_inr, fx_rate=fx_rate
+            )
+            draft_order_id = pending_draft["draft_id"]
+        except Exception as e:
+            log.warning(f"Pre-create draft order failed — will create after payment: {e}")
 
     if amount_inr_paise < 100:  # Razorpay minimum: ₹1
         return jsonify({"error": "Amount below minimum"}), 400
@@ -545,7 +561,8 @@ def create_order():
             "customer_email":        customer_email,
             "customer_name":         customer_name,
             "cart_currency":         cart_currency,
-            "cart_amount_usd":       str(cart_amount_base),
+            "cart_amount_base":      str(cart_amount_base),
+            "india_tax_inr":         str(india_tax_inr),
             "cart_items_json":       cart_items_json,
             "shipping_address_json": shipping_addr_json,
             "draft_order_id":        draft_order_id or "",
