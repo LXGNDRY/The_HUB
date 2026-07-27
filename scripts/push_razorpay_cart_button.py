@@ -12,21 +12,53 @@ Usage:
 
 import os
 import sys
+import time
+import threading
 import argparse
 import requests
 
-TOKEN    = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
 DOMAIN   = "lngndny.myshopify.com"
 API_VER  = "2026-04"
 BASE_URL = f"https://{DOMAIN}/admin/api/{API_VER}"
-HEADERS  = {"X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json"}
+
+CLIENT_ID     = os.environ.get("SHOPIFY_CLIENT_ID", "")
+CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
+_TOKEN_REFRESH_BUFFER = 300
+
+class _TokenCache:
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._token = ""
+        self._expires_at = 0.0
+
+    def get(self):
+        with self._lock:
+            if time.time() >= (self._expires_at - _TOKEN_REFRESH_BUFFER):
+                self._refresh()
+            return self._token
+
+    def _refresh(self):
+        if not CLIENT_ID or not CLIENT_SECRET:
+            raise RuntimeError("SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set")
+        r = requests.post(
+            f"https://{DOMAIN}/admin/oauth/access_token",
+            json={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "grant_type": "client_credentials"},
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        self._token = data["access_token"]
+        self._expires_at = time.time() + int(data.get("expires_in", 86399))
+
+_token_cache = _TokenCache()
+
+def _headers():
+    return {"X-Shopify-Access-Token": _token_cache.get(), "Content-Type": "application/json"}
 
 JS_SOURCE_PATH = os.path.join(os.path.dirname(__file__), "razorpay_cart_button.js")
 
 
 def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_run: bool = False) -> dict:
-    if not TOKEN:
-        raise ValueError("SHOPIFY_ADMIN_TOKEN is not set")
     if not razorpay_backend_url:
         raise ValueError("RAZORPAY_BACKEND_URL is not set")
     if not razorpay_key_id:
@@ -34,7 +66,7 @@ def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_ru
 
     # 1. Find live theme
     print("Step 1: Finding active theme...")
-    resp = requests.get(f"{BASE_URL}/themes.json", headers=HEADERS, timeout=15)
+    resp = requests.get(f"{BASE_URL}/themes.json", headers=_headers(), timeout=15)
     resp.raise_for_status()
     themes = resp.json()["themes"]
     active = next((t for t in themes if t["role"] == "main"), None)
@@ -71,7 +103,7 @@ def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_ru
         put_url = f"{BASE_URL}/themes/{theme_id}/assets.json"
         r = requests.put(
             put_url,
-            headers=HEADERS,
+            headers=_headers(),
             json={"asset": {"key": asset_key, "value": js_content}},
             timeout=30
         )
@@ -84,7 +116,7 @@ def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_ru
     snippet_key = "snippets/cart-summary.liquid"
     print(f"Step 4: Patching {snippet_key} with real backend URL + key ID ...")
     get_url = f"{BASE_URL}/themes/{theme_id}/assets.json"
-    gr = requests.get(get_url, headers=HEADERS, params={"asset[key]": snippet_key}, timeout=15)
+    gr = requests.get(get_url, headers=_headers(), params={"asset[key]": snippet_key}, timeout=15)
     gr.raise_for_status()
     snippet_content = gr.json()["asset"]["value"]
 
@@ -98,7 +130,7 @@ def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_ru
     else:
         pr = requests.put(
             get_url,
-            headers=HEADERS,
+            headers=_headers(),
             json={"asset": {"key": snippet_key, "value": patched}},
             timeout=30
         )
