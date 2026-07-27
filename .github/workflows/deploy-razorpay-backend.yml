@@ -57,6 +57,10 @@ jobs:
 
           load_secret() {
             local NAME="$1" VALUE="$2"
+            if [ -z "$VALUE" ]; then
+              echo "⚠️  $NAME is empty — skipping (add GitHub secret if needed)"
+              return 0
+            fi
             if gcloud secrets describe "$NAME" \
                 --project=${{ env.PROJECT_ID }} &>/dev/null; then
               echo -n "$VALUE" | gcloud secrets versions add "$NAME" \
