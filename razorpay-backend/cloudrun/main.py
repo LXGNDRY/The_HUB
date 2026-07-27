@@ -9,12 +9,19 @@ Endpoints:
 Environment (via GCP Secret Manager):
   RAZORPAY_KEY_ID        — rzp_live_...
   RAZORPAY_KEY_SECRET    — live secret
-  SHOPIFY_ADMIN_TOKEN    — shpat_...
+  SHOPIFY_CLIENT_ID      — Shopify custom app API key
+  SHOPIFY_CLIENT_SECRET  — Shopify custom app API secret (shpss_...)
   SHOPIFY_STORE_DOMAIN   — lngndny.myshopify.com
   WEBHOOK_SECRET         — Razorpay webhook secret (set in dashboard)
+
+Shopify auth uses OAuth Client Credentials Grant (same pattern as gcp-bot's
+modules/shopify.py) — SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET are exchanged
+for a short-lived Admin API access token, cached in memory and refreshed
+before expiry. No static SHOPIFY_ADMIN_TOKEN is required.
 """
 
 import os
+import time
 import hmac
 import hashlib
 import json
@@ -49,12 +56,59 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 RZP_KEY_ID      = os.environ.get("RAZORPAY_KEY_ID", "")
 RZP_KEY_SECRET  = os.environ.get("RAZORPAY_KEY_SECRET", "")
-SHOPIFY_TOKEN   = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
+SHOPIFY_CLIENT_ID     = os.environ.get("SHOPIFY_CLIENT_ID", "")
+SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_DOMAIN  = os.environ.get("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
 WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
 
 RAZORPAY_ORDERS_URL = "https://api.razorpay.com/v1/orders"
 SHOPIFY_GRAPHQL_URL = f"https://{SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json"
+SHOPIFY_OAUTH_URL   = f"https://{SHOPIFY_DOMAIN}/admin/oauth/access_token"
+
+# How many seconds before expiry to proactively refresh
+SHOPIFY_TOKEN_REFRESH_BUFFER = 300  # 5 minutes
+
+
+class _ShopifyTokenCache:
+    """Thread-safe in-memory Admin API token, refreshed via OAuth Client
+    Credentials Grant (SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET) before
+    expiry — mirrors modules/shopify.py's _TokenCache in the main gcp-bot."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._token = ""
+        self._expires_at = 0.0
+
+    def get(self) -> str:
+        with self._lock:
+            if time.time() >= (self._expires_at - SHOPIFY_TOKEN_REFRESH_BUFFER):
+                self._refresh()
+            return self._token
+
+    def _refresh(self):
+        if not SHOPIFY_CLIENT_ID or not SHOPIFY_CLIENT_SECRET:
+            raise RuntimeError(
+                "SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set to obtain a Shopify admin token."
+            )
+        log.info("Shopify token near expiry — requesting new Client Credentials token...")
+        r = requests.post(
+            SHOPIFY_OAUTH_URL,
+            json={
+                "client_id": SHOPIFY_CLIENT_ID,
+                "client_secret": SHOPIFY_CLIENT_SECRET,
+                "grant_type": "client_credentials",
+            },
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        self._token = data["access_token"]
+        expires_in = int(data.get("expires_in", 86399))
+        self._expires_at = time.time() + expires_in
+        log.info(f"Shopify token refreshed, expires in {expires_in}s")
+
+
+_shopify_token_cache = _ShopifyTokenCache()
 
 # Exchange rate fallback — if live fetch fails, use this floor
 USD_TO_INR_FALLBACK = 84.0
@@ -112,7 +166,7 @@ def shopify_graphql(query: str, variables: dict) -> dict:
     """Execute a Shopify Admin GraphQL request."""
     headers = {
         "Content-Type": "application/json",
-        "X-Shopify-Access-Token": SHOPIFY_TOKEN
+        "X-Shopify-Access-Token": _shopify_token_cache.get()
     }
     resp = requests.post(
         SHOPIFY_GRAPHQL_URL,

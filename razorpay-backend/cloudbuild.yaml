@@ -46,7 +46,7 @@ steps:
       - '--memory=512Mi'
       - '--cpu=1'
       - '--timeout=30'
-      - '--set-secrets=RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,SHOPIFY_ADMIN_TOKEN=SHOPIFY_ADMIN_TOKEN:latest'
+      - '--set-secrets=RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,SHOPIFY_CLIENT_ID=SHOPIFY_CLIENT_ID:latest,SHOPIFY_CLIENT_SECRET=SHOPIFY_CLIENT_SECRET:latest'
       - '--set-env-vars=SHOPIFY_STORE_DOMAIN=lngndny.myshopify.com,GCP_PROJECT_ID=idx-lngndny,SFTP_HOST=s-20628a7a7d07456a8.server.transfer.ap-south-1.amazonaws.com,SFTP_PORT=22,SFTP_USER=rzp-legendary-sftp,SFTP_UPLOAD_PATH=.'
 
 images:

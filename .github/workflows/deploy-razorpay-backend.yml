@@ -5,7 +5,7 @@
 #          files under razorpay-backend/ change.
 #
 # What this does:
-#   1. Loads 5 secrets into GCP Secret Manager (idempotent)
+#   1. Loads 6 secrets into GCP Secret Manager (idempotent)
 #   2. Grants the Cloud Run SA access to each secret
 #   3. Runs gcloud builds submit → cloudbuild.yaml builds the image
 #      and deploys to lb-razorpay-backend Cloud Run service
@@ -49,7 +49,8 @@ jobs:
           RAZORPAY_KEY_ID:           ${{ secrets.RAZORPAY_KEY_ID }}
           RAZORPAY_KEY_SECRET:       ${{ secrets.RAZORPAY_KEY_SECRET }}
           WEBHOOK_SECRET:            ${{ secrets.RAZORPAY_WEBHOOK_SECRET }}
-          SHOPIFY_ADMIN_TOKEN:       ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_CLIENT_ID:         ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET:     ${{ secrets.SHOPIFY_CLIENT_SECRET }}
           RAZORPAY_SFTP_PRIVATE_KEY: ${{ secrets.RAZORPAY_SFTP_PRIVATE_KEY }}
         run: |
           gcloud services enable secretmanager.googleapis.com \
@@ -76,7 +77,8 @@ jobs:
           load_secret "RAZORPAY_KEY_ID"           "$RAZORPAY_KEY_ID"
           load_secret "RAZORPAY_KEY_SECRET"        "$RAZORPAY_KEY_SECRET"
           load_secret "WEBHOOK_SECRET"             "$WEBHOOK_SECRET"
-          load_secret "SHOPIFY_ADMIN_TOKEN"        "$SHOPIFY_ADMIN_TOKEN"
+          load_secret "SHOPIFY_CLIENT_ID"          "$SHOPIFY_CLIENT_ID"
+          load_secret "SHOPIFY_CLIENT_SECRET"      "$SHOPIFY_CLIENT_SECRET"
           load_secret "RAZORPAY_SFTP_PRIVATE_KEY"  "$RAZORPAY_SFTP_PRIVATE_KEY"
 
       # ── Step 2: Grant Cloud Run SA access to secrets ──────────────
@@ -91,7 +93,7 @@ jobs:
           echo "Service account: $SA_EMAIL"
 
           for SECRET in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET WEBHOOK_SECRET \
-                        SHOPIFY_ADMIN_TOKEN RAZORPAY_SFTP_PRIVATE_KEY; do
+                        SHOPIFY_CLIENT_ID SHOPIFY_CLIENT_SECRET RAZORPAY_SFTP_PRIVATE_KEY; do
             gcloud secrets add-iam-policy-binding "$SECRET" \
               --member="serviceAccount:$SA_EMAIL" \
               --role="roles/secretmanager.secretAccessor" \
