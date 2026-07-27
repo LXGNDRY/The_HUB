@@ -6,10 +6,14 @@
 #
 # What this does:
 #   1. Loads 6 secrets into GCP Secret Manager (idempotent)
-#   2. Grants the Cloud Run SA access to each secret
-#   3. Runs gcloud builds submit → cloudbuild.yaml builds the image
+#   2. Runs gcloud builds submit → cloudbuild.yaml builds the image
 #      and deploys to lb-razorpay-backend Cloud Run service
-#   4. Prints the live service URL
+#   3. Prints the live service URL
+#
+# The Cloud Run runtime SA (<project-number>-compute@developer.gserviceaccount.com)
+# needs roles/secretmanager.secretAccessor at the project level — this is a
+# one-time grant made directly in GCP (Console or Cloud Shell), not something
+# this workflow can do to itself (its own SA lacks secrets.setIamPolicy).
 # ============================================================
 
 name: 🔵 Razorpay Backend — Deploy
@@ -81,37 +85,13 @@ jobs:
           load_secret "SHOPIFY_CLIENT_SECRET"      "$SHOPIFY_CLIENT_SECRET"
           load_secret "RAZORPAY_SFTP_PRIVATE_KEY"  "$RAZORPAY_SFTP_PRIVATE_KEY"
 
-      # ── Step 2: Grant Cloud Run SA access to secrets ──────────────
-      - name: Set Secret Manager IAM bindings
-        run: |
-          # Cloud Run's default runtime SA (when no custom SA is set) is
-          # <project-number>-compute@developer.gserviceaccount.com, not
-          # <project-id>@appspot.gserviceaccount.com (that's App Engine's).
-          # The previous `gcloud iam service-accounts list --filter=...`
-          # lookup returned nothing but still exited 0, so SA_EMAIL was
-          # silently empty and every add-iam-policy-binding call below was
-          # a no-op against a blank member — deploys failed on
-          # "Permission denied on secret ... for Revision service account".
-          PROJECT_NUMBER=$(gcloud projects describe ${{ env.PROJECT_ID }} \
-            --format="value(projectNumber)")
-          SA_EMAIL="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-
-          echo "Service account: $SA_EMAIL"
-
-          for SECRET in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET WEBHOOK_SECRET \
-                        SHOPIFY_CLIENT_ID SHOPIFY_CLIENT_SECRET RAZORPAY_SFTP_PRIVATE_KEY; do
-            if ! gcloud secrets describe "$SECRET" --project=${{ env.PROJECT_ID }} &>/dev/null; then
-              echo "⚠️  $SECRET does not exist in Secret Manager — skipping IAM binding"
-              continue
-            fi
-            gcloud secrets add-iam-policy-binding "$SECRET" \
-              --member="serviceAccount:$SA_EMAIL" \
-              --role="roles/secretmanager.secretAccessor" \
-              --project=${{ env.PROJECT_ID }} --quiet
-            echo "✓ IAM binding set for $SECRET"
-          done
-
-      # ── Step 3: Build & deploy via Cloud Build ────────────────────
+      # ── Step 2: Build & deploy via Cloud Build ────────────────────
+      # Note: no per-secret IAM binding step here. The Cloud Run runtime SA
+      # (901935277314-compute@developer.gserviceaccount.com) was granted
+      # roles/secretmanager.secretAccessor at the project level (one-time,
+      # via GCP Console by the project owner), which covers every current and
+      # future secret. The per-secret add-iam-policy-binding loop always
+      # failed with 403 setIamPolicy denied and is not needed.
       - name: Build and deploy via Cloud Build
         working-directory: razorpay-backend
         run: |
@@ -121,7 +101,7 @@ jobs:
             --substitutions=COMMIT_SHA=${{ github.sha }} \
             .
 
-      # ── Step 4: Print live URL ────────────────────────────────────
+      # ── Step 3: Print live URL ────────────────────────────────────
       - name: Print service URL
         run: |
           URL=$(gcloud run services describe ${{ env.SERVICE_NAME }} \
