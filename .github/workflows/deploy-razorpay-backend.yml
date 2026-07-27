@@ -106,6 +106,7 @@ jobs:
           gcloud builds submit \
             --config cloudbuild.yaml \
             --project=${{ env.PROJECT_ID }} \
+            --substitutions=COMMIT_SHA=${{ github.sha }} \
             .
 
       # ── Step 4: Print live URL ────────────────────────────────────
