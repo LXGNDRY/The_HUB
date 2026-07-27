@@ -7,12 +7,10 @@
 # Substitutions (set in Cloud Build trigger or pass via --substitutions):
 #   _SERVICE_NAME  : lb-razorpay-backend
 #   _REGION        : us-central1
-#   _PROJECT       : idx-lngndny
 
 substitutions:
   _SERVICE_NAME: lb-razorpay-backend
   _REGION: us-central1
-  _PROJECT: idx-lngndny
 
 steps:
   # Step 1: Build the Docker image
