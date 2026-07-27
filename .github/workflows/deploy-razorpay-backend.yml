@@ -84,20 +84,30 @@ jobs:
       # ── Step 2: Grant Cloud Run SA access to secrets ──────────────
       - name: Set Secret Manager IAM bindings
         run: |
-          SA_EMAIL=$(gcloud iam service-accounts list \
-            --project=${{ env.PROJECT_ID }} \
-            --filter="displayName:Compute Engine default" \
-            --format="value(email)" 2>/dev/null \
-            || echo "${{ env.PROJECT_ID }}@appspot.gserviceaccount.com")
+          # Cloud Run's default runtime SA (when no custom SA is set) is
+          # <project-number>-compute@developer.gserviceaccount.com, not
+          # <project-id>@appspot.gserviceaccount.com (that's App Engine's).
+          # The previous `gcloud iam service-accounts list --filter=...`
+          # lookup returned nothing but still exited 0, so SA_EMAIL was
+          # silently empty and every add-iam-policy-binding call below was
+          # a no-op against a blank member — deploys failed on
+          # "Permission denied on secret ... for Revision service account".
+          PROJECT_NUMBER=$(gcloud projects describe ${{ env.PROJECT_ID }} \
+            --format="value(projectNumber)")
+          SA_EMAIL="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
 
           echo "Service account: $SA_EMAIL"
 
           for SECRET in RAZORPAY_KEY_ID RAZORPAY_KEY_SECRET WEBHOOK_SECRET \
                         SHOPIFY_CLIENT_ID SHOPIFY_CLIENT_SECRET RAZORPAY_SFTP_PRIVATE_KEY; do
+            if ! gcloud secrets describe "$SECRET" --project=${{ env.PROJECT_ID }} &>/dev/null; then
+              echo "⚠️  $SECRET does not exist in Secret Manager — skipping IAM binding"
+              continue
+            fi
             gcloud secrets add-iam-policy-binding "$SECRET" \
               --member="serviceAccount:$SA_EMAIL" \
               --role="roles/secretmanager.secretAccessor" \
-              --project=${{ env.PROJECT_ID }} --quiet 2>/dev/null || true
+              --project=${{ env.PROJECT_ID }} --quiet
             echo "✓ IAM binding set for $SECRET"
           done
 
