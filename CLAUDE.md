@@ -39,10 +39,12 @@ The_HUB/
 - **`modules/`** — thin SDK wrappers around a single GCP service or third-party API.
   Each module exposes plain Python functions; it never imports from `api/` or `agents/`.
 - **`api/routers/`** — FastAPI routers that call into `modules/`. One router per domain,
-  registered in `api/main.py` under `/api/<domain>`. All routes are protected by the
-  `verify_api_key` dependency.
+  registered in `api/main.py` under `/api/<domain>`. All protected routes require
+  `X-API-Key`; webhook, OAuth, and dashboard routes are unauthenticated.
 - **`agents/`** — orchestration logic that may call multiple modules, run multi-step
   workflows, and use `config.safe_execute()` for destructive actions.
+  - `agents/blog_writer_agent.py` — Gemini-powered blog generation; runs via scheduler 3×/day and `POST /api/blog-writer/run`
+  - `agents/vision_agent.py` — NVIDIA NIM vision; alt text audit/apply and product description gen via `POST /api/vision/*`
 
 ### `config.py` utilities — use these everywhere
 
@@ -79,12 +81,21 @@ as env vars injected by the CI deploy pipeline.
 - **Health check**: `GET /health` — unauthenticated, returns scheduler job count
 - **Shopify API version**: `2026-04` (REST + GraphQL)
 - **Scheduler timezone**: `America/Chicago`
+- **Embedded dashboard**: `GET /app` — unauthenticated, serves `frontend/index.html` (Shopify App Bridge UI)
+- **Shopify OAuth**: `GET /auth/shopify` + `GET /auth/shopify/callback` — unauthenticated, handles install/callback
+- **Webhooks**: `POST /webhooks/shopify` — unauthenticated, HMAC-verified via `SHOPIFY_WEBHOOK_SECRET`
+- **Static assets**: `GET /frontend/*` — served from `frontend/` directory
 
-All routers use `**protected` shorthand defined in `api/main.py`:
+All protected routers use `**protected` shorthand defined in `api/main.py`:
 ```python
 protected = {"dependencies": [Depends(verify_api_key)]}
 app.include_router(router, prefix="/api/foo", tags=["Foo"], **protected)
 ```
+
+Routers mounted **without** `**protected` (no X-API-Key required):
+- `webhooks.router` at `/webhooks` — Shopify HMAC signature is the auth mechanism
+- `oauth.router` — install/callback redirect flow
+- `app_dashboard.router` — serves the embedded UI at `/app`
 
 ---
 
