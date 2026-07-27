@@ -237,6 +237,30 @@ mutation draftOrderComplete($id: ID!, $paymentPending: Boolean) {
 }
 """
 
+DRAFT_ORDER_CALCULATE = """
+mutation draftOrderCalculate($input: DraftOrderInput!) {
+  draftOrderCalculate(input: $input) {
+    calculatedDraftOrder {
+      subtotalPrice
+      totalTax
+      totalPrice
+      availableShippingRates {
+        handle
+        title
+        price {
+          amount
+          currencyCode
+        }
+      }
+    }
+    userErrors {
+      field
+      message
+    }
+  }
+}
+"""
+
 
 def _create_shopify_order(
     payment_id: str,
@@ -244,7 +268,8 @@ def _create_shopify_order(
     cart_items: list,
     customer_email: str,
     customer_name: str,
-    shipping_addr: dict
+    shipping_addr: dict,
+    shipping_line: dict = None
 ) -> dict:
     """Create and complete a Shopify Draft Order for a captured Razorpay payment.
 
@@ -306,6 +331,14 @@ def _create_shopify_order(
         ]
     }
 
+    # Attach shipping line calculated at order-creation time so the Shopify
+    # order reflects the correct shipping charge the customer was shown.
+    if shipping_line and shipping_line.get("title"):
+        draft_input["shippingLine"] = {
+            "title": shipping_line["title"],
+            "price": str(shipping_line.get("price", "0.00"))
+        }
+
     result = shopify_graphql(DRAFT_ORDER_CREATE, {"input": draft_input})
     errors = result.get("data", {}).get("draftOrderCreate", {}).get("userErrors", [])
     if errors:
@@ -326,6 +359,94 @@ def _create_shopify_order(
     order = complete_result["data"]["draftOrderComplete"]["draftOrder"]["order"]
     log.info(f"Shopify order created: {order['name']} | {order['id']}")
     return order
+
+
+def _get_shopify_calculated_total(cart_items: list, customer_email: str = "") -> dict:
+    """
+    Call draftOrderCalculate with a placeholder India address to get Shopify's
+    tax-inclusive total. Returns a breakdown dict, or None on failure.
+
+    The placeholder India address (Mumbai, Maharashtra) gives accurate GST
+    estimates — GST rates are uniform across India; only CGST/SGST vs IGST
+    split differs by state, not the total rate.
+    """
+    line_items = []
+    for item in cart_items:
+        variant_id = item.get("variant_id", "")
+        if not str(variant_id).startswith("gid://"):
+            variant_id = f"gid://shopify/ProductVariant/{variant_id}"
+        line_items.append({
+            "variantId": variant_id,
+            "quantity": int(item.get("quantity", 1))
+        })
+
+    if not line_items:
+        return None
+
+    draft_input = {
+        "lineItems": line_items,
+        "shippingAddress": {
+            "firstName": "India",
+            "lastName": "Customer",
+            "address1": "123 MG Road",
+            "city": "Mumbai",
+            "province": "Maharashtra",
+            "country": "IN",
+            "zip": "400001"
+        }
+    }
+    if customer_email:
+        draft_input["email"] = customer_email
+
+    try:
+        result = shopify_graphql(DRAFT_ORDER_CALCULATE, {"input": draft_input})
+        calc_data = result.get("data", {}).get("draftOrderCalculate", {})
+        errors = calc_data.get("userErrors", [])
+        if errors:
+            log.warning(f"draftOrderCalculate userErrors: {errors}")
+            return None
+
+        co = calc_data.get("calculatedDraftOrder") or {}
+
+        subtotal = float(co.get("subtotalPrice") or 0)
+        tax      = float(co.get("totalTax") or 0)
+
+        # Pick cheapest available shipping rate (free if available)
+        rates = co.get("availableShippingRates") or []
+        shipping_price  = 0.0
+        shipping_title  = "Free Shipping"
+        shipping_handle = None
+        if rates:
+            def _rate_price(r):
+                try:
+                    return float((r.get("price") or {}).get("amount", 0))
+                except Exception:
+                    return 999.0
+            best = min(rates, key=_rate_price)
+            shipping_price  = float((best.get("price") or {}).get("amount", 0))
+            shipping_title  = best.get("title") or "Standard Shipping"
+            shipping_handle = best.get("handle")
+
+        total = subtotal + tax + shipping_price
+
+        log.info(
+            f"draftOrderCalculate: subtotal=${subtotal:.2f} tax=${tax:.2f} "
+            f"shipping=${shipping_price:.2f} ({shipping_title}) total=${total:.2f}"
+        )
+
+        return {
+            "subtotal_usd":      subtotal,
+            "tax_usd":           tax,
+            "shipping_usd":      shipping_price,
+            "total_usd":         total,
+            "shipping_title":    shipping_title,
+            "shipping_price_usd": shipping_price,
+            "shipping_handle":   shipping_handle,
+        }
+
+    except Exception as e:
+        log.error(f"draftOrderCalculate failed: {e}")
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -379,21 +500,45 @@ def create_order():
     """
     data = request.get_json(force=True, silent=True) or {}
 
-    # Amount arrives in subunits (Shopify: cents). Convert to INR paise.
+    # Amount arrives in subunits (Shopify: cents). Used as fallback only.
     cart_amount_subunits = int(data.get("amount", 0))
     cart_currency = str(data.get("currency", "USD")).upper()
 
     if cart_amount_subunits <= 0:
         return jsonify({"error": "Invalid amount"}), 400
 
-    # Convert to base units first (divide by 100)
-    cart_amount_base = cart_amount_subunits / 100.0
+    customer_email = data.get("customer_email", "")
+    customer_name  = data.get("customer_name", "")
+    cart_items     = data.get("cart_items", [])
+
+    # --- Ask Shopify for the tax-inclusive total ---
+    # draftOrderCalculate returns subtotal + GST + shipping, ensuring the
+    # customer is charged the correct amount (not just the cart subtotal).
+    shopify_calc   = _get_shopify_calculated_total(cart_items, customer_email) if cart_items else None
+    shipping_line  = None
+
+    if shopify_calc:
+        cart_amount_base = shopify_calc["total_usd"]
+        cart_currency    = "USD"
+        shipping_line    = {
+            "title": shopify_calc["shipping_title"],
+            "price": f"{shopify_calc['shipping_price_usd']:.2f}"
+        }
+        log.info(
+            f"Using Shopify-calculated total: ${cart_amount_base:.2f} "
+            f"(subtotal ${shopify_calc['subtotal_usd']:.2f} + "
+            f"tax ${shopify_calc['tax_usd']:.2f} + "
+            f"shipping ${shopify_calc['shipping_usd']:.2f})"
+        )
+    else:
+        # Fallback: use cart subtotal provided by frontend
+        log.warning("draftOrderCalculate unavailable — falling back to frontend-provided subtotal (taxes/shipping excluded)")
+        cart_amount_base = cart_amount_subunits / 100.0
 
     # Always settle in INR — Razorpay Import Flow settles in INR regardless
     if cart_currency == "INR":
-        amount_inr_paise = cart_amount_subunits  # already paise
+        amount_inr_paise = int(round(cart_amount_base * 100))
     else:
-        # Convert USD (or other) → INR, then to paise
         fx_rate = get_usd_to_inr()
         amount_inr = cart_amount_base * fx_rate
         amount_inr_paise = int(round(amount_inr * 100))
@@ -403,10 +548,9 @@ def create_order():
 
     # Serialize cart items and shipping address into notes for webhook fallback.
     # Razorpay notes: up to 15 keys, values capped at 512 chars each.
-    customer_email = data.get("customer_email", "")
-    customer_name  = data.get("customer_name", "")
-    cart_items_json    = json.dumps(data.get("cart_items", []), separators=(",", ":"))
+    cart_items_json    = json.dumps(cart_items, separators=(",", ":"))
     shipping_addr_json = json.dumps(data.get("shipping_address", {}), separators=(",", ":"))
+    shipping_line_json = json.dumps(shipping_line, separators=(",", ":")) if shipping_line else ""
 
     if len(cart_items_json) > 512:
         log.warning(f"cart_items_json too large ({len(cart_items_json)} chars) — webhook fallback may not reconstruct order")
@@ -420,12 +564,13 @@ def create_order():
         "currency": "INR",
         "receipt": receipt,
         "notes": {
-            "customer_email":       customer_email,
-            "customer_name":        customer_name,
-            "cart_currency":        cart_currency,
-            "cart_amount_usd":      str(cart_amount_base),
-            "cart_items_json":      cart_items_json,
+            "customer_email":        customer_email,
+            "customer_name":         customer_name,
+            "cart_currency":         cart_currency,
+            "cart_amount_usd":       str(cart_amount_base),
+            "cart_items_json":       cart_items_json,
             "shipping_address_json": shipping_addr_json,
+            "shipping_line_json":    shipping_line_json,
         }
     }
 
@@ -451,7 +596,8 @@ def create_order():
         "id": order["id"],
         "amount": order["amount"],
         "currency": order["currency"],
-        "amount_display": f"₹{amount_inr_paise/100:.2f}"
+        "amount_display": f"₹{amount_inr_paise/100:.2f}",
+        "shipping_line": shipping_line  # forwarded to /verify-payment by frontend
     }), 200
 
 
@@ -507,7 +653,8 @@ def verify_payment():
             cart_items=data.get("cart_items", []),
             customer_email=data.get("customer_email", ""),
             customer_name=data.get("customer_name", ""),
-            shipping_addr=data.get("shipping_address", {})
+            shipping_addr=data.get("shipping_address", {}),
+            shipping_line=data.get("shipping_line")
         )
     except Exception as e:
         log.error(f"Shopify order creation exception: {e}")
@@ -578,8 +725,9 @@ def webhook():
                     rzp_resp.raise_for_status()
                     notes = rzp_resp.json().get("notes", {})
 
-                    cart_items_raw    = notes.get("cart_items_json", "")
-                    shipping_addr_raw = notes.get("shipping_address_json", "")
+                    cart_items_raw     = notes.get("cart_items_json", "")
+                    shipping_addr_raw  = notes.get("shipping_address_json", "")
+                    shipping_line_raw  = notes.get("shipping_line_json", "")
 
                     if not cart_items_raw:
                         log.warning(f"Webhook fallback: missing cart_items in notes for order {order_id} — cannot create Shopify order")
@@ -587,6 +735,7 @@ def webhook():
 
                     cart_items    = json.loads(cart_items_raw)
                     shipping_addr = json.loads(shipping_addr_raw) if shipping_addr_raw else {}
+                    shipping_line = json.loads(shipping_line_raw) if shipping_line_raw else None
 
                     _create_shopify_order(
                         payment_id=payment_id,
@@ -594,7 +743,8 @@ def webhook():
                         cart_items=cart_items,
                         customer_email=notes.get("customer_email", ""),
                         customer_name=notes.get("customer_name", ""),
-                        shipping_addr=shipping_addr
+                        shipping_addr=shipping_addr,
+                        shipping_line=shipping_line
                     )
                     log.info(f"Webhook fallback: Shopify order created for payment {payment_id}")
                 except Exception as err:
