@@ -80,11 +80,39 @@ def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_ru
         asset = r.json().get("asset", {})
         print(f"  Pushed: {asset.get('key')} at {asset.get('updated_at')}")
 
+    # 4. Fetch cart-summary.liquid, inject real values, push back
+    snippet_key = "snippets/cart-summary.liquid"
+    print(f"Step 4: Patching {snippet_key} with real backend URL + key ID ...")
+    get_url = f"{BASE_URL}/themes/{theme_id}/assets.json"
+    gr = requests.get(get_url, headers=HEADERS, params={"asset[key]": snippet_key}, timeout=15)
+    gr.raise_for_status()
+    snippet_content = gr.json()["asset"]["value"]
+
+    patched = snippet_content.replace("'GCP_BASE_URL'", f"'{razorpay_backend_url}'")
+    patched = patched.replace("'RZP_KEY_ID'", f"'{razorpay_key_id}'")
+
+    if patched == snippet_content:
+        print("  No placeholders found — snippet may already be patched or placeholders missing.")
+    elif dry_run:
+        print(f"  DRY RUN — would PUT {snippet_key} with injected values")
+    else:
+        pr = requests.put(
+            get_url,
+            headers=HEADERS,
+            json={"asset": {"key": snippet_key, "value": patched}},
+            timeout=30
+        )
+        if pr.status_code not in (200, 201):
+            raise RuntimeError(f"Snippet PUT failed ({pr.status_code}): {pr.text[:500]}")
+        s_asset = pr.json().get("asset", {})
+        print(f"  Patched: {s_asset.get('key')} at {s_asset.get('updated_at')}")
+
     result = {
         "status": "dry_run" if dry_run else "pushed",
         "theme_id": theme_id,
         "theme_name": active["name"],
-        "snippet_key": asset_key,
+        "js_key": asset_key,
+        "snippet_key": snippet_key,
     }
     print(f"\nDone. {result}")
     return result
