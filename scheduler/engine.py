@@ -38,6 +38,7 @@ from scheduler.jobs import (
     compliance_patch_job,
     product_type_patch_job,
     product_weight_patch_job,
+    market_health_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -282,6 +283,17 @@ class BotScheduler:
             CronTrigger(hour=2, minute=45),
             id="nightly_product_weight_patch",
             name="Nightly Product Weight Patch",
+            replace_existing=True,
+        )
+
+        # ── International Markets Health ──────────────────────────────────────
+
+        # Daily 06:45 — Ensure all markets stay enabled + local currencies on
+        self.scheduler.add_job(
+            market_health_job,
+            CronTrigger(hour=6, minute=45),
+            id="market_health_check",
+            name="Market Health Check (international markets + currencies)",
             replace_existing=True,
         )
 

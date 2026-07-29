@@ -2100,6 +2100,126 @@ def get_market(market_gid: str) -> dict:
     return result.get("data", {}).get("market", {})
 
 
+def enable_market(market_gid: str) -> dict:
+    """
+    Enable a disabled Shopify market so it accepts orders.
+    market_gid: 'gid://shopify/Market/123456789'
+    Requires 'write_markets' OAuth scope.
+    """
+    query = """
+    mutation marketUpdate($id: ID!, $input: MarketUpdateInput!) {
+      marketUpdate(id: $id, input: $input) {
+        market { id name enabled }
+        userErrors { field message }
+      }
+    }
+    """
+    result = _graphql(query, {"id": market_gid, "input": {"enabled": True}})
+    data = result.get("data", {}).get("marketUpdate", {})
+    errors = data.get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"marketUpdate errors: {errors}")
+    logger.info("[shopify] Enabled market: %s", market_gid)
+    return data.get("market", {})
+
+
+def disable_market(market_gid: str) -> dict:
+    """
+    Disable an active Shopify market. The market will no longer accept orders.
+    market_gid: 'gid://shopify/Market/123456789'
+    Requires 'write_markets' OAuth scope.
+    """
+    query = """
+    mutation marketUpdate($id: ID!, $input: MarketUpdateInput!) {
+      marketUpdate(id: $id, input: $input) {
+        market { id name enabled }
+        userErrors { field message }
+      }
+    }
+    """
+    result = _graphql(query, {"id": market_gid, "input": {"enabled": False}})
+    data = result.get("data", {}).get("marketUpdate", {})
+    errors = data.get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"marketUpdate errors: {errors}")
+    logger.info("[shopify] Disabled market: %s", market_gid)
+    return data.get("market", {})
+
+
+def update_market_currency(market_gid: str, local_currencies: bool = True) -> dict:
+    """
+    Toggle local currency display for a market.
+    When local_currencies=True, Shopify shows prices in the buyer's local
+    currency using live FX rates (available on all plans, including Basic).
+    market_gid: 'gid://shopify/Market/123456789'
+    Requires 'write_markets' OAuth scope.
+    """
+    query = """
+    mutation marketCurrencySettingsUpdate($marketId: ID!, $settings: MarketCurrencySettingsUpdateInput!) {
+      marketCurrencySettingsUpdate(marketId: $marketId, settings: $settings) {
+        market {
+          id
+          name
+          currencySettings {
+            localCurrencies
+            baseCurrency { currencyCode }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+    """
+    result = _graphql(query, {
+        "marketId": market_gid,
+        "settings": {"localCurrencies": local_currencies},
+    })
+    data = result.get("data", {}).get("marketCurrencySettingsUpdate", {})
+    errors = data.get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"marketCurrencySettingsUpdate errors: {errors}")
+    logger.info("[shopify] Updated currency settings for market %s: local_currencies=%s",
+                market_gid, local_currencies)
+    return data.get("market", {})
+
+
+def remove_market_regions(market_gid: str, country_codes: list) -> dict:
+    """
+    Remove specific countries from a market's region list.
+    Used to fix the US appearing in both the primary and International markets.
+    country_codes: list of ISO 3166-1 alpha-2 codes, e.g. ['US']
+    Requires 'write_markets' OAuth scope.
+    """
+    # First get the region IDs for the given country codes
+    market = get_market(market_gid)
+    region_gids = []
+    for r in market.get("regions", {}).get("nodes", []):
+        if r.get("code") in country_codes:
+            region_gids.append(r.get("id"))
+
+    if not region_gids:
+        logger.warning("[shopify] No matching regions found for codes %s in market %s",
+                       country_codes, market_gid)
+        return {"removed": 0}
+
+    query = """
+    mutation marketRegionsDelete($marketId: ID!, $regionIds: [ID!]!) {
+      marketRegionsDelete(marketId: $marketId, regionIds: $regionIds) {
+        deletedIds
+        market { id name }
+        userErrors { field message }
+      }
+    }
+    """
+    result = _graphql(query, {"marketId": market_gid, "regionIds": region_gids})
+    data = result.get("data", {}).get("marketRegionsDelete", {})
+    errors = data.get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"marketRegionsDelete errors: {errors}")
+    deleted = data.get("deletedIds", [])
+    logger.info("[shopify] Removed %d region(s) from market %s", len(deleted), market_gid)
+    return {"removed": len(deleted), "deleted_ids": deleted}
+
+
 def audit_markets() -> dict:
     """
     Run a full health audit of all Shopify Markets.

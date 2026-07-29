@@ -400,12 +400,15 @@ def sheets_refresh_job():
         bm = BillingModule(creds)
 
         # Fetch GA4
+        ga4_countries = {}
         try:
             from modules.analytics import AnalyticsModule
-            am = AnalyticsModule(creds)
+            am = AnalyticsModule()
             ga4_traffic = am.get_traffic_summary()
             ga4_pages = am.get_top_pages()
-        except Exception:
+            ga4_countries = am.get_country_breakdown()
+        except Exception as ga4_err:
+            logger.warning("[sheets_refresh_job] GA4 fetch failed: %s", ga4_err)
             ga4_traffic, ga4_pages = {}, {}
 
         # Fetch GSC
@@ -447,7 +450,8 @@ def sheets_refresh_job():
 
         billing_data = bm.get_monthly_spend()
 
-        url = sm.refresh_full_dashboard(ga4_traffic, ga4_pages, gsc_data, mobile_ps, desktop_ps, billing_data)
+        url = sm.refresh_full_dashboard(ga4_traffic, ga4_pages, gsc_data, mobile_ps, desktop_ps, billing_data,
+                                        ga4_countries=ga4_countries)
         send_alert(f"📊 *Sheets Dashboard Refreshed*\n{url}")
         logger.info("[sheets_refresh_job] Done. URL: %s", url)
 
@@ -1329,3 +1333,81 @@ def blog_writer_job():
     except Exception as e:
         logger.error("[blog_writer_job] Failed: %s", e)
         send_alert(f"❌ blog_writer_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 22 — Market Health Check  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def market_health_job():
+    """
+    Daily check that all Shopify markets are correctly configured for
+    international sales. Automatically re-enables markets that drift to
+    disabled, enables local currency display, and alerts on any remaining
+    issues that require manual intervention (e.g. missing price list).
+
+    Idempotent — safe to run daily. Uses safe_execute() for all writes.
+    """
+    logger.info("[market_health_job] Running...")
+
+    # Known market GIDs — these are stable identifiers in the Shopify account.
+    INDIA_MARKET_GID = "gid://shopify/Market/56012275865"
+    INTERNATIONAL_MARKET_GID = "gid://shopify/Market/1614020761"
+
+    try:
+        from modules.shopify import (
+            list_markets,
+            enable_market,
+            update_market_currency,
+        )
+
+        markets_data = list_markets()
+        markets = {m["name"]: m for m in markets_data["markets"]}
+
+        issues = []
+        fixed = []
+
+        # ── Ensure India market is enabled ──
+        india = markets.get("India")
+        if india and not india["enabled"]:
+            safe_execute(
+                "enable_market:India",
+                enable_market,
+                INDIA_MARKET_GID,
+            )
+            fixed.append("✅ Re-enabled India market")
+            logger.info("[market_health_job] Re-enabled India market.")
+
+        # ── Ensure International market has local currencies on ──
+        intl = markets.get("International")
+        if intl:
+            if not intl["currency"].get("local_currencies_enabled"):
+                safe_execute(
+                    "update_market_currency:International",
+                    update_market_currency,
+                    INTERNATIONAL_MARKET_GID,
+                    True,
+                )
+                fixed.append("✅ Enabled local currencies on International market")
+                logger.info("[market_health_job] Enabled local currencies on International market.")
+
+            if not intl["enabled"]:
+                issues.append("⚠️ International market is disabled — customers outside US cannot shop")
+
+        # ── Check all enabled markets have a web presence ──
+        for m in markets_data["markets"]:
+            if not m["enabled"]:
+                continue
+            wp = m["web_presence"]
+            if not wp.get("domain") and not wp.get("subfolder"):
+                issues.append(f"⚠️ Market '{m['name']}' has no web presence (domain/subfolder)")
+
+        if fixed or issues:
+            lines = fixed + issues
+            send_alert("🌍 *Market Health Check*\n" + "\n".join(lines))
+
+        logger.info("[market_health_job] Done. fixed=%d issues=%d", len(fixed), len(issues))
+
+    except Exception as e:
+        logger.error("[market_health_job] Failed: %s", e)
+        send_alert(f"❌ market_health_job failed: {e}")
