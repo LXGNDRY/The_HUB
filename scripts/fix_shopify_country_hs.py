@@ -106,8 +106,11 @@ query($cursor: String) {
           id
           sku
           title
-          countryCodeOfOrigin
-          harmonizedSystemCode
+          inventoryItem {
+            id
+            countryCodeOfOrigin
+            harmonizedSystemCode
+          }
         }
       }
     }
@@ -115,11 +118,12 @@ query($cursor: String) {
 }
 """
 
-BULK_UPDATE_VARIANTS = """
-mutation productVariantsBulkUpdate($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-  productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-    product { id }
-    productVariants {
+# countryCodeOfOrigin and harmonizedSystemCode live on InventoryItem, not ProductVariant.
+# Use inventoryItemUpdate once per variant.
+UPDATE_INVENTORY_ITEM = """
+mutation inventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+  inventoryItemUpdate(id: $id, input: $input) {
+    inventoryItem {
       id
       countryCodeOfOrigin
       harmonizedSystemCode
@@ -177,10 +181,11 @@ for p in all_products:
 
     for v in p["variants"]["nodes"]:
         total_variants += 1
-        vid     = v["id"]
         vtitle  = v.get("title", "")
-        coo     = (v.get("countryCodeOfOrigin") or "").strip()
-        hs      = (v.get("harmonizedSystemCode") or "").strip()
+        inv     = v.get("inventoryItem") or {}
+        inv_id  = inv.get("id", "")
+        coo     = (inv.get("countryCodeOfOrigin") or "").strip()
+        hs      = (inv.get("harmonizedSystemCode") or "").strip()
 
         needs_coo = not coo
         needs_hs  = not hs
@@ -201,7 +206,7 @@ for p in all_products:
             f"  {'[DRY]' if DRY_RUN else '     '} {ptitle[:45]:<45} | {vtitle:<12} "
             f"| COO: {coo or '—':>3} → {new_coo}  |  HS: {hs or '——————':>6} → {new_hs}"
         )
-        variant_updates.append({"id": vid, "countryCodeOfOrigin": new_coo, "harmonizedSystemCode": new_hs})
+        variant_updates.append({"inv_id": inv_id, "countryCodeOfOrigin": new_coo, "harmonizedSystemCode": new_hs})
 
     if variant_updates:
         updates[pid] = {"title": ptitle, "variants": variant_updates}
@@ -229,16 +234,26 @@ fixed      = 0
 errored    = 0
 
 for pid, info in updates.items():
-    result = gql(BULK_UPDATE_VARIANTS, {"productId": pid, "variants": info["variants"]})
-    errs   = result.get("data", {}).get("productVariantsBulkUpdate", {}).get("userErrors", [])
-    if errs:
-        print(f"  ! {info['title'][:60]}: {errs}")
-        errored += 1
-    else:
-        updated_count = len(info["variants"])
-        fixed += updated_count
-        print(f"  ✓ {info['title'][:60]} ({updated_count} variant{'s' if updated_count != 1 else ''})")
-    time.sleep(0.25)
+    product_errors = 0
+    for v in info["variants"]:
+        result = gql(UPDATE_INVENTORY_ITEM, {
+            "id": v["inv_id"],
+            "input": {
+                "countryCodeOfOrigin": v["countryCodeOfOrigin"],
+                "harmonizedSystemCode": v["harmonizedSystemCode"],
+            },
+        })
+        errs = result.get("data", {}).get("inventoryItemUpdate", {}).get("userErrors", [])
+        if errs:
+            print(f"  ! {info['title'][:55]} [{v['inv_id'].split('/')[-1]}]: {errs}")
+            product_errors += 1
+            errored += 1
+        else:
+            fixed += 1
+        time.sleep(0.2)
+    if product_errors == 0:
+        count = len(info["variants"])
+        print(f"  ✓ {info['title'][:60]} ({count} variant{'s' if count != 1 else ''})")
 
 print("\n" + "=" * 65)
 print("COMPLETE")
