@@ -55,11 +55,15 @@ query($cursor: String) {
           sku
           title
           barcode
-          weight
-          weightUnit
           inventoryItem {
             countryCodeOfOrigin
             harmonizedSystemCode
+            measurement {
+              weight {
+                value
+                unit
+              }
+            }
           }
         }
       }
@@ -104,13 +108,15 @@ for p in all_products:
         total += 1
         vtitle  = v.get("title", "")
         sku     = v.get("sku") or ""
-        weight  = v.get("weight")
         barcode = (v.get("barcode") or "").strip()
         inv     = v.get("inventoryItem") or {}
         coo     = (inv.get("countryCodeOfOrigin") or "").strip()
         hs      = (inv.get("harmonizedSystemCode") or "").strip()
+        meas    = inv.get("measurement") or {}
+        wt      = meas.get("weight") or {}
+        weight_val = wt.get("value")
 
-        missing_weight  = weight is None or weight == 0
+        missing_weight  = weight_val is None or weight_val == 0
         missing_barcode = not barcode
         missing_coo     = not coo
         missing_hs      = not hs
