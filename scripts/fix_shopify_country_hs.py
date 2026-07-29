@@ -5,8 +5,12 @@ fix_shopify_country_hs.py
 Audits every Shopify product variant for missing countryCodeOfOrigin and
 harmonizedSystemCode, then fills in defaults derived from each product's type.
 
-Default country of origin: CN (China) — override via env var COUNTRY_OF_ORIGIN.
-HS codes are mapped per product-type taxonomy string (6-digit, no separator).
+COO logic (same as the webhook handler):
+  - Check for a `coo:XX` product tag first (e.g. `coo:US`)
+  - Fall back to DEFAULT_COO env var (default: CN)
+
+Set FORCE_OVERWRITE=true to overwrite COO even when already set
+(use this to correct a bad previous batch run, e.g. incorrect US stamping).
 
 Set DRY_RUN=true to preview changes without writing to Shopify.
 """
@@ -16,14 +20,20 @@ import sys
 import time
 import requests
 
-CLIENT_ID     = os.environ["SHOPIFY_CLIENT_ID"]
-CLIENT_SECRET = os.environ["SHOPIFY_CLIENT_SECRET"]
-SHOP          = os.getenv("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
-API_VERSION   = "2026-04"
-DRY_RUN       = os.getenv("DRY_RUN", "false").lower() == "true"
+# ── Allow running standalone (outside the installed package) ──────────────────
+import importlib.util, pathlib
+_repo_root = pathlib.Path(__file__).resolve().parent.parent
+if str(_repo_root) not in sys.path:
+    sys.path.insert(0, str(_repo_root))
 
-# Default country of origin (ISO 3166-1 alpha-2) — override via env var
-DEFAULT_COUNTRY = os.getenv("COUNTRY_OF_ORIGIN", "CN")
+from modules.product_compliance import HS_CODE_MAP, infer_hs_code, resolve_coo  # noqa: E402
+
+CLIENT_ID      = os.environ["SHOPIFY_CLIENT_ID"]
+CLIENT_SECRET  = os.environ["SHOPIFY_CLIENT_SECRET"]
+SHOP           = os.getenv("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
+API_VERSION    = "2026-04"
+DRY_RUN        = os.getenv("DRY_RUN", "false").lower() == "true"
+FORCE_OVERWRITE = os.getenv("FORCE_OVERWRITE", "false").lower() == "true"
 
 token_resp = requests.post(
     f"https://{SHOP}/admin/oauth/access_token",
@@ -45,53 +55,6 @@ def gql(query, variables=None):
     return data
 
 
-# ── HS code map keyed on product-type taxonomy strings ───────────────────────
-# 6-digit harmonized system codes (no separator).
-# All codes assume primary cotton composition — most common for branded apparel.
-HS_CODE_MAP = {
-    # Shirts / Tops / Tees / Tanks
-    "Apparel & Accessories > Clothing > Shirts & Tops":      "610910",  # cotton knit T-shirts/vests
-    # Hoodies / Sweatshirts / Fleece
-    "Apparel & Accessories > Clothing > Activewear > Hoodies": "611020",  # cotton jerseys/sweatshirts
-    # Pants / Sweatpants / Joggers / Jeans
-    "Apparel & Accessories > Clothing > Pants":              "610342",  # cotton knit trousers/tracksuit bottoms
-    # Shorts
-    "Apparel & Accessories > Clothing > Shorts":             "610342",  # cotton knit shorts
-    # Hats / Caps / Beanies
-    "Apparel & Accessories > Clothing Accessories > Hats":   "650500",  # hats and headgear
-    # Sunglasses / Shades
-    "Apparel & Accessories > Clothing Accessories > Sunglasses": "900410",  # sunglasses
-    # Outerwear / Jackets / Windbreakers / Bombers
-    "Apparel & Accessories > Clothing > Outerwear":          "610120",  # cotton knit jackets/blazers
-    # Sets / Tracksuits / Lounge Sets / Outfit Sets
-    "Apparel & Accessories > Clothing > Outfit Sets":        "621133",  # track suits of man-made fibers
-    # Polo shirts
-    "Apparel & Accessories > Clothing > Polo":               "610510",  # cotton knit polo shirts
-}
-
-# Fallback keyword-based HS code inference for unrecognised product types
-def infer_hs_code(product_type: str, title: str) -> str:
-    t = (product_type + " " + title).lower()
-    if any(k in t for k in ["hoodie", "sweatshirt", "hooded", "fleece", "crewneck"]):
-        return "611020"
-    if any(k in t for k in ["pant", "jogger", "trackpant", "sweatpant", "jean", "denim"]):
-        return "610342"
-    if "short" in t:
-        return "610342"
-    if any(k in t for k in ["hat", "cap", "beanie", "snapback", "trucker"]):
-        return "650500"
-    if any(k in t for k in ["sunglass", "shade"]):
-        return "900410"
-    if any(k in t for k in ["jacket", "windbreaker", "bomber", "outerwear"]):
-        return "610120"
-    if any(k in t for k in ["set", "tracksuit", "outfit", "lounge"]):
-        return "621133"
-    if "polo" in t:
-        return "610510"
-    # Default: cotton knit T-shirt category covers most branded tops
-    return "610910"
-
-
 # ── GraphQL queries ───────────────────────────────────────────────────────────
 FETCH_PRODUCTS = """
 query($cursor: String) {
@@ -101,6 +64,7 @@ query($cursor: String) {
       id
       title
       productType
+      tags
       variants(first: 100) {
         nodes {
           id
@@ -118,8 +82,6 @@ query($cursor: String) {
 }
 """
 
-# countryCodeOfOrigin and harmonizedSystemCode live on InventoryItem, not ProductVariant.
-# Use inventoryItemUpdate once per variant.
 UPDATE_INVENTORY_ITEM = """
 mutation inventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
   inventoryItemUpdate(id: $id, input: $input) {
@@ -136,10 +98,10 @@ mutation inventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
 
 # ── Fetch all products ────────────────────────────────────────────────────────
 print("=" * 65)
-print(f"Shopify Country of Origin + HS Code Fixer")
-print(f"  Shop:         {SHOP}")
-print(f"  Default COO:  {DEFAULT_COUNTRY}")
-print(f"  DRY RUN:      {DRY_RUN}")
+print("Shopify Country of Origin + HS Code Fixer")
+print(f"  Shop:            {SHOP}")
+print(f"  DRY RUN:         {DRY_RUN}")
+print(f"  FORCE_OVERWRITE: {FORCE_OVERWRITE}")
 print("=" * 65)
 print("\nFetching all products...")
 
@@ -160,23 +122,26 @@ print(f"  Fetched {len(all_products)} products\n")
 
 # ── Audit and collect changes ─────────────────────────────────────────────────
 print("=" * 65)
-print("AUDIT — variants missing country of origin or HS code")
+print("AUDIT — variants needing COO or HS code update")
 print("=" * 65)
 
-# { product_id: { title, variants_to_update: [{id, coo, hs}] } }
 updates: dict = {}
 
-total_variants      = 0
-missing_coo         = 0
-missing_hs          = 0
-already_complete    = 0
+total_variants   = 0
+needs_update     = 0
+already_complete = 0
 
 for p in all_products:
-    pid        = p["id"]
-    ptitle     = p["title"]
-    ptype      = (p.get("productType") or "").strip()
-    hs_default = HS_CODE_MAP.get(ptype) or infer_hs_code(ptype, ptitle)
+    pid       = p["id"]
+    ptitle    = p["title"]
+    ptype     = (p.get("productType") or "").strip()
+    tags      = p.get("tags") or []
+    # GraphQL returns tags as a list; REST webhook returns a comma-string — handle both
+    if isinstance(tags, str):
+        tags = [t.strip() for t in tags.split(",") if t.strip()]
 
+    coo_default = resolve_coo(tags)
+    hs_default  = infer_hs_code(ptype, ptitle)
     variant_updates = []
 
     for v in p["variants"]["nodes"]:
@@ -184,28 +149,25 @@ for p in all_products:
         vtitle  = v.get("title", "")
         inv     = v.get("inventoryItem") or {}
         inv_id  = inv.get("id", "")
-        coo     = (inv.get("countryCodeOfOrigin") or "").strip()
-        hs      = (inv.get("harmonizedSystemCode") or "").strip()
+        cur_coo = (inv.get("countryCodeOfOrigin") or "").strip()
+        cur_hs  = (inv.get("harmonizedSystemCode") or "").strip()
 
-        needs_coo = not coo
-        needs_hs  = not hs
+        needs_coo = (not cur_coo) or (FORCE_OVERWRITE and cur_coo != coo_default)
+        needs_hs  = not cur_hs
 
         if not needs_coo and not needs_hs:
             already_complete += 1
             continue
 
-        if needs_coo:
-            missing_coo += 1
-        if needs_hs:
-            missing_hs += 1
+        needs_update += 1
+        new_coo = coo_default if needs_coo else cur_coo
+        new_hs  = hs_default  if needs_hs  else cur_hs
 
-        new_coo = coo if coo else DEFAULT_COUNTRY
-        new_hs  = hs if hs else hs_default
+        flag = "[DRY]" if DRY_RUN else "     "
+        coo_arrow = f"{cur_coo or '—':>3} → {new_coo}" if needs_coo else f"{cur_coo} (ok)"
+        hs_arrow  = f"{cur_hs or '——————':>6} → {new_hs}" if needs_hs else f"{cur_hs} (ok)"
+        print(f"  {flag} {ptitle[:42]:<42} | {vtitle:<10} | COO: {coo_arrow}  HS: {hs_arrow}")
 
-        print(
-            f"  {'[DRY]' if DRY_RUN else '     '} {ptitle[:45]:<45} | {vtitle:<12} "
-            f"| COO: {coo or '—':>3} → {new_coo}  |  HS: {hs or '——————':>6} → {new_hs}"
-        )
         variant_updates.append({"inv_id": inv_id, "countryCodeOfOrigin": new_coo, "harmonizedSystemCode": new_hs})
 
     if variant_updates:
@@ -213,12 +175,11 @@ for p in all_products:
 
 print(f"\n  Total variants:        {total_variants}")
 print(f"  Already complete:      {already_complete}")
-print(f"  Missing COO:           {missing_coo}")
-print(f"  Missing HS code:       {missing_hs}")
-print(f"  Products needing fix:  {len(updates)}")
+print(f"  Needing update:        {needs_update}")
+print(f"  Products to update:    {len(updates)}")
 
 if not updates:
-    print("\nAll variants already have country of origin and HS code set. Nothing to do.")
+    print("\nAll variants are up to date. Nothing to do.")
     sys.exit(0)
 
 if DRY_RUN:
@@ -230,8 +191,8 @@ print("\n" + "=" * 65)
 print("APPLYING CHANGES")
 print("=" * 65)
 
-fixed      = 0
-errored    = 0
+fixed   = 0
+errored = 0
 
 for pid, info in updates.items():
     product_errors = 0
@@ -258,5 +219,5 @@ for pid, info in updates.items():
 print("\n" + "=" * 65)
 print("COMPLETE")
 print(f"  Variants updated:  {fixed}")
-print(f"  Products errored:  {errored}")
+print(f"  Errors:            {errored}")
 print("=" * 65)

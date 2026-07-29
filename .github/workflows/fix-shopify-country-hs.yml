@@ -6,15 +6,19 @@ on:
       dry_run:
         description: "Preview changes without writing to Shopify"
         required: false
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      force_overwrite:
+        description: "Overwrite COO even when already set (use to correct a bad previous run)"
+        required: false
         default: "false"
         type: choice
         options:
           - "false"
           - "true"
-      country_of_origin:
-        description: "Default country of origin ISO code (e.g. CN, VN, BD)"
-        required: false
-        default: "CN"
 
 jobs:
   fix:
@@ -30,5 +34,5 @@ jobs:
           SHOPIFY_CLIENT_ID:     ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
           DRY_RUN:               ${{ inputs.dry_run }}
-          COUNTRY_OF_ORIGIN:     ${{ inputs.country_of_origin }}
+          FORCE_OVERWRITE:       ${{ inputs.force_overwrite }}
         run: python scripts/fix_shopify_country_hs.py
