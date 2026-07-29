@@ -25,7 +25,12 @@ Domains blocked:
   best-jobs-online.com    — 4 sessions, 0 conv
   defenddaily.com         — 2 sessions, 0 conv
 
-Auth: same as pmax_report.py
+Auth (service account — preferred):
+  GCP_SA_KEY_JSON            — raw JSON of the service account key
+  GOOGLE_ADS_DEVELOPER_TOKEN — Google Ads API developer token
+  GOOGLE_ADS_IMPERSONATED_EMAIL — Google account the SA impersonates (optional)
+
+Auth (OAuth fallback):
   GOOGLE_ADS_DEVELOPER_TOKEN
   GOOGLE_ADS_CLIENT_ID
   GOOGLE_ADS_CLIENT_SECRET
@@ -40,6 +45,8 @@ Usage:
 
 import os
 import sys
+import json
+import tempfile
 import argparse
 from google.ads.googleads.client import GoogleAdsClient
 from google.ads.googleads.errors import GoogleAdsException
@@ -66,14 +73,33 @@ JUNK_DOMAINS = [
 # ── Client ─────────────────────────────────────────────────────────────────────
 
 def get_client():
-    config = {
-        "developer_token":   os.environ["GOOGLE_ADS_DEVELOPER_TOKEN"],
-        "client_id":         os.environ["GOOGLE_ADS_CLIENT_ID"],
-        "client_secret":     os.environ["GOOGLE_ADS_CLIENT_SECRET"],
-        "refresh_token":     os.environ["GOOGLE_ADS_REFRESH_TOKEN"],
-        "login_customer_id": CUSTOMER_ID,
-        "use_proto_plus":    True,
-    }
+    dev_token = os.environ["GOOGLE_ADS_DEVELOPER_TOKEN"]
+    sa_key_json = os.environ.get("GCP_SA_KEY_JSON") or os.environ.get("GCP_SA_KEY")
+
+    if sa_key_json:
+        # Service account auth — write key to a temp file
+        key_data = json.loads(sa_key_json)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            json.dump(key_data, f)
+            key_path = f.name
+        config = {
+            "developer_token":    dev_token,
+            "json_key_file_path": key_path,
+            "login_customer_id":  CUSTOMER_ID,
+            "use_proto_plus":     True,
+        }
+        impersonate = os.environ.get("GOOGLE_ADS_IMPERSONATED_EMAIL", "lb@legendary-branding.com")
+        config["impersonated_email"] = impersonate
+    else:
+        # OAuth fallback
+        config = {
+            "developer_token":   dev_token,
+            "client_id":         os.environ["GOOGLE_ADS_CLIENT_ID"],
+            "client_secret":     os.environ["GOOGLE_ADS_CLIENT_SECRET"],
+            "refresh_token":     os.environ["GOOGLE_ADS_REFRESH_TOKEN"],
+            "login_customer_id": CUSTOMER_ID,
+            "use_proto_plus":    True,
+        }
     return GoogleAdsClient.load_from_dict(config)
 
 
