@@ -140,6 +140,32 @@ def infer_hs_code(product_type: str, title: str) -> str:
     return "610910"
 
 
+# ── GMC numeric category ID map ──────────────────────────────────────────────
+# Maps canonical taxonomy strings → official Google taxonomy numeric IDs.
+# Written to the google_product_category metafield so GMC uses the right
+# category for disapproval rules, required-attribute checks, and feed matching.
+GMC_CATEGORY_ID_MAP: dict[str, str] = {
+    "Apparel & Accessories > Clothing > Shirts & Tops":                       "212",
+    "Apparel & Accessories > Clothing > Activewear > Hoodies":                "5322",
+    "Apparel & Accessories > Clothing > Pants":                               "207",
+    "Apparel & Accessories > Clothing > Shorts":                              "2271",
+    "Apparel & Accessories > Clothing > Polo":                                "3471",
+    "Apparel & Accessories > Clothing > Outerwear":                           "1831",
+    "Apparel & Accessories > Clothing > Outfit Sets":                         "1604",
+    "Apparel & Accessories > Clothing Accessories > Hats":                    "178",
+    "Apparel & Accessories > Clothing Accessories > Sunglasses":              "176",
+    "Apparel & Accessories > Handbags, Wallets & Cases":                      "6",
+    "Apparel & Accessories > Jewelry > Watch Accessories > Watch Boxes":      "191",
+}
+
+_DEFAULT_GMC_CATEGORY_ID = "212"  # Shirts & Tops — broadest branded-apparel bucket
+
+
+def resolve_gmc_category_id(canonical_type: str) -> str:
+    """Return the numeric Google taxonomy ID for a canonical taxonomy string."""
+    return GMC_CATEGORY_ID_MAP.get(canonical_type.strip(), _DEFAULT_GMC_CATEGORY_ID)
+
+
 def resolve_coo(tags: list) -> str:
     """
     Return the country of origin code for a product.

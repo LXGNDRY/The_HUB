@@ -1132,6 +1132,7 @@ def product_type_patch_job():
               id
               title
               productType
+              metafield(namespace: "google", key: "google_product_category") { value }
             }
           }
         }
@@ -1148,25 +1149,47 @@ def product_type_patch_job():
             for product in page["nodes"]:
                 title = product.get("title", "")
                 current_type = (product.get("productType") or "").strip()
+                existing_category = (
+                    (product.get("metafield") or {}).get("value") or ""
+                ).strip()
 
-                if current_type in _CANONICAL_TYPES:
-                    continue  # already a canonical taxonomy string — skip
-
+                # Resolve canonical type (may already be canonical)
                 resolved = resolve_product_type(current_type, title)
 
-                result = update_product_type(product["id"], resolved)
-                errs = (result.get("data", {})
-                        .get("productUpdate", {})
-                        .get("userErrors", []))
-                if errs:
-                    logger.error("[product_type_patch_job] Error on %s: %s", product["id"], errs)
-                    errors += 1
-                else:
-                    logger.info(
-                        "[product_type_patch_job] '%s' → '%s' (%s)",
-                        current_type or "(blank)", resolved, title[:60],
-                    )
-                    updated += 1
+                # Determine correct GMC category ID
+                from modules.product_compliance import resolve_gmc_category_id
+                from modules.shopify import update_google_product_category
+                correct_category_id = resolve_gmc_category_id(resolved)
+
+                # Write product_type only if it's non-canonical
+                if current_type not in _CANONICAL_TYPES:
+                    result = update_product_type(product["id"], resolved)
+                    errs = (result.get("data", {})
+                            .get("productUpdate", {})
+                            .get("userErrors", []))
+                    if errs:
+                        logger.error("[product_type_patch_job] productType error on %s: %s", product["id"], errs)
+                        errors += 1
+                    else:
+                        logger.info(
+                            "[product_type_patch_job] productType '%s' → '%s' (%s)",
+                            current_type or "(blank)", resolved, title[:60],
+                        )
+                        updated += 1
+
+                # Write google_product_category metafield if missing or wrong
+                if existing_category != correct_category_id:
+                    numeric_id = int(product["id"].split("/")[-1])
+                    try:
+                        update_google_product_category(numeric_id, correct_category_id)
+                        logger.info(
+                            "[product_type_patch_job] google_product_category '%s' → '%s' (%s)",
+                            existing_category or "(blank)", correct_category_id, title[:60],
+                        )
+                        updated += 1
+                    except Exception as meta_err:
+                        logger.error("[product_type_patch_job] metafield error on %s: %s", product["id"], meta_err)
+                        errors += 1
 
                 time.sleep(0.2)
 

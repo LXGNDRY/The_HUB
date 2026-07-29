@@ -163,6 +163,7 @@ def _handle_product_created(payload: dict):
         logger.error("[webhooks] COO/HS code assignment failed for product %s: %s", product_id, e)
 
     # 5. Ensure product_type is a canonical Google Shopping taxonomy string
+    resolved_type = product_type
     try:
         from modules.shopify import update_product_type
         from modules.product_compliance import resolve_product_type
@@ -177,6 +178,16 @@ def _handle_product_created(payload: dict):
                 logger.info("[webhooks] product_type '%s' → '%s' for product %s", product_type, resolved_type, product_id)
     except Exception as e:
         logger.error("[webhooks] product_type standardization failed for product %s: %s", product_id, e)
+
+    # 6. Write google_product_category metafield so GMC receives the numeric taxonomy ID
+    try:
+        from modules.shopify import update_google_product_category
+        from modules.product_compliance import resolve_gmc_category_id
+        category_id = resolve_gmc_category_id(resolved_type)
+        update_google_product_category(product_id, category_id)
+        logger.info("[webhooks] google_product_category → %s for product %s", category_id, product_id)
+    except Exception as e:
+        logger.error("[webhooks] google_product_category write failed for product %s: %s", product_id, e)
 
 
 def _handle_product_updated(payload: dict):
