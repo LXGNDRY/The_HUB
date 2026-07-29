@@ -166,7 +166,7 @@ INTL_STANDARD_METHOD = {
     "rateDefinition": {"price": {"amount": "14.99", "currencyCode": "USD"}},
     "priceConditionsToCreate": [
         {"operator": "GREATER_THAN_OR_EQUAL_TO", "criteria": {"amount": "0.00",  "currencyCode": "USD"}},
-        {"operator": "LESS_THAN",                "criteria": {"amount": "100.00", "currencyCode": "USD"}},
+        {"operator": "LESS_THAN_OR_EQUAL_TO",    "criteria": {"amount": "99.99", "currencyCode": "USD"}},
     ],
 }
 
