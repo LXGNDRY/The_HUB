@@ -21,31 +21,20 @@ Applies to all 3 location groups (Printful LG1, PODpluser LG2, duvre LG3).
 DRY_RUN=true to preview changes without writing.
 
 Usage:
-  SHOPIFY_CLIENT_ID=... SHOPIFY_CLIENT_SECRET=... python scripts/fix_international_shipping_rates.py
-  DRY_RUN=true SHOPIFY_CLIENT_ID=... SHOPIFY_CLIENT_SECRET=... python scripts/fix_international_shipping_rates.py
+  SHOPIFY_ADMIN_TOKEN=... python scripts/fix_international_shipping_rates.py
+  DRY_RUN=true SHOPIFY_ADMIN_TOKEN=... python scripts/fix_international_shipping_rates.py
 """
 import os
 import sys
 import json
 import requests
 
-CLIENT_ID = os.environ["SHOPIFY_CLIENT_ID"]
-CLIENT_SECRET = os.environ["SHOPIFY_CLIENT_SECRET"]
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 SHOP = "lngndny.myshopify.com"
 API_VERSION = "2026-04"
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
-token_resp = requests.post(
-    f"https://{SHOP}/admin/oauth/access_token",
-    data={
-        "grant_type": "client_credentials",
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-    }
-)
-token_resp.raise_for_status()
-TOKEN = token_resp.json()["access_token"]
+# ── Auth — use SHOPIFY_ADMIN_TOKEN (private app token with write_shipping scope)
+TOKEN = os.environ["SHOPIFY_ADMIN_TOKEN"]
 GQL_URL = f"https://{SHOP}/admin/api/{API_VERSION}/graphql.json"
 HEADERS = {"X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json"}
 
