@@ -266,6 +266,7 @@ class BotScheduler:
             replace_existing=True,
         )
 
+<<<<<<< HEAD
         # Daily 02:30 — Standardize product_type to Google Shopping taxonomy (idempotent)
         self.scheduler.add_job(
             product_type_patch_job,
@@ -275,6 +276,8 @@ class BotScheduler:
             replace_existing=True,
         )
 
+=======
+>>>>>>> origin/main
         logger.info("Registered %d scheduler jobs.", len(self.scheduler.get_jobs()))
 
     def start(self):
