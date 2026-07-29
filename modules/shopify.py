@@ -431,6 +431,38 @@ def set_inventory(inventory_item_id: int, location_id: int, available: int) -> d
     return _post("/inventory_levels/set.json", payload)
 
 
+def update_inventory_item_compliance(inv_item_gid: str, coo: str, hs_code: str) -> dict:
+    """
+    Set countryCodeOfOrigin and harmonizedSystemCode on an InventoryItem.
+
+    Args:
+        inv_item_gid: Full Shopify GID, e.g. "gid://shopify/InventoryItem/12345"
+        coo:          ISO 3166-1 alpha-2 country code, e.g. "CN" or "US"
+        hs_code:      6-digit HS code string, e.g. "610910"
+
+    Returns the full GraphQL response dict.
+    """
+    mutation = """
+    mutation inventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+      inventoryItemUpdate(id: $id, input: $input) {
+        inventoryItem {
+          id
+          countryCodeOfOrigin
+          harmonizedSystemCode
+        }
+        userErrors { field message }
+      }
+    }
+    """
+    return _graphql(mutation, {
+        "id": inv_item_gid,
+        "input": {
+            "countryCodeOfOrigin": coo,
+            "harmonizedSystemCode": hs_code,
+        },
+    })
+
+
 # ─────────────────────────────────────────────
 # Themes
 # ─────────────────────────────────────────────

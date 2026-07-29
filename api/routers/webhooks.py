@@ -141,6 +141,27 @@ def _handle_product_created(payload: dict):
         except Exception as e:
             logger.error("[webhooks] IndexNow ping failed for %s: %s", product_url, e)
 
+    # 4. Set country of origin + HS code on all variants
+    try:
+        from modules.shopify import update_inventory_item_compliance
+        from modules.product_compliance import infer_hs_code, resolve_coo
+        tag_list = [t.strip() for t in (payload.get("tags") or "").split(",") if t.strip()]
+        coo = resolve_coo(tag_list)
+        hs_code = infer_hs_code(product_type, title)
+        for variant in payload.get("variants", []):
+            inv_id = variant.get("inventory_item_id")
+            if not inv_id:
+                continue
+            inv_gid = f"gid://shopify/InventoryItem/{inv_id}"
+            result = update_inventory_item_compliance(inv_gid, coo, hs_code)
+            errs = result.get("data", {}).get("inventoryItemUpdate", {}).get("userErrors", [])
+            if errs:
+                logger.error("[webhooks] COO/HS update failed for %s: %s", inv_gid, errs)
+            else:
+                logger.info("[webhooks] Set COO=%s HS=%s on %s", coo, hs_code, inv_gid)
+    except Exception as e:
+        logger.error("[webhooks] COO/HS code assignment failed for product %s: %s", product_id, e)
+
 
 def _handle_product_updated(payload: dict):
     """
