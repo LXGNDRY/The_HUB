@@ -189,6 +189,25 @@ def _handle_product_created(payload: dict):
     except Exception as e:
         logger.error("[webhooks] google_product_category write failed for product %s: %s", product_id, e)
 
+    # 7. Set default weight on variants that have no weight (0 or null)
+    try:
+        from modules.shopify import update_variant_weight
+        from modules.product_compliance import resolve_product_weight_g
+        weight_g = resolve_product_weight_g(resolved_type)
+        for variant in payload.get("variants", []):
+            if not variant.get("weight") or float(variant.get("weight", 0)) == 0.0:
+                variant_gid = f"gid://shopify/ProductVariant/{variant['id']}"
+                result = update_variant_weight(variant_gid, weight_g)
+                errs = (result.get("data", {})
+                        .get("productVariantUpdate", {})
+                        .get("userErrors", []))
+                if errs:
+                    logger.error("[webhooks] weight update failed for variant %s: %s", variant["id"], errs)
+                else:
+                    logger.info("[webhooks] Set weight=%.0fg on variant %s", weight_g, variant["id"])
+    except Exception as e:
+        logger.error("[webhooks] weight assignment failed for product %s: %s", product_id, e)
+
 
 def _handle_product_updated(payload: dict):
     """

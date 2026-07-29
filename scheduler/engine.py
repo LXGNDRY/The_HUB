@@ -37,6 +37,7 @@ from scheduler.jobs import (
     blog_writer_job,
     compliance_patch_job,
     product_type_patch_job,
+    product_weight_patch_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -266,7 +267,6 @@ class BotScheduler:
             replace_existing=True,
         )
 
-<<<<<<< HEAD
         # Daily 02:30 — Standardize product_type to Google Shopping taxonomy (idempotent)
         self.scheduler.add_job(
             product_type_patch_job,
@@ -276,8 +276,15 @@ class BotScheduler:
             replace_existing=True,
         )
 
-=======
->>>>>>> origin/main
+        # Daily 02:45 — Fill missing variant weights from taxonomy defaults (idempotent)
+        self.scheduler.add_job(
+            product_weight_patch_job,
+            CronTrigger(hour=2, minute=45),
+            id="nightly_product_weight_patch",
+            name="Nightly Product Weight Patch",
+            replace_existing=True,
+        )
+
         logger.info("Registered %d scheduler jobs.", len(self.scheduler.get_jobs()))
 
     def start(self):
