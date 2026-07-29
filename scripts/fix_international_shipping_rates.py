@@ -150,13 +150,13 @@ for plg in profile.get("profileLocationGroups", []):
             methods_to_delete[zone_id] = to_delete
 
 if not methods_to_delete:
-    print("\n⚠  No methods found to delete in international zones.")
+    print("\n⚠  No methods found to deactivate in international zones.")
     print("   The zone may already be correctly configured, or zone IDs may have changed.")
     print("   Run audit_delivery_profiles.py to inspect current state.")
     sys.exit(0)
 
 total_to_delete = sum(len(v) for v in methods_to_delete.values())
-print(f"\n  {total_to_delete} method definition(s) across {len(methods_to_delete)} zone(s) will be removed.")
+print(f"\n  {total_to_delete} method definition(s) across {len(methods_to_delete)} zone(s) will be deactivated.")
 
 # ── New rate definitions ──────────────────────────────────────────────────────
 # $14.99 standard for orders < $100
@@ -214,13 +214,14 @@ mutation updateProfile($id: ID!, $profile: DeliveryProfileInput!) {
 
 lg_updates = []
 for lg_id, intl_zone_id in INTL_ZONES.items():
-    delete_ids = methods_to_delete.get(intl_zone_id, [])
+    deactivate_ids = methods_to_delete.get(intl_zone_id, [])
+    # Shopify has no methodDefinitionsToDelete — deactivate old methods instead.
+    # Inactive methods are hidden from customers but can be cleaned up manually via admin.
     zone_update = {
         "id": intl_zone_id,
         "methodDefinitionsToCreate": NEW_METHODS,
+        "methodDefinitionsToUpdate": [{"id": mid, "active": False} for mid in deactivate_ids],
     }
-    if delete_ids:
-        zone_update["methodDefinitionsToDelete"] = delete_ids
 
     lg_updates.append({
         "id": lg_id,
