@@ -10,7 +10,8 @@ weight is missing — never overwrites an existing non-zero weight.
 
 Env vars:
   DRY_RUN=true   Print what would change; do not write (default: false)
-  SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET
+  SHOPIFY_ADMIN_TOKEN         (preferred — use the long-lived admin token)
+  SHOPIFY_CLIENT_ID, SHOPIFY_CLIENT_SECRET  (fallback OAuth client credentials)
   SHOPIFY_STORE_DOMAIN  (default: lngndny.myshopify.com)
 """
 
@@ -24,19 +25,21 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("fix_product_weights")
 
 STORE_DOMAIN = os.getenv("SHOPIFY_STORE_DOMAIN") or "lngndny.myshopify.com"
+ADMIN_TOKEN = os.getenv("SHOPIFY_ADMIN_TOKEN", "")
 CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "")
 API_VERSION = "2026-04"
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 
-BASE_URL = f"https://{STORE_DOMAIN}/admin/api/{API_VERSION}"
 GRAPHQL_URL = f"https://{STORE_DOMAIN}/admin/api/{API_VERSION}/graphql.json"
 
 
 def _get_token() -> str:
+    if ADMIN_TOKEN:
+        return ADMIN_TOKEN
     resp = requests.post(
         f"https://{STORE_DOMAIN}/admin/oauth/access_token",
-        data={
+        json={
             "grant_type": "client_credentials",
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,
@@ -45,6 +48,22 @@ def _get_token() -> str:
     )
     resp.raise_for_status()
     return resp.json()["access_token"]
+
+
+def _graphql(headers: dict, query: str, variables: dict) -> dict:
+    resp = requests.post(
+        GRAPHQL_URL,
+        headers=headers,
+        json={"query": query, "variables": variables},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    gql_errors = body.get("errors")
+    if gql_errors:
+        logger.error("GraphQL errors: %s", gql_errors)
+        raise RuntimeError(f"GraphQL error: {gql_errors}")
+    return body
 
 
 def main():
@@ -88,14 +107,8 @@ def main():
     cursor = None
 
     while True:
-        resp = requests.post(
-            GRAPHQL_URL,
-            headers=headers,
-            json={"query": FETCH_QUERY, "variables": {"cursor": cursor}},
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json().get("data", {}).get("products", {})
+        body = _graphql(headers, FETCH_QUERY, {"cursor": cursor})
+        data = body.get("data", {}).get("products", {})
 
         for product in data.get("nodes", []):
             title = product.get("title", "")
@@ -117,25 +130,13 @@ def main():
                 logger.info(action)
 
                 if not DRY_RUN:
-                    mut_resp = requests.post(
-                        GRAPHQL_URL,
-                        headers=headers,
-                        json={
-                            "query": UPDATE_MUTATION,
-                            "variables": {
-                                "input": {
-                                    "id": variant["id"],
-                                    "weight": weight_g,
-                                    "weightUnit": "GRAMS",
-                                }
-                            },
-                        },
-                        timeout=15,
+                    mut_body = _graphql(
+                        headers,
+                        UPDATE_MUTATION,
+                        {"input": {"id": variant["id"], "weight": weight_g, "weightUnit": "GRAMS"}},
                     )
-                    mut_resp.raise_for_status()
                     errs = (
-                        mut_resp.json()
-                        .get("data", {})
+                        mut_body.get("data", {})
                         .get("productVariantUpdate", {})
                         .get("userErrors", [])
                     )

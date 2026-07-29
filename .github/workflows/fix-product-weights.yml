@@ -23,6 +23,7 @@ jobs:
       - run: pip install requests
       - name: Backfill missing product variant weights
         env:
+          SHOPIFY_ADMIN_TOKEN:   ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           SHOPIFY_CLIENT_ID:     ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
           DRY_RUN:               ${{ inputs.dry_run }}
