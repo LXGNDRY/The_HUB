@@ -23,9 +23,7 @@ jobs:
       - run: pip install requests
       - name: Backfill google_product_category metafield
         env:
-          SHOPIFY_STORE_DOMAIN:  ${{ secrets.SHOPIFY_STORE_DOMAIN }}
           SHOPIFY_CLIENT_ID:     ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
-          SHOPIFY_ADMIN_TOKEN:   ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           DRY_RUN:               ${{ inputs.dry_run }}
         run: python scripts/fix_google_product_category.py

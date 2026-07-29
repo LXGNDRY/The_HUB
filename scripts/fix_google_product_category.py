@@ -27,7 +27,7 @@ import requests
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger("fix_google_product_category")
 
-STORE_DOMAIN = os.getenv("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
+STORE_DOMAIN = os.getenv("SHOPIFY_STORE_DOMAIN") or "lngndny.myshopify.com"
 CLIENT_ID = os.getenv("SHOPIFY_CLIENT_ID", "")
 CLIENT_SECRET = os.getenv("SHOPIFY_CLIENT_SECRET", "")
 ADMIN_TOKEN = os.getenv("SHOPIFY_ADMIN_TOKEN", "")
