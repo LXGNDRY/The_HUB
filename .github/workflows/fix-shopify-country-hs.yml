@@ -1,0 +1,34 @@
+name: Fix Shopify Country of Origin + HS Codes
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Preview changes without writing to Shopify"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      country_of_origin:
+        description: "Default country of origin ISO code (e.g. CN, VN, BD)"
+        required: false
+        default: "CN"
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Apply country of origin + HS codes
+        env:
+          SHOPIFY_CLIENT_ID:     ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          DRY_RUN:               ${{ inputs.dry_run }}
+          COUNTRY_OF_ORIGIN:     ${{ inputs.country_of_origin }}
+        run: python scripts/fix_shopify_country_hs.py
