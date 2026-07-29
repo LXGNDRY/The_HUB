@@ -1,0 +1,54 @@
+name: Google Ads + Checkout Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Number of days to look back (7, 14, 30, 60, 90)"
+        required: false
+        default: "30"
+  schedule:
+    # Every Monday at 09:30 CT (14:30 UTC) — after the PMax report runs
+    - cron: "30 14 * * 1"
+
+jobs:
+  audit:
+    name: Run Google Ads + Checkout Funnel Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install google-ads google-analytics-data
+
+      - name: Run audit
+        id: audit
+        env:
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GOOGLE_ADS_CLIENT_ID:       ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET:   ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          GOOGLE_ADS_REFRESH_TOKEN:   ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+          GA4_PROPERTY_ID:            ${{ secrets.GA4_PROPERTY_ID }}
+          GA4_TOKEN_JSON:             ${{ secrets.GA4_TOKEN_JSON }}
+        run: |
+          DAYS="${{ github.event.inputs.days || '30' }}"
+          echo "## Google Ads + Checkout Audit — Last ${DAYS} Days" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python scripts/google_ads_checkout_audit.py --days "$DAYS" 2>&1 | tee audit_output.txt
+          cat audit_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload audit as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkout-audit-${{ github.run_id }}
+          path: audit_output.txt
+          retention-days: 90
