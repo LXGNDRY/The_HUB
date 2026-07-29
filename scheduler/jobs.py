@@ -1132,6 +1132,7 @@ def product_type_patch_job():
               id
               title
               productType
+              metafield(namespace: "google", key: "google_product_category") { value }
             }
           }
         }
@@ -1148,25 +1149,47 @@ def product_type_patch_job():
             for product in page["nodes"]:
                 title = product.get("title", "")
                 current_type = (product.get("productType") or "").strip()
+                existing_category = (
+                    (product.get("metafield") or {}).get("value") or ""
+                ).strip()
 
-                if current_type in _CANONICAL_TYPES:
-                    continue  # already a canonical taxonomy string — skip
-
+                # Resolve canonical type (may already be canonical)
                 resolved = resolve_product_type(current_type, title)
 
-                result = update_product_type(product["id"], resolved)
-                errs = (result.get("data", {})
-                        .get("productUpdate", {})
-                        .get("userErrors", []))
-                if errs:
-                    logger.error("[product_type_patch_job] Error on %s: %s", product["id"], errs)
-                    errors += 1
-                else:
-                    logger.info(
-                        "[product_type_patch_job] '%s' → '%s' (%s)",
-                        current_type or "(blank)", resolved, title[:60],
-                    )
-                    updated += 1
+                # Determine correct GMC category ID
+                from modules.product_compliance import resolve_gmc_category_id
+                from modules.shopify import update_google_product_category
+                correct_category_id = resolve_gmc_category_id(resolved)
+
+                # Write product_type only if it's non-canonical
+                if current_type not in _CANONICAL_TYPES:
+                    result = update_product_type(product["id"], resolved)
+                    errs = (result.get("data", {})
+                            .get("productUpdate", {})
+                            .get("userErrors", []))
+                    if errs:
+                        logger.error("[product_type_patch_job] productType error on %s: %s", product["id"], errs)
+                        errors += 1
+                    else:
+                        logger.info(
+                            "[product_type_patch_job] productType '%s' → '%s' (%s)",
+                            current_type or "(blank)", resolved, title[:60],
+                        )
+                        updated += 1
+
+                # Write google_product_category metafield if missing or wrong
+                if existing_category != correct_category_id:
+                    numeric_id = int(product["id"].split("/")[-1])
+                    try:
+                        update_google_product_category(numeric_id, correct_category_id)
+                        logger.info(
+                            "[product_type_patch_job] google_product_category '%s' → '%s' (%s)",
+                            existing_category or "(blank)", correct_category_id, title[:60],
+                        )
+                        updated += 1
+                    except Exception as meta_err:
+                        logger.error("[product_type_patch_job] metafield error on %s: %s", product["id"], meta_err)
+                        errors += 1
 
                 time.sleep(0.2)
 
@@ -1188,7 +1211,89 @@ def product_type_patch_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 20 — Blog Writer  [NO COMPUTE REQUIRED]
+# JOB 20 — Product Weight Patch  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def product_weight_patch_job():
+    """
+    Nightly sweep: for every product variant with no weight set (weight == 0),
+    infer the correct default weight in grams from the product's canonical
+    taxonomy type and write it back via productVariantUpdate.
+
+    - Only writes to variants where weight is 0 or null — never overwrites.
+    - Idempotent and safe to run nightly alongside product_type_patch_job.
+    - Sends a summary alert only when at least one variant was updated.
+    """
+    logger.info("[product_weight_patch_job] Running...")
+    try:
+        import time
+        import requests as _requests
+        from modules.shopify import BASE_URL, _headers, update_variant_weight
+        from modules.product_compliance import resolve_product_type, resolve_product_weight_g
+
+        updated = 0
+        errors = 0
+
+        # REST pagination via Link header
+        url = f"{BASE_URL}/products.json"
+        params: dict | None = {"limit": 250, "status": "any", "fields": "id,title,product_type,variants"}
+
+        while url:
+            resp = _requests.get(url, headers=_headers(), params=params, timeout=30)
+            resp.raise_for_status()
+            products = resp.json().get("products", [])
+            params = None  # only pass on first request; subsequent URLs are fully formed
+
+            for product in products:
+                title = product.get("title", "")
+                product_type = (product.get("product_type") or "").strip()
+                canonical = resolve_product_type(product_type, title)
+                weight_g = resolve_product_weight_g(canonical)
+
+                for variant in product.get("variants", []):
+                    current_weight = variant.get("weight") or 0.0
+                    if float(current_weight) > 0:
+                        continue  # already has a weight — skip
+
+                    variant_id = variant["id"]
+                    try:
+                        update_variant_weight(variant_id, weight_g)
+                        logger.info(
+                            "[product_weight_patch_job] Set weight=%.0fg on variant %s (%s)",
+                            weight_g, variant_id, title[:50],
+                        )
+                        updated += 1
+                    except Exception as ve:
+                        logger.error("[product_weight_patch_job] Error on variant %s: %s", variant_id, ve)
+                        errors += 1
+
+                    time.sleep(0.2)
+
+            # Follow REST pagination Link header
+            link = resp.headers.get("Link", "")
+            next_url = None
+            for part in link.split(","):
+                part = part.strip()
+                if 'rel="next"' in part:
+                    next_url = part.split(";")[0].strip().strip("<>")
+                    break
+            url = next_url
+
+        logger.info("[product_weight_patch_job] Done. updated=%d errors=%d", updated, errors)
+        if updated > 0 or errors > 0:
+            send_alert(
+                f"⚖️ *Product Weight Patch*\n"
+                f"  Variants updated : {updated}\n"
+                f"  Errors           : {errors}"
+            )
+
+    except Exception as e:
+        logger.error("[product_weight_patch_job] Failed: %s", e)
+        send_alert(f"❌ product_weight_patch_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 21 — Blog Writer  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
 
 def blog_writer_job():

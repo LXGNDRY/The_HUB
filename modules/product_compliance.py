@@ -140,6 +140,58 @@ def infer_hs_code(product_type: str, title: str) -> str:
     return "610910"
 
 
+# ── GMC numeric category ID map ──────────────────────────────────────────────
+# Maps canonical taxonomy strings → official Google taxonomy numeric IDs.
+# Written to the google_product_category metafield so GMC uses the right
+# category for disapproval rules, required-attribute checks, and feed matching.
+GMC_CATEGORY_ID_MAP: dict[str, str] = {
+    "Apparel & Accessories > Clothing > Shirts & Tops":                       "212",
+    "Apparel & Accessories > Clothing > Activewear > Hoodies":                "5322",
+    "Apparel & Accessories > Clothing > Pants":                               "207",
+    "Apparel & Accessories > Clothing > Shorts":                              "2271",
+    "Apparel & Accessories > Clothing > Polo":                                "3471",
+    "Apparel & Accessories > Clothing > Outerwear":                           "1831",
+    "Apparel & Accessories > Clothing > Outfit Sets":                         "1604",
+    "Apparel & Accessories > Clothing Accessories > Hats":                    "178",
+    "Apparel & Accessories > Clothing Accessories > Sunglasses":              "176",
+    "Apparel & Accessories > Handbags, Wallets & Cases":                      "6",
+    "Apparel & Accessories > Jewelry > Watch Accessories > Watch Boxes":      "191",
+}
+
+_DEFAULT_GMC_CATEGORY_ID = "212"  # Shirts & Tops — broadest branded-apparel bucket
+
+
+def resolve_gmc_category_id(canonical_type: str) -> str:
+    """Return the numeric Google taxonomy ID for a canonical taxonomy string."""
+    return GMC_CATEGORY_ID_MAP.get(canonical_type.strip(), _DEFAULT_GMC_CATEGORY_ID)
+
+
+# ── Product weight map (grams) ───────────────────────────────────────────────
+# Default shipping weights per canonical taxonomy string.
+# Values are conservative mid-range estimates for branded apparel (no packaging).
+# Used to fill missing variant weights so shipping rates calculate correctly.
+WEIGHT_MAP_G: dict[str, float] = {
+    "Apparel & Accessories > Clothing > Shirts & Tops":                       200.0,   # tee / tank
+    "Apparel & Accessories > Clothing > Activewear > Hoodies":                550.0,   # hoodie / sweatshirt
+    "Apparel & Accessories > Clothing > Pants":                               450.0,   # sweatpants / joggers
+    "Apparel & Accessories > Clothing > Shorts":                              280.0,   # shorts
+    "Apparel & Accessories > Clothing > Polo":                                220.0,   # polo shirt
+    "Apparel & Accessories > Clothing > Outerwear":                           700.0,   # jacket / windbreaker
+    "Apparel & Accessories > Clothing > Outfit Sets":                         750.0,   # tracksuit / lounge set
+    "Apparel & Accessories > Clothing Accessories > Hats":                    100.0,   # cap / beanie
+    "Apparel & Accessories > Clothing Accessories > Sunglasses":               30.0,   # sunglasses
+    "Apparel & Accessories > Handbags, Wallets & Cases":                      400.0,   # bag / backpack
+    "Apparel & Accessories > Jewelry > Watch Accessories > Watch Boxes":      300.0,   # watch box
+}
+
+_DEFAULT_WEIGHT_G = 200.0  # Shirts & Tops — safest fallback for unclassified apparel
+
+
+def resolve_product_weight_g(canonical_type: str) -> float:
+    """Return the default weight in grams for a canonical taxonomy string."""
+    return WEIGHT_MAP_G.get(canonical_type.strip(), _DEFAULT_WEIGHT_G)
+
+
 def resolve_coo(tags: list) -> str:
     """
     Return the country of origin code for a product.
