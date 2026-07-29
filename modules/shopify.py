@@ -460,6 +460,27 @@ def update_google_product_category(product_id: int, category_id: str) -> dict:
     )
 
 
+def update_variant_weight(variant_gid: str, weight_g: float) -> dict:
+    """Set weight (in grams) on a product variant via productVariantUpdate mutation.
+
+    Only writes if the variant has no weight set (weight == 0 or null).
+    Caller should check before invoking.
+    """
+    mutation = """
+    mutation updateVariantWeight($input: ProductVariantInput!) {
+      productVariantUpdate(input: $input) {
+        productVariant { id weight weightUnit }
+        userErrors { field message }
+      }
+    }
+    """
+    return _graphql(mutation, {"input": {
+        "id": variant_gid,
+        "weight": weight_g,
+        "weightUnit": "GRAMS",
+    }})
+
+
 def update_inventory_item_compliance(inv_item_gid: str, coo: str, hs_code: str) -> dict:
     """
     Set countryCodeOfOrigin and harmonizedSystemCode on an InventoryItem.

@@ -1211,7 +1211,99 @@ def product_type_patch_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 20 — Blog Writer  [NO COMPUTE REQUIRED]
+# JOB 20 — Product Weight Patch  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def product_weight_patch_job():
+    """
+    Nightly sweep: for every product variant with no weight set (weight == 0),
+    infer the correct default weight in grams from the product's canonical
+    taxonomy type and write it back via productVariantUpdate.
+
+    - Only writes to variants where weight is 0 or null — never overwrites.
+    - Idempotent and safe to run nightly alongside product_type_patch_job.
+    - Sends a summary alert only when at least one variant was updated.
+    """
+    logger.info("[product_weight_patch_job] Running...")
+    try:
+        import time
+        from modules.shopify import _graphql, update_variant_weight
+        from modules.product_compliance import resolve_product_type, resolve_product_weight_g
+
+        FETCH_QUERY = """
+        query($cursor: String) {
+          products(first: 50, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              title
+              productType
+              variants(first: 50) {
+                nodes {
+                  id
+                  weight
+                  weightUnit
+                }
+              }
+            }
+          }
+        }
+        """
+
+        updated = 0
+        errors = 0
+        cursor = None
+
+        while True:
+            data = _graphql(FETCH_QUERY, {"cursor": cursor})
+            page = data["products"]
+
+            for product in page["nodes"]:
+                title = product.get("title", "")
+                product_type = (product.get("productType") or "").strip()
+                canonical = resolve_product_type(product_type, title)
+                weight_g = resolve_product_weight_g(canonical)
+
+                for variant in product["variants"]["nodes"]:
+                    current_weight = variant.get("weight") or 0.0
+                    if float(current_weight) > 0:
+                        continue  # already has a weight — skip
+
+                    result = update_variant_weight(variant["id"], weight_g)
+                    errs = (result.get("data", {})
+                            .get("productVariantUpdate", {})
+                            .get("userErrors", []))
+                    if errs:
+                        logger.error("[product_weight_patch_job] Error on %s: %s", variant["id"], errs)
+                        errors += 1
+                    else:
+                        logger.info(
+                            "[product_weight_patch_job] Set weight=%.0fg on %s (%s)",
+                            weight_g, variant["id"], title[:50],
+                        )
+                        updated += 1
+
+                    time.sleep(0.2)
+
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+
+        logger.info("[product_weight_patch_job] Done. updated=%d errors=%d", updated, errors)
+        if updated > 0 or errors > 0:
+            send_alert(
+                f"⚖️ *Product Weight Patch*\n"
+                f"  Variants updated : {updated}\n"
+                f"  Errors           : {errors}"
+            )
+
+    except Exception as e:
+        logger.error("[product_weight_patch_job] Failed: %s", e)
+        send_alert(f"❌ product_weight_patch_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 21 — Blog Writer  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
 
 def blog_writer_job():
