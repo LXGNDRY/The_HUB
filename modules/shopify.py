@@ -431,6 +431,19 @@ def set_inventory(inventory_item_id: int, location_id: int, available: int) -> d
     return _post("/inventory_levels/set.json", payload)
 
 
+def update_product_type(product_gid: str, product_type: str) -> dict:
+    """Set productType on a product via productUpdate mutation."""
+    mutation = """
+    mutation updateProductType($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product { id productType }
+        userErrors { field message }
+      }
+    }
+    """
+    return _graphql(mutation, {"input": {"id": product_gid, "productType": product_type}})
+
+
 def update_inventory_item_compliance(inv_item_gid: str, coo: str, hs_code: str) -> dict:
     """
     Set countryCodeOfOrigin and harmonizedSystemCode on an InventoryItem.

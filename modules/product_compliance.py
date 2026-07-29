@@ -23,6 +23,76 @@ logger = logging.getLogger("gcp-bot.product_compliance")
 
 DEFAULT_COO: str = os.getenv("DEFAULT_COO", "CN")
 
+# ── Google Shopping taxonomy map ─────────────────────────────────────────────
+# Maps informal/legacy Shopify product_type values → canonical full taxonomy string.
+# Keys are lower-cased at match time so casing doesn't matter.
+TAXONOMY_MAP: dict[str, str] = {
+    "t shirt":    "Apparel & Accessories > Clothing > Shirts & Tops",
+    "t-shirt":    "Apparel & Accessories > Clothing > Shirts & Tops",
+    "tshirt":     "Apparel & Accessories > Clothing > Shirts & Tops",
+    "tee":        "Apparel & Accessories > Clothing > Shirts & Tops",
+    "tank top":   "Apparel & Accessories > Clothing > Shirts & Tops",
+    "tank":       "Apparel & Accessories > Clothing > Shirts & Tops",
+    "polo":       "Apparel & Accessories > Clothing > Polo",
+    "hoodie":     "Apparel & Accessories > Clothing > Activewear > Hoodies",
+    "sweatshirt": "Apparel & Accessories > Clothing > Activewear > Hoodies",
+    "crewneck":   "Apparel & Accessories > Clothing > Activewear > Hoodies",
+    "fleece":     "Apparel & Accessories > Clothing > Activewear > Hoodies",
+    "jeans":      "Apparel & Accessories > Clothing > Pants",
+    "sweatpants": "Apparel & Accessories > Clothing > Pants",
+    "joggers":    "Apparel & Accessories > Clothing > Pants",
+    "pants":      "Apparel & Accessories > Clothing > Pants",
+    "leggings":   "Apparel & Accessories > Clothing > Pants",
+    "shorts":     "Apparel & Accessories > Clothing > Shorts",
+    "hat":        "Apparel & Accessories > Clothing Accessories > Hats",
+    "cap":        "Apparel & Accessories > Clothing Accessories > Hats",
+    "beanie":     "Apparel & Accessories > Clothing Accessories > Hats",
+    "jacket":     "Apparel & Accessories > Clothing > Outerwear",
+    "windbreaker": "Apparel & Accessories > Clothing > Outerwear",
+    "bomber":     "Apparel & Accessories > Clothing > Outerwear",
+    "vest":       "Apparel & Accessories > Clothing > Outerwear",
+    "outfit set": "Apparel & Accessories > Clothing > Outfit Sets",
+    "tracksuit":  "Apparel & Accessories > Clothing > Outfit Sets",
+    "lounge set": "Apparel & Accessories > Clothing > Outfit Sets",
+    "matching set": "Apparel & Accessories > Clothing > Outfit Sets",
+    "sunglasses": "Apparel & Accessories > Clothing Accessories > Sunglasses",
+    "backpack":   "Apparel & Accessories > Handbags, Wallets & Cases",
+    "bag":        "Apparel & Accessories > Handbags, Wallets & Cases",
+    "watch box":  "Apparel & Accessories > Jewelry > Watch Accessories > Watch Boxes",
+}
+
+# Set of canonical full taxonomy strings for fast membership checks
+_CANONICAL_TYPES: frozenset = frozenset(TAXONOMY_MAP.values())
+
+
+def resolve_product_type(product_type: str, title: str = "") -> str:
+    """
+    Normalize a product_type value to a canonical Google Shopping taxonomy string.
+
+    Resolution order:
+      1. Already a known full taxonomy string → return as-is
+      2. Exact case-insensitive match in TAXONOMY_MAP → map it
+      3. Keyword scan of (product_type + title) against TAXONOMY_MAP keys
+      4. Default → Shirts & Tops (broadest branded-apparel bucket)
+    """
+    pt = product_type.strip()
+    if pt in _CANONICAL_TYPES:
+        return pt
+
+    pt_lower = pt.lower()
+    # Exact map lookup (case-insensitive)
+    if pt_lower in TAXONOMY_MAP:
+        return TAXONOMY_MAP[pt_lower]
+
+    # Keyword scan of combined type + title text
+    combined = (pt + " " + title).lower()
+    for keyword, taxonomy in TAXONOMY_MAP.items():
+        if keyword in combined:
+            return taxonomy
+
+    return "Apparel & Accessories > Clothing > Shirts & Tops"
+
+
 # ── HS code map keyed on product-type taxonomy strings ───────────────────────
 # Primary cotton composition assumed — most common for branded apparel.
 HS_CODE_MAP: dict[str, str] = {

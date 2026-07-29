@@ -1105,7 +1105,90 @@ def compliance_patch_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 19 — Blog Writer  [NO COMPUTE REQUIRED]
+# JOB 19 — Product Type Patch  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def product_type_patch_job():
+    """
+    Nightly sweep: for every product whose productType is blank or not a
+    canonical Google Shopping taxonomy string, infer the correct taxonomy
+    value from the product type + title and write it back via productUpdate.
+
+    - Never overwrites a value that is already a canonical taxonomy string.
+    - Idempotent and safe to run nightly alongside compliance_patch_job.
+    - Sends a summary alert only when at least one product was updated.
+    """
+    logger.info("[product_type_patch_job] Running...")
+    try:
+        import time
+        from modules.shopify import _graphql, update_product_type
+        from modules.product_compliance import resolve_product_type, _CANONICAL_TYPES
+
+        FETCH_QUERY = """
+        query($cursor: String) {
+          products(first: 50, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              title
+              productType
+            }
+          }
+        }
+        """
+
+        updated = 0
+        errors = 0
+        cursor = None
+
+        while True:
+            data = _graphql(FETCH_QUERY, {"cursor": cursor})
+            page = data["products"]
+
+            for product in page["nodes"]:
+                title = product.get("title", "")
+                current_type = (product.get("productType") or "").strip()
+
+                if current_type in _CANONICAL_TYPES:
+                    continue  # already a canonical taxonomy string — skip
+
+                resolved = resolve_product_type(current_type, title)
+
+                result = update_product_type(product["id"], resolved)
+                errs = (result.get("data", {})
+                        .get("productUpdate", {})
+                        .get("userErrors", []))
+                if errs:
+                    logger.error("[product_type_patch_job] Error on %s: %s", product["id"], errs)
+                    errors += 1
+                else:
+                    logger.info(
+                        "[product_type_patch_job] '%s' → '%s' (%s)",
+                        current_type or "(blank)", resolved, title[:60],
+                    )
+                    updated += 1
+
+                time.sleep(0.2)
+
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+
+        logger.info("[product_type_patch_job] Done. updated=%d errors=%d", updated, errors)
+        if updated > 0 or errors > 0:
+            send_alert(
+                f"🏷️ *Product Type Patch*\n"
+                f"  Products updated : {updated}\n"
+                f"  Errors           : {errors}"
+            )
+
+    except Exception as e:
+        logger.error("[product_type_patch_job] Failed: %s", e)
+        send_alert(f"❌ product_type_patch_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 20 — Blog Writer  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
 
 def blog_writer_job():

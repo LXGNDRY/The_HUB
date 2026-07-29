@@ -162,6 +162,22 @@ def _handle_product_created(payload: dict):
     except Exception as e:
         logger.error("[webhooks] COO/HS code assignment failed for product %s: %s", product_id, e)
 
+    # 5. Ensure product_type is a canonical Google Shopping taxonomy string
+    try:
+        from modules.shopify import update_product_type
+        from modules.product_compliance import resolve_product_type
+        resolved_type = resolve_product_type(product_type, title)
+        if resolved_type != product_type:
+            product_gid = f"gid://shopify/Product/{product_id}"
+            result = update_product_type(product_gid, resolved_type)
+            errs = result.get("data", {}).get("productUpdate", {}).get("userErrors", [])
+            if errs:
+                logger.error("[webhooks] product_type update failed for %s: %s", product_id, errs)
+            else:
+                logger.info("[webhooks] product_type '%s' → '%s' for product %s", product_type, resolved_type, product_id)
+    except Exception as e:
+        logger.error("[webhooks] product_type standardization failed for product %s: %s", product_id, e)
+
 
 def _handle_product_updated(payload: dict):
     """

@@ -36,6 +36,7 @@ from scheduler.jobs import (
     gmc_title_rotation_job,
     blog_writer_job,
     compliance_patch_job,
+    product_type_patch_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -265,6 +266,18 @@ class BotScheduler:
             replace_existing=True,
         )
 
+<<<<<<< HEAD
+        # Daily 02:30 — Standardize product_type to Google Shopping taxonomy (idempotent)
+        self.scheduler.add_job(
+            product_type_patch_job,
+            CronTrigger(hour=2, minute=30),
+            id="nightly_product_type_patch",
+            name="Nightly Product Type Taxonomy Patch",
+            replace_existing=True,
+        )
+
+=======
+>>>>>>> origin/main
         logger.info("Registered %d scheduler jobs.", len(self.scheduler.get_jobs()))
 
     def start(self):
