@@ -1001,7 +1001,111 @@ def gmc_title_rotation_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 18 — Blog Writer  [NO COMPUTE REQUIRED]
+# JOB 18 — Compliance Patch (COO + HS Code)  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def compliance_patch_job():
+    """
+    Nightly sweep: for every product variant missing countryCodeOfOrigin or
+    harmonizedSystemCode, infer both from the product title/type using the
+    shared product_compliance module and write them via inventoryItemUpdate.
+
+    - Never overwrites a value that already exists (safe to run nightly).
+    - Respects the `coo:XX` product tag pattern for per-product COO overrides.
+    - Sends a summary alert only when at least one variant was updated.
+    """
+    logger.info("[compliance_patch_job] Running...")
+    try:
+        import time
+        from modules.shopify import _graphql, update_inventory_item_compliance
+        from modules.product_compliance import infer_hs_code, resolve_coo
+
+        FETCH_QUERY = """
+        query($cursor: String) {
+          products(first: 50, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              title
+              productType
+              tags
+              variants(first: 100) {
+                nodes {
+                  id
+                  inventoryItem {
+                    id
+                    countryCodeOfOrigin
+                    harmonizedSystemCode
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+
+        updated = 0
+        errors = 0
+        cursor = None
+
+        while True:
+            data = _graphql(FETCH_QUERY, {"cursor": cursor})
+            page = data["products"]
+
+            for product in page["nodes"]:
+                title = product.get("title", "")
+                product_type = (product.get("productType") or "").strip()
+                tags = [t.strip() for t in (product.get("tags") or "").split(",") if t.strip()]
+
+                coo = resolve_coo(tags)
+                hs_code = infer_hs_code(product_type, title)
+
+                for variant in product["variants"]["nodes"]:
+                    inv = variant.get("inventoryItem") or {}
+                    inv_gid = inv.get("id")
+                    if not inv_gid:
+                        continue
+
+                    cur_coo = (inv.get("countryCodeOfOrigin") or "").strip()
+                    cur_hs = (inv.get("harmonizedSystemCode") or "").strip()
+
+                    if cur_coo and cur_hs:
+                        continue  # already complete — skip
+
+                    write_coo = coo if not cur_coo else cur_coo
+                    write_hs = hs_code if not cur_hs else cur_hs
+
+                    result = update_inventory_item_compliance(inv_gid, write_coo, write_hs)
+                    errs = (result.get("data", {})
+                            .get("inventoryItemUpdate", {})
+                            .get("userErrors", []))
+                    if errs:
+                        logger.error("[compliance_patch_job] Error on %s: %s", inv_gid, errs)
+                        errors += 1
+                    else:
+                        updated += 1
+
+                time.sleep(0.1)  # stay well within Shopify GraphQL rate limits
+
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+
+        logger.info("[compliance_patch_job] Done. updated=%d errors=%d", updated, errors)
+        if updated > 0 or errors > 0:
+            send_alert(
+                f"🌐 *Compliance Patch (COO + HS Code)*\n"
+                f"  Variants updated : {updated}\n"
+                f"  Errors           : {errors}"
+            )
+
+    except Exception as e:
+        logger.error("[compliance_patch_job] Failed: %s", e)
+        send_alert(f"❌ compliance_patch_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 19 — Blog Writer  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
 
 def blog_writer_job():
