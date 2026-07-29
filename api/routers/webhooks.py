@@ -196,15 +196,12 @@ def _handle_product_created(payload: dict):
         weight_g = resolve_product_weight_g(resolved_type)
         for variant in payload.get("variants", []):
             if not variant.get("weight") or float(variant.get("weight", 0)) == 0.0:
-                variant_gid = f"gid://shopify/ProductVariant/{variant['id']}"
-                result = update_variant_weight(variant_gid, weight_g)
-                errs = (result.get("data", {})
-                        .get("productVariantUpdate", {})
-                        .get("userErrors", []))
-                if errs:
-                    logger.error("[webhooks] weight update failed for variant %s: %s", variant["id"], errs)
-                else:
-                    logger.info("[webhooks] Set weight=%.0fg on variant %s", weight_g, variant["id"])
+                variant_id = variant["id"]
+                try:
+                    update_variant_weight(variant_id, weight_g)
+                    logger.info("[webhooks] Set weight=%.0fg on variant %s", weight_g, variant_id)
+                except Exception as ve:
+                    logger.error("[webhooks] weight update failed for variant %s: %s", variant_id, ve)
     except Exception as e:
         logger.error("[webhooks] weight assignment failed for product %s: %s", product_id, e)
 

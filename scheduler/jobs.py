@@ -1227,67 +1227,57 @@ def product_weight_patch_job():
     logger.info("[product_weight_patch_job] Running...")
     try:
         import time
-        from modules.shopify import _graphql, update_variant_weight
+        import requests as _requests
+        from modules.shopify import BASE_URL, _headers, update_variant_weight
         from modules.product_compliance import resolve_product_type, resolve_product_weight_g
-
-        FETCH_QUERY = """
-        query($cursor: String) {
-          products(first: 50, after: $cursor) {
-            pageInfo { hasNextPage endCursor }
-            nodes {
-              id
-              title
-              productType
-              variants(first: 50) {
-                nodes {
-                  id
-                  weight
-                  weightUnit
-                }
-              }
-            }
-          }
-        }
-        """
 
         updated = 0
         errors = 0
-        cursor = None
 
-        while True:
-            data = _graphql(FETCH_QUERY, {"cursor": cursor})
-            page = data["products"]
+        # REST pagination via Link header
+        url = f"{BASE_URL}/products.json"
+        params: dict | None = {"limit": 250, "status": "any", "fields": "id,title,product_type,variants"}
 
-            for product in page["nodes"]:
+        while url:
+            resp = _requests.get(url, headers=_headers(), params=params, timeout=30)
+            resp.raise_for_status()
+            products = resp.json().get("products", [])
+            params = None  # only pass on first request; subsequent URLs are fully formed
+
+            for product in products:
                 title = product.get("title", "")
-                product_type = (product.get("productType") or "").strip()
+                product_type = (product.get("product_type") or "").strip()
                 canonical = resolve_product_type(product_type, title)
                 weight_g = resolve_product_weight_g(canonical)
 
-                for variant in product["variants"]["nodes"]:
+                for variant in product.get("variants", []):
                     current_weight = variant.get("weight") or 0.0
                     if float(current_weight) > 0:
                         continue  # already has a weight — skip
 
-                    result = update_variant_weight(variant["id"], weight_g)
-                    errs = (result.get("data", {})
-                            .get("productVariantUpdate", {})
-                            .get("userErrors", []))
-                    if errs:
-                        logger.error("[product_weight_patch_job] Error on %s: %s", variant["id"], errs)
-                        errors += 1
-                    else:
+                    variant_id = variant["id"]
+                    try:
+                        update_variant_weight(variant_id, weight_g)
                         logger.info(
-                            "[product_weight_patch_job] Set weight=%.0fg on %s (%s)",
-                            weight_g, variant["id"], title[:50],
+                            "[product_weight_patch_job] Set weight=%.0fg on variant %s (%s)",
+                            weight_g, variant_id, title[:50],
                         )
                         updated += 1
+                    except Exception as ve:
+                        logger.error("[product_weight_patch_job] Error on variant %s: %s", variant_id, ve)
+                        errors += 1
 
                     time.sleep(0.2)
 
-            if not page["pageInfo"]["hasNextPage"]:
-                break
-            cursor = page["pageInfo"]["endCursor"]
+            # Follow REST pagination Link header
+            link = resp.headers.get("Link", "")
+            next_url = None
+            for part in link.split(","):
+                part = part.strip()
+                if 'rel="next"' in part:
+                    next_url = part.split(";")[0].strip().strip("<>")
+                    break
+            url = next_url
 
         logger.info("[product_weight_patch_job] Done. updated=%d errors=%d", updated, errors)
         if updated > 0 or errors > 0:
