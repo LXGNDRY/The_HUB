@@ -21,31 +21,20 @@ Applies to all 3 location groups (Printful LG1, PODpluser LG2, duvre LG3).
 DRY_RUN=true to preview changes without writing.
 
 Usage:
-  SHOPIFY_CLIENT_ID=... SHOPIFY_CLIENT_SECRET=... python scripts/fix_international_shipping_rates.py
-  DRY_RUN=true SHOPIFY_CLIENT_ID=... SHOPIFY_CLIENT_SECRET=... python scripts/fix_international_shipping_rates.py
+  SHOPIFY_ADMIN_TOKEN=... python scripts/fix_international_shipping_rates.py
+  DRY_RUN=true SHOPIFY_ADMIN_TOKEN=... python scripts/fix_international_shipping_rates.py
 """
 import os
 import sys
 import json
 import requests
 
-CLIENT_ID = os.environ["SHOPIFY_CLIENT_ID"]
-CLIENT_SECRET = os.environ["SHOPIFY_CLIENT_SECRET"]
 DRY_RUN = os.getenv("DRY_RUN", "false").lower() == "true"
 SHOP = "lngndny.myshopify.com"
 API_VERSION = "2026-04"
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
-token_resp = requests.post(
-    f"https://{SHOP}/admin/oauth/access_token",
-    data={
-        "grant_type": "client_credentials",
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-    }
-)
-token_resp.raise_for_status()
-TOKEN = token_resp.json()["access_token"]
+# ── Auth — use SHOPIFY_ADMIN_TOKEN (private app token with write_shipping scope)
+TOKEN = os.environ["SHOPIFY_ADMIN_TOKEN"]
 GQL_URL = f"https://{SHOP}/admin/api/{API_VERSION}/graphql.json"
 HEADERS = {"X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json"}
 
@@ -150,13 +139,13 @@ for plg in profile.get("profileLocationGroups", []):
             methods_to_delete[zone_id] = to_delete
 
 if not methods_to_delete:
-    print("\n⚠  No methods found to delete in international zones.")
+    print("\n⚠  No methods found to deactivate in international zones.")
     print("   The zone may already be correctly configured, or zone IDs may have changed.")
     print("   Run audit_delivery_profiles.py to inspect current state.")
     sys.exit(0)
 
 total_to_delete = sum(len(v) for v in methods_to_delete.values())
-print(f"\n  {total_to_delete} method definition(s) across {len(methods_to_delete)} zone(s) will be removed.")
+print(f"\n  {total_to_delete} method definition(s) across {len(methods_to_delete)} zone(s) will be deactivated.")
 
 # ── New rate definitions ──────────────────────────────────────────────────────
 # $14.99 standard for orders < $100
@@ -214,13 +203,14 @@ mutation updateProfile($id: ID!, $profile: DeliveryProfileInput!) {
 
 lg_updates = []
 for lg_id, intl_zone_id in INTL_ZONES.items():
-    delete_ids = methods_to_delete.get(intl_zone_id, [])
+    deactivate_ids = methods_to_delete.get(intl_zone_id, [])
+    # Shopify has no methodDefinitionsToDelete — deactivate old methods instead.
+    # Inactive methods are hidden from customers but can be cleaned up manually via admin.
     zone_update = {
         "id": intl_zone_id,
         "methodDefinitionsToCreate": NEW_METHODS,
+        "methodDefinitionsToUpdate": [{"id": mid, "active": False} for mid in deactivate_ids],
     }
-    if delete_ids:
-        zone_update["methodDefinitionsToDelete"] = delete_ids
 
     lg_updates.append({
         "id": lg_id,

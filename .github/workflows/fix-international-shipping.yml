@@ -28,7 +28,6 @@ jobs:
 
       - name: Run shipping rate fix
         env:
-          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
-          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}
         run: python scripts/fix_international_shipping_rates.py

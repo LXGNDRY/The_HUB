@@ -32,9 +32,7 @@ jobs:
         id: audit
         env:
           GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
-          GOOGLE_ADS_CLIENT_ID:       ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
-          GOOGLE_ADS_CLIENT_SECRET:   ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
-          GOOGLE_ADS_REFRESH_TOKEN:   ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
+          GCP_SA_KEY_JSON:            ${{ secrets.GCP_SA_KEY }}
           GA4_PROPERTY_ID:            ${{ secrets.GA4_PROPERTY_ID }}
           GA4_TOKEN_JSON:             ${{ secrets.GA4_TOKEN_JSON }}
         run: |
