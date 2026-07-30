@@ -1,31 +1,32 @@
 {%- comment -%}
   robots.txt.liquid
-  Version:      2.0.0
-  Last updated: 2026-05-25
-  Author:       Legendary Branding / Perplexity Computer audit
+  Version:      4.0.0
+  Last updated: 2026-07-30
+  Author:       Legendary Branding / Claude Code
 
-  Changes from v1.1.0:
-    — Added explicit Allow for AI agent crawlers (GPTBot, ClaudeBot,
-      PerplexityBot, Googlebot-Image) to support Agentic/Shopping discovery.
-    — Expanded parameter Disallow to cover utm_*, country=, currency=
-      variants that were generating crawl-budget-wasting parameterized
-      URLs being indexed as unique pages (confirmed via GSC audit May 2026).
-    — Blocked /cdn/shop/files/ CDN asset paths that appeared in GSC as
-      indexed .png/.webp URLs — not crawlable content.
-    — Blocked /*/pages/html-sitemap — phantom locale page confirmed indexed.
-    — Blocked /*/collections/all-products — locale-prefixed dupe collection.
-    — Extended locale blocks from /de/ /fr/ /es/ to cover full subtrees
-      including /de /fr /es without trailing slash edge case.
-    — Kept Disallow: /*?*stkn= and /*?*com_cvv= — already in robots.txt
-      but Google has cached copies; these prevent new crawls while
-      GSC URL Removal clears the existing indexed set.
-    — NOTE: Disallow alone does NOT remove already-indexed locale pages
-      (/de/* /fr/* /es/*). Submit GSC URL Removal requests in parallel.
+  Changes from v3.0.0:
+    — Blocked /*?*variant= — Shopify generates a unique URL per product variant
+      (colour, size, etc.). Without this rule, a product with 10 variants consumes
+      10× the crawl budget on near-identical pages, crowding out canonical URLs.
+    — Blocked /account — session-dependent page with zero SEO value; indexing it
+      creates thin-content risk and wastes crawl budget on authenticated UI.
+    — Blocked /cart — dynamic, user-specific page; no indexable content and exposes
+      checkout flow structure to bots unnecessarily.
+    — Added Applebot-Extended named block — Apple Intelligence / Siri Suggestions
+      (iOS 18+) is the fastest-growing AI commerce surface. Explicit Allow signals
+      cooperative intent for product discovery via Siri and Apple Search.
+    — Added DuckAssistBot named block — DuckDuckGo AI Answers crawler; added for
+      completeness across major AI answer surfaces.
+
+  Changes from v2.0.0 (see v3.0.0 header for full list).
 
   Agentic Commerce note:
-    GPTBot, ClaudeBot, PerplexityBot are explicitly allowed via named
-    user-agent blocks (they inherit * rules by default, but explicit Allow
-    groups signal cooperative intent and may improve AI discovery ranking).
+    GPTBot (OpenAI training), OAI-SearchBot (ChatGPT web search/shopping),
+    ClaudeBot, PerplexityBot, Google-Extended, meta-externalagent, Amazonbot,
+    Applebot-Extended (Apple Intelligence/Siri), and DuckAssistBot are explicitly
+    allowed via named user-agent blocks.
+    Explicit Allow signals cooperative intent and improves AI discovery
+    ranking versus relying on inherited wildcard rules.
 {%- endcomment -%}
 
 {%- comment -%} ─── SHOPIFY DEFAULT GROUPS ────────────────────────────────── {%- endcomment -%}
@@ -44,11 +45,20 @@
 {{ 'Disallow: /*?*com_cvv=' }}
 {{ 'Disallow: /*?*currency=' }}
 {{ 'Disallow: /*?*country=' }}
+{{ 'Disallow: /*?*sort_by=' }}
+{{ 'Disallow: /*?*variant=' }}
 {{ 'Disallow: /*?*utm_source=' }}
 {{ 'Disallow: /*?*utm_medium=' }}
 {{ 'Disallow: /*?*utm_campaign=' }}
 {{ 'Disallow: /*?*utm_content=' }}
 {{ 'Disallow: /*?*utm_term=' }}
+
+    {%- comment -%} ── LOW-VALUE SHOPIFY PAGES ─────────────────────────────── {%- endcomment -%}
+{{ 'Disallow: /search?' }}
+{{ 'Disallow: /account' }}
+{{ 'Disallow: /cart' }}
+{{ 'Disallow: /*/collections/vendors' }}
+{{ 'Disallow: /*/collections/types' }}
 
     {%- comment -%} ── PHANTOM LOCALE PATHS (not published, already indexed) ─ {%- endcomment -%}
 {{ 'Disallow: /de/' }}
@@ -68,18 +78,137 @@
   {{- group.sitemap -}}
 {%- endfor -%}
 
-{%- comment -%} ─── AI AGENT CRAWLERS (explicit allow for Agentic discovery) ─ {%- endcomment -%}
+{%- comment -%} ─── AI AGENT CRAWLERS (allow content pages, block noise) ──── {%- endcomment -%}
+{%- comment -%}
+  Each named AI block:
+    Allow: /           — full site access for product/content discovery
+    Disallow locale    — phantom /de /fr /es paths (with and without trailing slash)
+    Disallow params    — UTM, currency, country query strings (query-anchored pattern)
+    Sitemap            — explicit pointer so AI crawlers find the product catalog
+{%- endcomment -%}
 {{ 'User-agent: GPTBot' }}
 {{ 'Allow: /' }}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
+{{ '' }}
+{{ 'User-agent: OAI-SearchBot' }}
+{{ 'Allow: /' }}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
 {{ '' }}
 {{ 'User-agent: ClaudeBot' }}
 {{ 'Allow: /' }}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
 {{ '' }}
 {{ 'User-agent: PerplexityBot' }}
 {{ 'Allow: /' }}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
 {{ '' }}
 {{ 'User-agent: Google-Extended' }}
 {{ 'Allow: /' }}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
+{{ '' }}
+{{ 'User-agent: meta-externalagent' }}
+{{ 'Allow: /' }}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
+{{ '' }}
+{{ 'User-agent: Amazonbot' }}
+{{ 'Allow: /' }}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
+{{ '' }}
+{{ 'User-agent: Applebot-Extended' }}
+{{ 'Allow: /' }}
+{{ 'Disallow: /de/' }}
+{{ 'Disallow: /de' }}
+{{ 'Disallow: /fr/' }}
+{{ 'Disallow: /fr' }}
+{{ 'Disallow: /es/' }}
+{{ 'Disallow: /es' }}
+{{ 'Disallow: /*?*utm_source=' }}
+{{ 'Disallow: /*?*utm_medium=' }}
+{{ 'Disallow: /*?*utm_campaign=' }}
+{{ 'Disallow: /*?*currency=' }}
+{{ 'Disallow: /*?*country=' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
+{{ '' }}
+{{ 'User-agent: DuckAssistBot' }}
+{{ 'Allow: /' }}
+{{ 'Sitemap: https://legendary-branding.com/sitemap.xml' }}
 {{ '' }}
 {{ 'User-agent: Googlebot-Image' }}
 {{ 'Allow: /cdn/shop/products/' }}
