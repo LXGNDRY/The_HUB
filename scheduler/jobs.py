@@ -426,11 +426,14 @@ def sheets_refresh_job():
                 )
                 svc = build("searchconsole", "v1", credentials=gsc_creds, cache_discovery=False)
                 site_url = os.getenv("GSC_SITE_URL", "https://legendary-branding.com")
+                from datetime import date, timedelta
+                gsc_end = date.today() - timedelta(days=3)  # GSC data lags ~3 days
+                gsc_start = gsc_end - timedelta(days=90)
                 gsc_data = svc.searchanalytics().query(
                     siteUrl=site_url,
                     body={
-                        "startDate": "2026-04-22",
-                        "endDate": "2026-05-20",
+                        "startDate": gsc_start.isoformat(),
+                        "endDate": gsc_end.isoformat(),
                         "dimensions": ["query"],
                         "rowLimit": 50,
                     }

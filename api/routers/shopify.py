@@ -764,12 +764,20 @@ def delete_webhook(webhook_id: int):
 # Abandoned Checkouts
 # ─────────────────────────────────────────────
 
-@router.get("/checkouts/abandoned", summary="List abandoned checkouts")
+@router.get("/checkouts/abandoned", summary="List abandoned checkouts with optional date range")
 def list_abandoned_checkouts(
     limit: int = Query(50, ge=1, le=250),
     since_id: Optional[int] = Query(None),
+    created_at_min: Optional[str] = Query(None, description="ISO 8601, e.g. 2026-06-01T00:00:00Z"),
+    created_at_max: Optional[str] = Query(None, description="ISO 8601, e.g. 2026-06-30T23:59:59Z"),
 ):
     try:
+        if created_at_min or created_at_max:
+            return sh.get_abandoned_checkouts(
+                created_at_min=created_at_min,
+                created_at_max=created_at_max,
+                limit=limit,
+            )
         return sh.list_abandoned_checkouts(limit=limit, since_id=since_id)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
