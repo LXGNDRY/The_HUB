@@ -339,6 +339,36 @@ def list_orders(limit: int = 50, status: str = "any",
     }
 
 
+def get_abandoned_checkouts(created_at_min: str = None, created_at_max: str = None, limit: int = 250) -> dict:
+    """List abandoned checkouts with optional date range filters."""
+    params = {"limit": limit, "status": "open"}
+    if created_at_min:
+        params["created_at_min"] = created_at_min
+    if created_at_max:
+        params["created_at_max"] = created_at_max
+    data = _get("/checkouts.json", params)
+    checkouts = data.get("checkouts", [])
+    return {
+        "count": len(checkouts),
+        "checkouts": [
+            {
+                "token": c.get("token"),
+                "email": c.get("email"),
+                "total_price": c.get("total_price"),
+                "currency": c.get("currency"),
+                "created_at": c.get("created_at"),
+                "updated_at": c.get("updated_at"),
+                "completed_at": c.get("completed_at"),
+                "abandoned_checkout_url": c.get("abandoned_checkout_url"),
+                "line_items_count": len(c.get("line_items", [])),
+                "shipping_address_country": (c.get("shipping_address") or {}).get("country"),
+                "gateway": c.get("gateway"),
+            }
+            for c in checkouts
+        ],
+    }
+
+
 def get_order(order_id: int) -> dict:
     """Get full order detail by ID."""
     return _get(f"/orders/{order_id}.json")
