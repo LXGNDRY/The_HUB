@@ -226,23 +226,27 @@ def _handle_checkout_created(payload: dict):
         from modules.klaviyo import KlaviyoModule
         klv = KlaviyoModule()
         klv.create_event(
-            event_name="Started Checkout",
+            event_name="Checkout Started",
             email=email,
+            metric_id="YdsnAF",
             properties={
                 "checkout_id": checkout_id,
+                "checkout_url": payload.get("abandoned_checkout_url", ""),
                 "total_price": total_price,
                 "item_count": len(line_items),
-                "items": [
+                "line_items": [
                     {
                         "title": item.get("title"),
+                        "variant_title": item.get("variant_title", ""),
                         "quantity": item.get("quantity"),
                         "price": item.get("price"),
+                        "image_url": item.get("image_url", ""),
                     }
                     for item in line_items[:10]
                 ],
             },
         )
-        logger.info("[webhooks] Klaviyo 'Started Checkout' event fired for %s", email)
+        logger.info("[webhooks] Klaviyo 'Checkout Started' event fired for %s", email)
     except Exception as e:
         logger.error("[webhooks] Klaviyo Started Checkout event failed for checkout %s: %s", checkout_id, e)
 
