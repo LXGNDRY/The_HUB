@@ -239,18 +239,48 @@
       // cart_items and shipping_address are stored in Razorpay order notes so
       // the webhook can reconstruct the Shopify order if this browser session
       // drops before /verify-payment is called.
-      const orderResp = await fetch(`${GCP_BASE}/create-order`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amount:           cartTotal,
-          currency:         cartCurrency,
-          customer_email:   customerEmail,
-          customer_name:    customerName,
-          cart_items:       cartItems,
-          shipping_address: shippingAddress
-        })
-      });
+
+      // GA4 — begin_checkout
+      if (window.dataLayer) {
+        window.dataLayer.push({
+          event:          'begin_checkout',
+          currency:       cartCurrency,
+          value:          cartTotal / 100,
+          items:          cartItems.map((item, i) => ({
+            item_id:       String(item.variant_id),
+            quantity:      item.quantity,
+            price:         item.price / 100,
+            index:         i
+          }))
+        });
+      }
+
+      const orderAbort = new AbortController();
+      const orderTimeout = setTimeout(() => orderAbort.abort(), 15000);
+
+      let orderResp;
+      try {
+        orderResp = await fetch(`${GCP_BASE}/create-order`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          signal:  orderAbort.signal,
+          body: JSON.stringify({
+            amount:           cartTotal,
+            currency:         cartCurrency,
+            customer_email:   customerEmail,
+            customer_name:    customerName,
+            cart_items:       cartItems,
+            shipping_address: shippingAddress
+          })
+        });
+      } catch (fetchErr) {
+        if (fetchErr.name === 'AbortError') {
+          throw new Error('The payment service is taking too long — please try again.');
+        }
+        throw fetchErr;
+      } finally {
+        clearTimeout(orderTimeout);
+      }
 
       if (!orderResp.ok) {
         const err = await orderResp.json().catch(() => ({}));
@@ -261,6 +291,16 @@
 
       // 5. Load Razorpay SDK
       await loadRazorpayScript();
+
+      // GA4 — add_payment_info (modal is about to open)
+      if (window.dataLayer) {
+        window.dataLayer.push({
+          event:          'add_payment_info',
+          currency:       order.currency || cartCurrency,
+          value:          (order.amount || cartTotal) / 100,
+          payment_type:   'UPI/Card'
+        });
+      }
 
       // 6. Open Razorpay Standard Checkout
       const options = {
@@ -290,6 +330,7 @@
                 razorpay_payment_id: response.razorpay_payment_id,
                 razorpay_order_id:   response.razorpay_order_id,
                 razorpay_signature:  response.razorpay_signature,
+                draft_order_id:      order.draft_order_id || null,
                 cart_items:          cartItems,
                 customer_email:      customerEmail,
                 customer_name:       customerName,
@@ -300,6 +341,21 @@
             const result = await verifyResp.json();
 
             if (result.success && result.order_status_url) {
+              // GA4 — purchase
+              if (window.dataLayer) {
+                window.dataLayer.push({
+                  event:          'purchase',
+                  transaction_id: response.razorpay_payment_id,
+                  currency:       order.currency || cartCurrency,
+                  value:          (order.amount || cartTotal) / 100,
+                  items:          cartItems.map((item, i) => ({
+                    item_id:  String(item.variant_id),
+                    quantity: item.quantity,
+                    price:    item.price / 100,
+                    index:    i
+                  }))
+                });
+              }
               window.location.href = result.order_status_url;
             } else {
               throw new Error(result.error || 'Order confirmation failed. Please contact support.');

@@ -45,6 +45,7 @@ app = Flask(__name__)
 # Allow requests from the Legendary Branding storefront only
 CORS(app, origins=[
     "https://legendary-branding.com",
+    "https://www.legendary-branding.com",
     "https://lngndny.myshopify.com"
 ])
 
@@ -60,6 +61,12 @@ SHOPIFY_CLIENT_ID     = os.environ.get("SHOPIFY_CLIENT_ID", "")
 SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOPIFY_DOMAIN  = os.environ.get("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
 WEBHOOK_SECRET  = os.environ.get("WEBHOOK_SECRET", "")
+KLAVIYO_API_KEY = os.environ.get("KLAVIYO_API_KEY", "")
+
+# India import tax rate applied on top of the INR cart total.
+# Default: 0.18 = 18% standard IGST for goods priced above ₹1,000.
+# Set INDIA_TAX_RATE=0 to disable (e.g. if you handle duties in product pricing).
+INDIA_TAX_RATE = float(os.environ.get("INDIA_TAX_RATE", "0.18"))
 
 # India import tax rate applied on top of the INR cart total.
 # Default: 0.18 = 18% standard IGST for goods priced above ₹1,000.
@@ -505,6 +512,15 @@ def create_order():
     # cart_currency is "INR" for India market customers, "USD" otherwise.
     cart_amount_base = cart_amount_subunits / 100.0
 
+    # Razorpay is India-only — only INR and USD (converted to INR) are supported.
+    # Reject other currencies explicitly rather than silently applying the wrong
+    # exchange rate (e.g. treating GBP as USD overcharges by ~20%).
+    SUPPORTED_CURRENCIES = {"INR", "USD"}
+    if cart_currency not in SUPPORTED_CURRENCIES:
+        log.warning(f"Unsupported currency {cart_currency!r} rejected at /create-order")
+        return jsonify({"error": "Unsupported currency for India checkout. Only INR and USD are accepted."}), 400
+
+
     # Convert to INR paise for Razorpay
     if cart_currency == "INR":
         fx_rate = get_usd_to_inr()
@@ -668,6 +684,71 @@ def verify_payment():
 
 
 # ---------------------------------------------------------------------------
+# Klaviyo helper — fire "Checkout Started" on metric YdsnAF (abandoned cart flow)
+# Uses requests directly (no SDK dependency) so this service stays lightweight.
+# ---------------------------------------------------------------------------
+KLAVIYO_EVENTS_URL     = "https://a.klaviyo.com/api/events/"
+CHECKOUT_STARTED_METRIC = "YdsnAF"
+
+
+def _fire_klaviyo_checkout_started(email: str, checkout_url: str, notes: dict, payment_id: str = ""):
+    """POST a Klaviyo 'Checkout Started' event to enroll the customer in the
+    abandoned cart reminder flow (VXj9x6).  Called after a Razorpay payment fails."""
+    try:
+        cart_items = json.loads(notes.get("cart_items_json", "[]"))
+    except Exception:
+        cart_items = []
+
+    line_items = [
+        {
+            "title":         item.get("title", ""),
+            "variant_title": item.get("variant_title", ""),
+            "quantity":      item.get("quantity", 1),
+            "price":         str(item.get("price", "0.00")),
+            "image_url":     item.get("image_url", ""),
+        }
+        for item in cart_items[:10]
+    ]
+
+    body = {
+        "data": {
+            "type": "event",
+            "attributes": {
+                "metric": {
+                    "data": {
+                        "type": "metric",
+                        "id": CHECKOUT_STARTED_METRIC,
+                    }
+                },
+                "profile": {
+                    "data": {
+                        "type": "profile",
+                        "attributes": {"email": email},
+                    }
+                },
+                "properties": {
+                    "checkout_id":  notes.get("draft_order_id", payment_id),
+                    "checkout_url": checkout_url or "https://legendary-branding.com/cart",
+                    "total_price":  notes.get("cart_amount_base", "0.00"),
+                    "item_count":   len(line_items),
+                    "line_items":   line_items,
+                    "razorpay_payment_id": payment_id,
+                },
+                "time": time.strftime("%Y-%m-%dT%H:%M:%S+00:00", time.gmtime()),
+            },
+        }
+    }
+    headers = {
+        "Authorization": f"Klaviyo-API-Key {KLAVIYO_API_KEY}",
+        "revision": "2024-10-15",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(KLAVIYO_EVENTS_URL, headers=headers, json=body, timeout=10)
+    resp.raise_for_status()
+    log.info(f"Klaviyo 'Checkout Started' fired for {email} (payment_id={payment_id}) — HTTP {resp.status_code}")
+
+
+# ---------------------------------------------------------------------------
 # Route: POST /webhook
 # ---------------------------------------------------------------------------
 @app.route("/webhook", methods=["POST"])
@@ -777,10 +858,31 @@ def webhook():
 
     elif event_type == "payment.failed":
         payment = payload.get("payment", {}).get("entity", {})
-        payment_id = payment.get("id")
-        error_desc = payment.get("error_description", "unknown")
-        log.warning(f"Payment failed: {payment_id} | reason={error_desc}")
-        # Future: fire Klaviyo abandoned checkout flow
+        payment_id    = payment.get("id")
+        error_desc    = payment.get("error_description", "unknown")
+        error_code    = payment.get("error_code", "")
+        error_source  = payment.get("error_source", "")
+        error_step    = payment.get("error_step", "")
+        amount_inr    = payment.get("amount", 0) / 100.0
+        method        = payment.get("method", "")
+        customer_email = payment.get("email", "")
+        notes = payment.get("notes", {}) or {}
+        checkout_url = notes.get("abandoned_checkout_url", "")
+        log.warning(
+            f"Payment failed: {payment_id} | email={customer_email} | "
+            f"amount=₹{amount_inr:.2f} | method={method} | "
+            f"code={error_code} | source={error_source} | step={error_step} | "
+            f"reason={error_desc}"
+        )
+        if customer_email and KLAVIYO_API_KEY:
+            def _fire_klaviyo():
+                try:
+                    _fire_klaviyo_checkout_started(customer_email, checkout_url, notes, payment_id)
+                except Exception as klv_err:
+                    log.error(f"Klaviyo abandoned cart fire failed for {customer_email}: {klv_err}")
+            threading.Thread(target=_fire_klaviyo, daemon=True).start()
+        else:
+            log.info(f"Skipping Klaviyo event for failed payment {payment_id} — no email or API key")
 
     elif event_type == "order.paid":
         order = payload.get("order", {}).get("entity", {})

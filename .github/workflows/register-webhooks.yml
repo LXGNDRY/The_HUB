@@ -1,0 +1,35 @@
+name: Register Shopify Webhooks
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Create missing webhooks (dry run if unchecked)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  register:
+    name: Register Shopify Webhooks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+
+      - name: Register webhooks
+        env:
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          APP_URL: ${{ secrets.APP_URL }}
+        run: |
+          FLAGS=""
+          if [ "${{ github.event.inputs.apply }}" = "true" ]; then
+            FLAGS="--apply"
+          fi
+          python scripts/register_webhooks.py $FLAGS

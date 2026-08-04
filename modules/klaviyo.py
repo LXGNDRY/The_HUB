@@ -243,12 +243,18 @@ class KlaviyoModule:
     # Events / Track
     # ------------------------------------------------------------------
 
-    def create_event(self, event_name: str, email: str, properties: dict = None) -> dict:
+    def create_event(self, event_name: str, email: str,
+                     properties: dict = None, metric_id: str = None) -> dict:
+        metric_ref = (
+            {"data": {"type": "metric", "id": metric_id}}
+            if metric_id
+            else {"data": {"type": "metric", "attributes": {"name": event_name}}}
+        )
         body = {
             "data": {
                 "type": "event",
                 "attributes": {
-                    "metric": {"data": {"type": "metric", "attributes": {"name": event_name}}},
+                    "metric": metric_ref,
                     "profile": {"data": {"type": "profile", "attributes": {"email": email}}},
                     "properties": properties or {},
                     "time": datetime.now(timezone.utc).isoformat(),
