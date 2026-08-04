@@ -143,6 +143,70 @@ def _handle_product_created(payload: dict):
         except Exception as e:
             logger.error("[webhooks] IndexNow ping failed for %s: %s", product_url, e)
 
+    # 4. Set country of origin + HS code on all variants
+    try:
+        from modules.shopify import update_inventory_item_compliance
+        from modules.product_compliance import infer_hs_code, resolve_coo
+        tag_list = [t.strip() for t in (payload.get("tags") or "").split(",") if t.strip()]
+        coo = resolve_coo(tag_list)
+        hs_code = infer_hs_code(product_type, title)
+        for variant in payload.get("variants", []):
+            inv_id = variant.get("inventory_item_id")
+            if not inv_id:
+                continue
+            inv_gid = f"gid://shopify/InventoryItem/{inv_id}"
+            result = update_inventory_item_compliance(inv_gid, coo, hs_code)
+            errs = result.get("data", {}).get("inventoryItemUpdate", {}).get("userErrors", [])
+            if errs:
+                logger.error("[webhooks] COO/HS update failed for %s: %s", inv_gid, errs)
+            else:
+                logger.info("[webhooks] Set COO=%s HS=%s on %s", coo, hs_code, inv_gid)
+    except Exception as e:
+        logger.error("[webhooks] COO/HS code assignment failed for product %s: %s", product_id, e)
+
+    # 5. Ensure product_type is a canonical Google Shopping taxonomy string
+    resolved_type = product_type
+    try:
+        from modules.shopify import update_product_type
+        from modules.product_compliance import resolve_product_type
+        resolved_type = resolve_product_type(product_type, title)
+        if resolved_type != product_type:
+            product_gid = f"gid://shopify/Product/{product_id}"
+            result = update_product_type(product_gid, resolved_type)
+            errs = result.get("data", {}).get("productUpdate", {}).get("userErrors", [])
+            if errs:
+                logger.error("[webhooks] product_type update failed for %s: %s", product_id, errs)
+            else:
+                logger.info("[webhooks] product_type '%s' → '%s' for product %s", product_type, resolved_type, product_id)
+    except Exception as e:
+        logger.error("[webhooks] product_type standardization failed for product %s: %s", product_id, e)
+
+    # 6. Write google_product_category metafield so GMC receives the numeric taxonomy ID
+    try:
+        from modules.shopify import update_google_product_category
+        from modules.product_compliance import resolve_gmc_category_id
+        category_id = resolve_gmc_category_id(resolved_type)
+        update_google_product_category(product_id, category_id)
+        logger.info("[webhooks] google_product_category → %s for product %s", category_id, product_id)
+    except Exception as e:
+        logger.error("[webhooks] google_product_category write failed for product %s: %s", product_id, e)
+
+    # 7. Set default weight on variants that have no weight (0 or null)
+    try:
+        from modules.shopify import update_variant_weight
+        from modules.product_compliance import resolve_product_weight_g
+        weight_g = resolve_product_weight_g(resolved_type)
+        for variant in payload.get("variants", []):
+            if not variant.get("weight") or float(variant.get("weight", 0)) == 0.0:
+                variant_id = variant["id"]
+                try:
+                    update_variant_weight(variant_id, weight_g)
+                    logger.info("[webhooks] Set weight=%.0fg on variant %s", weight_g, variant_id)
+                except Exception as ve:
+                    logger.error("[webhooks] weight update failed for variant %s: %s", variant_id, ve)
+    except Exception as e:
+        logger.error("[webhooks] weight assignment failed for product %s: %s", product_id, e)
+
 
 def _handle_product_updated(payload: dict):
     """

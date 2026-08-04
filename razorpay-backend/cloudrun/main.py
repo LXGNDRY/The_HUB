@@ -68,6 +68,11 @@ KLAVIYO_API_KEY = os.environ.get("KLAVIYO_API_KEY", "")
 # Set INDIA_TAX_RATE=0 to disable (e.g. if you handle duties in product pricing).
 INDIA_TAX_RATE = float(os.environ.get("INDIA_TAX_RATE", "0.18"))
 
+# India import tax rate applied on top of the INR cart total.
+# Default: 0.18 = 18% standard IGST for goods priced above ₹1,000.
+# Set INDIA_TAX_RATE=0 to disable (e.g. if you handle duties in product pricing).
+INDIA_TAX_RATE = float(os.environ.get("INDIA_TAX_RATE", "0.18"))
+
 RAZORPAY_ORDERS_URL = "https://api.razorpay.com/v1/orders"
 SHOPIFY_GRAPHQL_URL = f"https://{SHOPIFY_DOMAIN}/admin/api/2026-04/graphql.json"
 SHOPIFY_OAUTH_URL   = f"https://{SHOPIFY_DOMAIN}/admin/oauth/access_token"
@@ -514,6 +519,7 @@ def create_order():
     if cart_currency not in SUPPORTED_CURRENCIES:
         log.warning(f"Unsupported currency {cart_currency!r} rejected at /create-order")
         return jsonify({"error": "Unsupported currency for India checkout. Only INR and USD are accepted."}), 400
+
 
     # Convert to INR paise for Razorpay
     if cart_currency == "INR":

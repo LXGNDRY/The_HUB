@@ -14,8 +14,7 @@ jobs:
       - run: pip install requests
       - name: Push lb-razorpay.js and patch cart-summary.liquid
         env:
-          SHOPIFY_CLIENT_ID:     ${{ secrets.SHOPIFY_CLIENT_ID }}
-          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
-          RAZORPAY_BACKEND_URL:  ${{ secrets.RAZORPAY_BACKEND_URL }}
-          RAZORPAY_KEY_ID:       ${{ secrets.RAZORPAY_KEY_ID }}
+          SHOPIFY_ADMIN_TOKEN:  ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          RAZORPAY_BACKEND_URL: ${{ secrets.RAZORPAY_BACKEND_URL }}
+          RAZORPAY_KEY_ID:      ${{ secrets.RAZORPAY_KEY_ID }}
         run: python3 scripts/push_razorpay_cart_button.py

@@ -339,6 +339,36 @@ def list_orders(limit: int = 50, status: str = "any",
     }
 
 
+def get_abandoned_checkouts(created_at_min: str = None, created_at_max: str = None, limit: int = 250) -> dict:
+    """List abandoned checkouts with optional date range filters."""
+    params = {"limit": limit, "status": "open"}
+    if created_at_min:
+        params["created_at_min"] = created_at_min
+    if created_at_max:
+        params["created_at_max"] = created_at_max
+    data = _get("/checkouts.json", params)
+    checkouts = data.get("checkouts", [])
+    return {
+        "count": len(checkouts),
+        "checkouts": [
+            {
+                "token": c.get("token"),
+                "email": c.get("email"),
+                "total_price": c.get("total_price"),
+                "currency": c.get("currency"),
+                "created_at": c.get("created_at"),
+                "updated_at": c.get("updated_at"),
+                "completed_at": c.get("completed_at"),
+                "abandoned_checkout_url": c.get("abandoned_checkout_url"),
+                "line_items_count": len(c.get("line_items", [])),
+                "shipping_address_country": (c.get("shipping_address") or {}).get("country"),
+                "gateway": c.get("gateway"),
+            }
+            for c in checkouts
+        ],
+    }
+
+
 def get_order(order_id: int) -> dict:
     """Get full order detail by ID."""
     return _get(f"/orders/{order_id}.json")
@@ -429,6 +459,79 @@ def set_inventory(inventory_item_id: int, location_id: int, available: int) -> d
         "available": available,
     }
     return _post("/inventory_levels/set.json", payload)
+
+
+def update_product_type(product_gid: str, product_type: str) -> dict:
+    """Set productType on a product via productUpdate mutation."""
+    mutation = """
+    mutation updateProductType($input: ProductInput!) {
+      productUpdate(input: $input) {
+        product { id productType }
+        userErrors { field message }
+      }
+    }
+    """
+    return _graphql(mutation, {"input": {"id": product_gid, "productType": product_type}})
+
+
+def update_google_product_category(product_id: int, category_id: str) -> dict:
+    """Write the google_product_category metafield on a product.
+
+    category_id is the numeric Google taxonomy ID string (e.g. "212").
+    This is read by Shopify's Google channel and surfaced to GMC as the
+    google_product_category feed attribute.
+    """
+    return set_metafield(
+        "product", product_id,
+        namespace="google",
+        key="google_product_category",
+        value=category_id,
+        type_="single_line_text_field",
+    )
+
+
+def update_variant_weight(variant_id: int, weight_g: float) -> dict:
+    """Set weight (in grams) on a product variant via REST.
+
+    variant_id is the numeric Shopify variant ID (not a GID).
+    Only writes if the variant has no weight set (weight == 0 or null).
+    Caller should check before invoking.
+    """
+    return _put(f"/variants/{variant_id}.json", {
+        "variant": {"id": variant_id, "weight": weight_g, "weight_unit": "g"},
+    })
+
+
+def update_inventory_item_compliance(inv_item_gid: str, coo: str, hs_code: str) -> dict:
+    """
+    Set countryCodeOfOrigin and harmonizedSystemCode on an InventoryItem.
+
+    Args:
+        inv_item_gid: Full Shopify GID, e.g. "gid://shopify/InventoryItem/12345"
+        coo:          ISO 3166-1 alpha-2 country code, e.g. "CN" or "US"
+        hs_code:      6-digit HS code string, e.g. "610910"
+
+    Returns the full GraphQL response dict.
+    """
+    mutation = """
+    mutation inventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+      inventoryItemUpdate(id: $id, input: $input) {
+        inventoryItem {
+          id
+          countryCodeOfOrigin
+          harmonizedSystemCode
+        }
+        userErrors { field message }
+      }
+    }
+    """
+    return _graphql(mutation, {
+        "id": inv_item_gid,
+        "input": {
+            "countryCodeOfOrigin": coo,
+            "harmonizedSystemCode": hs_code,
+        },
+    })
 
 
 # ─────────────────────────────────────────────
@@ -2025,6 +2128,126 @@ def get_market(market_gid: str) -> dict:
     """
     result = _graphql(query, {"id": market_gid})
     return result.get("data", {}).get("market", {})
+
+
+def enable_market(market_gid: str) -> dict:
+    """
+    Enable a disabled Shopify market so it accepts orders.
+    market_gid: 'gid://shopify/Market/123456789'
+    Requires 'write_markets' OAuth scope.
+    """
+    query = """
+    mutation marketUpdate($id: ID!, $input: MarketUpdateInput!) {
+      marketUpdate(id: $id, input: $input) {
+        market { id name enabled }
+        userErrors { field message }
+      }
+    }
+    """
+    result = _graphql(query, {"id": market_gid, "input": {"enabled": True}})
+    data = result.get("data", {}).get("marketUpdate", {})
+    errors = data.get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"marketUpdate errors: {errors}")
+    logger.info("[shopify] Enabled market: %s", market_gid)
+    return data.get("market", {})
+
+
+def disable_market(market_gid: str) -> dict:
+    """
+    Disable an active Shopify market. The market will no longer accept orders.
+    market_gid: 'gid://shopify/Market/123456789'
+    Requires 'write_markets' OAuth scope.
+    """
+    query = """
+    mutation marketUpdate($id: ID!, $input: MarketUpdateInput!) {
+      marketUpdate(id: $id, input: $input) {
+        market { id name enabled }
+        userErrors { field message }
+      }
+    }
+    """
+    result = _graphql(query, {"id": market_gid, "input": {"enabled": False}})
+    data = result.get("data", {}).get("marketUpdate", {})
+    errors = data.get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"marketUpdate errors: {errors}")
+    logger.info("[shopify] Disabled market: %s", market_gid)
+    return data.get("market", {})
+
+
+def update_market_currency(market_gid: str, local_currencies: bool = True) -> dict:
+    """
+    Toggle local currency display for a market.
+    When local_currencies=True, Shopify shows prices in the buyer's local
+    currency using live FX rates (available on all plans, including Basic).
+    market_gid: 'gid://shopify/Market/123456789'
+    Requires 'write_markets' OAuth scope.
+    """
+    query = """
+    mutation marketCurrencySettingsUpdate($marketId: ID!, $settings: MarketCurrencySettingsUpdateInput!) {
+      marketCurrencySettingsUpdate(marketId: $marketId, settings: $settings) {
+        market {
+          id
+          name
+          currencySettings {
+            localCurrencies
+            baseCurrency { currencyCode }
+          }
+        }
+        userErrors { field message }
+      }
+    }
+    """
+    result = _graphql(query, {
+        "marketId": market_gid,
+        "settings": {"localCurrencies": local_currencies},
+    })
+    data = result.get("data", {}).get("marketCurrencySettingsUpdate", {})
+    errors = data.get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"marketCurrencySettingsUpdate errors: {errors}")
+    logger.info("[shopify] Updated currency settings for market %s: local_currencies=%s",
+                market_gid, local_currencies)
+    return data.get("market", {})
+
+
+def remove_market_regions(market_gid: str, country_codes: list) -> dict:
+    """
+    Remove specific countries from a market's region list.
+    Used to fix the US appearing in both the primary and International markets.
+    country_codes: list of ISO 3166-1 alpha-2 codes, e.g. ['US']
+    Requires 'write_markets' OAuth scope.
+    """
+    # First get the region IDs for the given country codes
+    market = get_market(market_gid)
+    region_gids = []
+    for r in market.get("regions", {}).get("nodes", []):
+        if r.get("code") in country_codes:
+            region_gids.append(r.get("id"))
+
+    if not region_gids:
+        logger.warning("[shopify] No matching regions found for codes %s in market %s",
+                       country_codes, market_gid)
+        return {"removed": 0}
+
+    query = """
+    mutation marketRegionsDelete($marketId: ID!, $regionIds: [ID!]!) {
+      marketRegionsDelete(marketId: $marketId, regionIds: $regionIds) {
+        deletedIds
+        market { id name }
+        userErrors { field message }
+      }
+    }
+    """
+    result = _graphql(query, {"marketId": market_gid, "regionIds": region_gids})
+    data = result.get("data", {}).get("marketRegionsDelete", {})
+    errors = data.get("userErrors", [])
+    if errors:
+        raise RuntimeError(f"marketRegionsDelete errors: {errors}")
+    deleted = data.get("deletedIds", [])
+    logger.info("[shopify] Removed %d region(s) from market %s", len(deleted), market_gid)
+    return {"removed": len(deleted), "deleted_ids": deleted}
 
 
 def audit_markets() -> dict:

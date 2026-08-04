@@ -2,7 +2,7 @@
 push_razorpay_cart_button.py — Push lb-razorpay.js to the live Shopify theme.
 
 Reads env vars:
-  SHOPIFY_ADMIN_TOKEN    — shpat_...
+  SHOPIFY_ADMIN_TOKEN    — Shopify Admin API access token (shpat_... or shpss_...)
   RAZORPAY_BACKEND_URL   — https://lb-razorpay-backend-xxx-uc.a.run.app
   RAZORPAY_KEY_ID        — rzp_live_... (public key ID only)
 
@@ -12,8 +12,6 @@ Usage:
 
 import os
 import sys
-import time
-import threading
 import argparse
 import requests
 
@@ -21,44 +19,18 @@ DOMAIN   = "lngndny.myshopify.com"
 API_VER  = "2026-04"
 BASE_URL = f"https://{DOMAIN}/admin/api/{API_VER}"
 
-CLIENT_ID     = os.environ.get("SHOPIFY_CLIENT_ID", "")
-CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
-_TOKEN_REFRESH_BUFFER = 300
+TOKEN = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
 
-class _TokenCache:
-    def __init__(self):
-        self._lock = threading.Lock()
-        self._token = ""
-        self._expires_at = 0.0
+JS_SOURCE_PATH = os.path.join(os.path.dirname(__file__), "..", "razorpay-backend", "theme", "lb-razorpay.js")
 
-    def get(self):
-        with self._lock:
-            if time.time() >= (self._expires_at - _TOKEN_REFRESH_BUFFER):
-                self._refresh()
-            return self._token
-
-    def _refresh(self):
-        if not CLIENT_ID or not CLIENT_SECRET:
-            raise RuntimeError("SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET must be set")
-        r = requests.post(
-            f"https://{DOMAIN}/admin/oauth/access_token",
-            json={"client_id": CLIENT_ID, "client_secret": CLIENT_SECRET, "grant_type": "client_credentials"},
-            timeout=15,
-        )
-        r.raise_for_status()
-        data = r.json()
-        self._token = data["access_token"]
-        self._expires_at = time.time() + int(data.get("expires_in", 86399))
-
-_token_cache = _TokenCache()
 
 def _headers():
-    return {"X-Shopify-Access-Token": _token_cache.get(), "Content-Type": "application/json"}
-
-JS_SOURCE_PATH = os.path.join(os.path.dirname(__file__), "razorpay_cart_button.js")
+    return {"X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json"}
 
 
 def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_run: bool = False) -> dict:
+    if not TOKEN:
+        raise ValueError("SHOPIFY_ADMIN_TOKEN is not set")
     if not razorpay_backend_url:
         raise ValueError("RAZORPAY_BACKEND_URL is not set")
     if not razorpay_key_id:
@@ -75,46 +47,30 @@ def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_ru
     theme_id = active["id"]
     print(f"  Active theme: {active['name']} (id={theme_id})")
 
-    # 2. Read JS asset from LegendaryBrandingTheme worktree if available,
-    #    otherwise fall back to scripts/razorpay_cart_button.js
-    worktree_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "legendarybrandingtheme", "assets", "lb-razorpay.js"
-    )
-    if os.path.exists(worktree_path):
-        js_path = os.path.realpath(worktree_path)
-    elif os.path.exists(JS_SOURCE_PATH):
-        js_path = JS_SOURCE_PATH
-    else:
-        raise FileNotFoundError(
-            "Cannot find lb-razorpay.js. Expected at ../legendarybrandingtheme/assets/lb-razorpay.js "
-            "or scripts/razorpay_cart_button.js"
-        )
-
+    # 2. Find lb-razorpay.js
+    js_path = os.path.realpath(JS_SOURCE_PATH)
+    if not os.path.exists(js_path):
+        raise FileNotFoundError(f"Cannot find lb-razorpay.js at {js_path}")
     print(f"Step 2: Reading JS from {js_path} ...")
     js_content = open(js_path).read()
     print(f"  {len(js_content)} chars")
 
-    # 3. Push asset
+    # 3. Push JS asset
     asset_key = "assets/lb-razorpay.js"
     print(f"Step 3: Pushing {asset_key} to theme {theme_id} ...")
     if dry_run:
-        print(f"  DRY RUN — would PUT assets/{asset_key} ({len(js_content)} chars)")
+        print(f"  DRY RUN — would PUT {asset_key} ({len(js_content)} chars)")
     else:
         put_url = f"{BASE_URL}/themes/{theme_id}/assets.json"
-        r = requests.put(
-            put_url,
-            headers=_headers(),
-            json={"asset": {"key": asset_key, "value": js_content}},
-            timeout=30
-        )
+        r = requests.put(put_url, headers=_headers(),
+                         json={"asset": {"key": asset_key, "value": js_content}}, timeout=30)
         if r.status_code not in (200, 201):
             raise RuntimeError(f"Asset PUT failed ({r.status_code}): {r.text[:500]}")
-        asset = r.json().get("asset", {})
-        print(f"  Pushed: {asset.get('key')} at {asset.get('updated_at')}")
+        print(f"  Pushed: {r.json()['asset'].get('updated_at')}")
 
     # 4. Fetch cart-summary.liquid, inject real values, push back
     snippet_key = "snippets/cart-summary.liquid"
-    print(f"Step 4: Patching {snippet_key} with real backend URL + key ID ...")
+    print(f"Step 4: Patching {snippet_key} ...")
     get_url = f"{BASE_URL}/themes/{theme_id}/assets.json"
     gr = requests.get(get_url, headers=_headers(), params={"asset[key]": snippet_key}, timeout=15)
     gr.raise_for_status()
@@ -124,20 +80,15 @@ def push_razorpay_button(razorpay_backend_url: str, razorpay_key_id: str, dry_ru
     patched = patched.replace("'RZP_KEY_ID'", f"'{razorpay_key_id}'")
 
     if patched == snippet_content:
-        print("  No placeholders found — snippet may already be patched or placeholders missing.")
+        print("  No placeholders found — already patched or placeholders missing.")
     elif dry_run:
         print(f"  DRY RUN — would PUT {snippet_key} with injected values")
     else:
-        pr = requests.put(
-            get_url,
-            headers=_headers(),
-            json={"asset": {"key": snippet_key, "value": patched}},
-            timeout=30
-        )
+        pr = requests.put(get_url, headers=_headers(),
+                          json={"asset": {"key": snippet_key, "value": patched}}, timeout=30)
         if pr.status_code not in (200, 201):
             raise RuntimeError(f"Snippet PUT failed ({pr.status_code}): {pr.text[:500]}")
-        s_asset = pr.json().get("asset", {})
-        print(f"  Patched: {s_asset.get('key')} at {s_asset.get('updated_at')}")
+        print(f"  Patched: {pr.json()['asset'].get('updated_at')}")
 
     result = {
         "status": "dry_run" if dry_run else "pushed",

@@ -764,12 +764,20 @@ def delete_webhook(webhook_id: int):
 # Abandoned Checkouts
 # ─────────────────────────────────────────────
 
-@router.get("/checkouts/abandoned", summary="List abandoned checkouts")
+@router.get("/checkouts/abandoned", summary="List abandoned checkouts with optional date range")
 def list_abandoned_checkouts(
     limit: int = Query(50, ge=1, le=250),
     since_id: Optional[int] = Query(None),
+    created_at_min: Optional[str] = Query(None, description="ISO 8601, e.g. 2026-06-01T00:00:00Z"),
+    created_at_max: Optional[str] = Query(None, description="ISO 8601, e.g. 2026-06-30T23:59:59Z"),
 ):
     try:
+        if created_at_min or created_at_max:
+            return sh.get_abandoned_checkouts(
+                created_at_min=created_at_min,
+                created_at_max=created_at_max,
+                limit=limit,
+            )
         return sh.list_abandoned_checkouts(limit=limit, since_id=since_id)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
@@ -1071,6 +1079,46 @@ def audit_markets():
 def get_market(market_gid: str):
     try:
         return sh.get_market(market_gid)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/markets/{market_gid:path}/enable", summary="Enable a Shopify market")
+def enable_market(market_gid: str):
+    try:
+        return sh.enable_market(market_gid)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/markets/{market_gid:path}/disable", summary="Disable a Shopify market")
+def disable_market(market_gid: str):
+    try:
+        return sh.disable_market(market_gid)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+class MarketCurrencyRequest(BaseModel):
+    local_currencies: bool = True
+
+
+@router.put("/markets/{market_gid:path}/currency", summary="Toggle local currency display for a market")
+def update_market_currency(market_gid: str, req: MarketCurrencyRequest):
+    try:
+        return sh.update_market_currency(market_gid, local_currencies=req.local_currencies)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+class RemoveRegionsRequest(BaseModel):
+    country_codes: list[str]
+
+
+@router.delete("/markets/{market_gid:path}/regions", summary="Remove countries from a market")
+def remove_market_regions(market_gid: str, req: RemoveRegionsRequest):
+    try:
+        return sh.remove_market_regions(market_gid, req.country_codes)
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
 

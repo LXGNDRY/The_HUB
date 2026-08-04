@@ -35,6 +35,10 @@ from scheduler.jobs import (
     indexnow_new_products_job,
     gmc_title_rotation_job,
     blog_writer_job,
+    compliance_patch_job,
+    product_type_patch_job,
+    product_weight_patch_job,
+    market_health_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -60,7 +64,7 @@ class BotScheduler:
         self._register_jobs()
 
     def _register_jobs(self):
-        """Register all 10 automation jobs."""
+        """Register all automation jobs."""
 
         # Daily 8:00 AM — Billing alert (always runs)
         self.scheduler.add_job(
@@ -250,6 +254,46 @@ class BotScheduler:
             CronTrigger(hour=16, minute=0),
             id="blog_writer_afternoon",
             name="Blog Writer — Afternoon Post (16:00 CT)",
+            replace_existing=True,
+        )
+
+        # ── Compliance Jobs ───────────────────────────────────────────────────
+
+        # Daily 02:00 — Fill missing COO + HS code on all variants (idempotent)
+        self.scheduler.add_job(
+            compliance_patch_job,
+            CronTrigger(hour=2, minute=0),
+            id="nightly_compliance_patch",
+            name="Nightly COO + HS Code Compliance Patch",
+            replace_existing=True,
+        )
+
+        # Daily 02:30 — Standardize product_type to Google Shopping taxonomy (idempotent)
+        self.scheduler.add_job(
+            product_type_patch_job,
+            CronTrigger(hour=2, minute=30),
+            id="nightly_product_type_patch",
+            name="Nightly Product Type Taxonomy Patch",
+            replace_existing=True,
+        )
+
+        # Daily 02:45 — Fill missing variant weights from taxonomy defaults (idempotent)
+        self.scheduler.add_job(
+            product_weight_patch_job,
+            CronTrigger(hour=2, minute=45),
+            id="nightly_product_weight_patch",
+            name="Nightly Product Weight Patch",
+            replace_existing=True,
+        )
+
+        # ── International Markets Health ──────────────────────────────────────
+
+        # Daily 06:45 — Ensure all markets stay enabled + local currencies on
+        self.scheduler.add_job(
+            market_health_job,
+            CronTrigger(hour=6, minute=45),
+            id="market_health_check",
+            name="Market Health Check (international markets + currencies)",
             replace_existing=True,
         )
 

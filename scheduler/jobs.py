@@ -400,12 +400,15 @@ def sheets_refresh_job():
         bm = BillingModule(creds)
 
         # Fetch GA4
+        ga4_countries = {}
         try:
             from modules.analytics import AnalyticsModule
-            am = AnalyticsModule(creds)
+            am = AnalyticsModule()
             ga4_traffic = am.get_traffic_summary()
             ga4_pages = am.get_top_pages()
-        except Exception:
+            ga4_countries = am.get_country_breakdown()
+        except Exception as ga4_err:
+            logger.warning("[sheets_refresh_job] GA4 fetch failed: %s", ga4_err)
             ga4_traffic, ga4_pages = {}, {}
 
         # Fetch GSC
@@ -423,11 +426,14 @@ def sheets_refresh_job():
                 )
                 svc = build("searchconsole", "v1", credentials=gsc_creds, cache_discovery=False)
                 site_url = os.getenv("GSC_SITE_URL", "https://legendary-branding.com")
+                from datetime import date, timedelta
+                gsc_end = date.today() - timedelta(days=3)  # GSC data lags ~3 days
+                gsc_start = gsc_end - timedelta(days=90)
                 gsc_data = svc.searchanalytics().query(
                     siteUrl=site_url,
                     body={
-                        "startDate": "2026-04-22",
-                        "endDate": "2026-05-20",
+                        "startDate": gsc_start.isoformat(),
+                        "endDate": gsc_end.isoformat(),
                         "dimensions": ["query"],
                         "rowLimit": 50,
                     }
@@ -447,7 +453,8 @@ def sheets_refresh_job():
 
         billing_data = bm.get_monthly_spend()
 
-        url = sm.refresh_full_dashboard(ga4_traffic, ga4_pages, gsc_data, mobile_ps, desktop_ps, billing_data)
+        url = sm.refresh_full_dashboard(ga4_traffic, ga4_pages, gsc_data, mobile_ps, desktop_ps, billing_data,
+                                        ga4_countries=ga4_countries)
         send_alert(f"📊 *Sheets Dashboard Refreshed*\n{url}")
         logger.info("[sheets_refresh_job] Done. URL: %s", url)
 
@@ -1012,7 +1019,299 @@ def gmc_title_rotation_job():
 
 
 # ---------------------------------------------------------------------------
-# JOB 18 — Blog Writer  [NO COMPUTE REQUIRED]
+# JOB 18 — Compliance Patch (COO + HS Code)  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def compliance_patch_job():
+    """
+    Nightly sweep: for every product variant missing countryCodeOfOrigin or
+    harmonizedSystemCode, infer both from the product title/type using the
+    shared product_compliance module and write them via inventoryItemUpdate.
+
+    - Never overwrites a value that already exists (safe to run nightly).
+    - Respects the `coo:XX` product tag pattern for per-product COO overrides.
+    - Sends a summary alert only when at least one variant was updated.
+    """
+    logger.info("[compliance_patch_job] Running...")
+    try:
+        import time
+        from modules.shopify import _graphql, update_inventory_item_compliance
+        from modules.product_compliance import infer_hs_code, resolve_coo
+
+        FETCH_QUERY = """
+        query($cursor: String) {
+          products(first: 50, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              title
+              productType
+              tags
+              variants(first: 100) {
+                nodes {
+                  id
+                  inventoryItem {
+                    id
+                    countryCodeOfOrigin
+                    harmonizedSystemCode
+                  }
+                }
+              }
+            }
+          }
+        }
+        """
+
+        updated = 0
+        errors = 0
+        cursor = None
+
+        while True:
+            data = _graphql(FETCH_QUERY, {"cursor": cursor})
+            page = data["products"]
+
+            for product in page["nodes"]:
+                title = product.get("title", "")
+                product_type = (product.get("productType") or "").strip()
+                tags = [t.strip() for t in (product.get("tags") or "").split(",") if t.strip()]
+
+                coo = resolve_coo(tags)
+                hs_code = infer_hs_code(product_type, title)
+
+                for variant in product["variants"]["nodes"]:
+                    inv = variant.get("inventoryItem") or {}
+                    inv_gid = inv.get("id")
+                    if not inv_gid:
+                        continue
+
+                    cur_coo = (inv.get("countryCodeOfOrigin") or "").strip()
+                    cur_hs = (inv.get("harmonizedSystemCode") or "").strip()
+
+                    if cur_coo and cur_hs:
+                        continue  # already complete — skip
+
+                    write_coo = coo if not cur_coo else cur_coo
+                    write_hs = hs_code if not cur_hs else cur_hs
+
+                    result = update_inventory_item_compliance(inv_gid, write_coo, write_hs)
+                    errs = (result.get("data", {})
+                            .get("inventoryItemUpdate", {})
+                            .get("userErrors", []))
+                    if errs:
+                        logger.error("[compliance_patch_job] Error on %s: %s", inv_gid, errs)
+                        errors += 1
+                    else:
+                        updated += 1
+
+                time.sleep(0.1)  # stay well within Shopify GraphQL rate limits
+
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+
+        logger.info("[compliance_patch_job] Done. updated=%d errors=%d", updated, errors)
+        if updated > 0 or errors > 0:
+            send_alert(
+                f"🌐 *Compliance Patch (COO + HS Code)*\n"
+                f"  Variants updated : {updated}\n"
+                f"  Errors           : {errors}"
+            )
+
+    except Exception as e:
+        logger.error("[compliance_patch_job] Failed: %s", e)
+        send_alert(f"❌ compliance_patch_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 19 — Product Type Patch  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def product_type_patch_job():
+    """
+    Nightly sweep: for every product whose productType is blank or not a
+    canonical Google Shopping taxonomy string, infer the correct taxonomy
+    value from the product type + title and write it back via productUpdate.
+
+    - Never overwrites a value that is already a canonical taxonomy string.
+    - Idempotent and safe to run nightly alongside compliance_patch_job.
+    - Sends a summary alert only when at least one product was updated.
+    """
+    logger.info("[product_type_patch_job] Running...")
+    try:
+        import time
+        from modules.shopify import _graphql, update_product_type
+        from modules.product_compliance import resolve_product_type, _CANONICAL_TYPES
+
+        FETCH_QUERY = """
+        query($cursor: String) {
+          products(first: 50, after: $cursor) {
+            pageInfo { hasNextPage endCursor }
+            nodes {
+              id
+              title
+              productType
+              metafield(namespace: "google", key: "google_product_category") { value }
+            }
+          }
+        }
+        """
+
+        updated = 0
+        errors = 0
+        cursor = None
+
+        while True:
+            data = _graphql(FETCH_QUERY, {"cursor": cursor})
+            page = data["products"]
+
+            for product in page["nodes"]:
+                title = product.get("title", "")
+                current_type = (product.get("productType") or "").strip()
+                existing_category = (
+                    (product.get("metafield") or {}).get("value") or ""
+                ).strip()
+
+                # Resolve canonical type (may already be canonical)
+                resolved = resolve_product_type(current_type, title)
+
+                # Determine correct GMC category ID
+                from modules.product_compliance import resolve_gmc_category_id
+                from modules.shopify import update_google_product_category
+                correct_category_id = resolve_gmc_category_id(resolved)
+
+                # Write product_type only if it's non-canonical
+                if current_type not in _CANONICAL_TYPES:
+                    result = update_product_type(product["id"], resolved)
+                    errs = (result.get("data", {})
+                            .get("productUpdate", {})
+                            .get("userErrors", []))
+                    if errs:
+                        logger.error("[product_type_patch_job] productType error on %s: %s", product["id"], errs)
+                        errors += 1
+                    else:
+                        logger.info(
+                            "[product_type_patch_job] productType '%s' → '%s' (%s)",
+                            current_type or "(blank)", resolved, title[:60],
+                        )
+                        updated += 1
+
+                # Write google_product_category metafield if missing or wrong
+                if existing_category != correct_category_id:
+                    numeric_id = int(product["id"].split("/")[-1])
+                    try:
+                        update_google_product_category(numeric_id, correct_category_id)
+                        logger.info(
+                            "[product_type_patch_job] google_product_category '%s' → '%s' (%s)",
+                            existing_category or "(blank)", correct_category_id, title[:60],
+                        )
+                        updated += 1
+                    except Exception as meta_err:
+                        logger.error("[product_type_patch_job] metafield error on %s: %s", product["id"], meta_err)
+                        errors += 1
+
+                time.sleep(0.2)
+
+            if not page["pageInfo"]["hasNextPage"]:
+                break
+            cursor = page["pageInfo"]["endCursor"]
+
+        logger.info("[product_type_patch_job] Done. updated=%d errors=%d", updated, errors)
+        if updated > 0 or errors > 0:
+            send_alert(
+                f"🏷️ *Product Type Patch*\n"
+                f"  Products updated : {updated}\n"
+                f"  Errors           : {errors}"
+            )
+
+    except Exception as e:
+        logger.error("[product_type_patch_job] Failed: %s", e)
+        send_alert(f"❌ product_type_patch_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 20 — Product Weight Patch  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def product_weight_patch_job():
+    """
+    Nightly sweep: for every product variant with no weight set (weight == 0),
+    infer the correct default weight in grams from the product's canonical
+    taxonomy type and write it back via productVariantUpdate.
+
+    - Only writes to variants where weight is 0 or null — never overwrites.
+    - Idempotent and safe to run nightly alongside product_type_patch_job.
+    - Sends a summary alert only when at least one variant was updated.
+    """
+    logger.info("[product_weight_patch_job] Running...")
+    try:
+        import time
+        import requests as _requests
+        from modules.shopify import BASE_URL, _headers, update_variant_weight
+        from modules.product_compliance import resolve_product_type, resolve_product_weight_g
+
+        updated = 0
+        errors = 0
+
+        # REST pagination via Link header
+        url = f"{BASE_URL}/products.json"
+        params: dict | None = {"limit": 250, "status": "any", "fields": "id,title,product_type,variants"}
+
+        while url:
+            resp = _requests.get(url, headers=_headers(), params=params, timeout=30)
+            resp.raise_for_status()
+            products = resp.json().get("products", [])
+            params = None  # only pass on first request; subsequent URLs are fully formed
+
+            for product in products:
+                title = product.get("title", "")
+                product_type = (product.get("product_type") or "").strip()
+                canonical = resolve_product_type(product_type, title)
+                weight_g = resolve_product_weight_g(canonical)
+
+                for variant in product.get("variants", []):
+                    current_weight = variant.get("weight") or 0.0
+                    if float(current_weight) > 0:
+                        continue  # already has a weight — skip
+
+                    variant_id = variant["id"]
+                    try:
+                        update_variant_weight(variant_id, weight_g)
+                        logger.info(
+                            "[product_weight_patch_job] Set weight=%.0fg on variant %s (%s)",
+                            weight_g, variant_id, title[:50],
+                        )
+                        updated += 1
+                    except Exception as ve:
+                        logger.error("[product_weight_patch_job] Error on variant %s: %s", variant_id, ve)
+                        errors += 1
+
+                    time.sleep(0.2)
+
+            # Follow REST pagination Link header
+            link = resp.headers.get("Link", "")
+            next_url = None
+            for part in link.split(","):
+                part = part.strip()
+                if 'rel="next"' in part:
+                    next_url = part.split(";")[0].strip().strip("<>")
+                    break
+            url = next_url
+
+        logger.info("[product_weight_patch_job] Done. updated=%d errors=%d", updated, errors)
+        if updated > 0 or errors > 0:
+            send_alert(
+                f"⚖️ *Product Weight Patch*\n"
+                f"  Variants updated : {updated}\n"
+                f"  Errors           : {errors}"
+            )
+
+    except Exception as e:
+        logger.error("[product_weight_patch_job] Failed: %s", e)
+        send_alert(f"❌ product_weight_patch_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 21 — Blog Writer  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
 
 def blog_writer_job():
@@ -1048,3 +1347,81 @@ def blog_writer_job():
     except Exception as e:
         logger.error("[blog_writer_job] Failed: %s", e)
         send_alert(f"❌ blog_writer_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 22 — Market Health Check  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def market_health_job():
+    """
+    Daily check that all Shopify markets are correctly configured for
+    international sales. Automatically re-enables markets that drift to
+    disabled, enables local currency display, and alerts on any remaining
+    issues that require manual intervention (e.g. missing price list).
+
+    Idempotent — safe to run daily. Uses safe_execute() for all writes.
+    """
+    logger.info("[market_health_job] Running...")
+
+    # Known market GIDs — these are stable identifiers in the Shopify account.
+    INDIA_MARKET_GID = "gid://shopify/Market/56012275865"
+    INTERNATIONAL_MARKET_GID = "gid://shopify/Market/1614020761"
+
+    try:
+        from modules.shopify import (
+            list_markets,
+            enable_market,
+            update_market_currency,
+        )
+
+        markets_data = list_markets()
+        markets = {m["name"]: m for m in markets_data["markets"]}
+
+        issues = []
+        fixed = []
+
+        # ── Ensure India market is enabled ──
+        india = markets.get("India")
+        if india and not india["enabled"]:
+            safe_execute(
+                "enable_market:India",
+                enable_market,
+                INDIA_MARKET_GID,
+            )
+            fixed.append("✅ Re-enabled India market")
+            logger.info("[market_health_job] Re-enabled India market.")
+
+        # ── Ensure International market has local currencies on ──
+        intl = markets.get("International")
+        if intl:
+            if not intl["currency"].get("local_currencies_enabled"):
+                safe_execute(
+                    "update_market_currency:International",
+                    update_market_currency,
+                    INTERNATIONAL_MARKET_GID,
+                    True,
+                )
+                fixed.append("✅ Enabled local currencies on International market")
+                logger.info("[market_health_job] Enabled local currencies on International market.")
+
+            if not intl["enabled"]:
+                issues.append("⚠️ International market is disabled — customers outside US cannot shop")
+
+        # ── Check all enabled markets have a web presence ──
+        for m in markets_data["markets"]:
+            if not m["enabled"]:
+                continue
+            wp = m["web_presence"]
+            if not wp.get("domain") and not wp.get("subfolder"):
+                issues.append(f"⚠️ Market '{m['name']}' has no web presence (domain/subfolder)")
+
+        if fixed or issues:
+            lines = fixed + issues
+            send_alert("🌍 *Market Health Check*\n" + "\n".join(lines))
+
+        logger.info("[market_health_job] Done. fixed=%d issues=%d", len(fixed), len(issues))
+
+    except Exception as e:
+        logger.error("[market_health_job] Failed: %s", e)
+        send_alert(f"❌ market_health_job failed: {e}")
