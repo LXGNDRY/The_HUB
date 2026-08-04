@@ -45,6 +45,7 @@ app = Flask(__name__)
 # Allow requests from the Legendary Branding storefront only
 CORS(app, origins=[
     "https://legendary-branding.com",
+    "https://www.legendary-branding.com",
     "https://lngndny.myshopify.com"
 ])
 
@@ -506,6 +507,14 @@ def create_order():
     # cart_currency is "INR" for India market customers, "USD" otherwise.
     cart_amount_base = cart_amount_subunits / 100.0
 
+    # Razorpay is India-only — only INR and USD (converted to INR) are supported.
+    # Reject other currencies explicitly rather than silently applying the wrong
+    # exchange rate (e.g. treating GBP as USD overcharges by ~20%).
+    SUPPORTED_CURRENCIES = {"INR", "USD"}
+    if cart_currency not in SUPPORTED_CURRENCIES:
+        log.warning(f"Unsupported currency {cart_currency!r} rejected at /create-order")
+        return jsonify({"error": "Unsupported currency for India checkout. Only INR and USD are accepted."}), 400
+
     # Convert to INR paise for Razorpay
     if cart_currency == "INR":
         fx_rate = get_usd_to_inr()
@@ -843,12 +852,22 @@ def webhook():
 
     elif event_type == "payment.failed":
         payment = payload.get("payment", {}).get("entity", {})
-        payment_id = payment.get("id")
-        error_desc = payment.get("error_description", "unknown")
-        log.warning(f"Payment failed: {payment_id} | reason={error_desc}")
+        payment_id    = payment.get("id")
+        error_desc    = payment.get("error_description", "unknown")
+        error_code    = payment.get("error_code", "")
+        error_source  = payment.get("error_source", "")
+        error_step    = payment.get("error_step", "")
+        amount_inr    = payment.get("amount", 0) / 100.0
+        method        = payment.get("method", "")
         customer_email = payment.get("email", "")
         notes = payment.get("notes", {}) or {}
         checkout_url = notes.get("abandoned_checkout_url", "")
+        log.warning(
+            f"Payment failed: {payment_id} | email={customer_email} | "
+            f"amount=₹{amount_inr:.2f} | method={method} | "
+            f"code={error_code} | source={error_source} | step={error_step} | "
+            f"reason={error_desc}"
+        )
         if customer_email and KLAVIYO_API_KEY:
             def _fire_klaviyo():
                 try:

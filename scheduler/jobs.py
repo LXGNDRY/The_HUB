@@ -462,37 +462,48 @@ def sheets_refresh_job():
 
 def error_log_monitor_job():
     """
-    Checks Cloud Run error logs every 6 hours.
-    Sends an alert if error rate spikes above threshold.
+    Checks Cloud Run error logs every 6 hours for both gcp-bot and the
+    Razorpay payment backend (lb-razorpay-backend).
+    Sends an alert if error rate spikes above threshold for either service.
     """
-    ERROR_RATE_THRESHOLD = float(os.getenv("ERROR_RATE_THRESHOLD", "5.0"))  # errors/hour
+    ERROR_RATE_THRESHOLD  = float(os.getenv("ERROR_RATE_THRESHOLD", "5.0"))   # errors/hour
+    PAYMENT_RATE_THRESHOLD = float(os.getenv("PAYMENT_ERROR_RATE_THRESHOLD", "2.0"))  # lower bar for payments
     logger.info("[error_log_monitor_job] Running...")
-    try:
-        from modules.cloud_logging import CloudLoggingModule
-        from auth.credentials import get_credentials
-        mod = CloudLoggingModule(get_credentials())
-        summary = mod.get_error_summary(hours_back=6)
 
-        error_rate = summary.get("error_rate_per_hour", 0)
-        error_count = summary.get("error_count", 0)
+    services = [
+        ("gcp-bot",               ERROR_RATE_THRESHOLD),
+        ("lb-razorpay-backend",   PAYMENT_RATE_THRESHOLD),
+    ]
 
-        if error_rate >= ERROR_RATE_THRESHOLD:
-            top_errors = summary.get("top_errors", [])[:3]
-            error_lines = "\n".join([
-                f"  • [{e['count']}x] {e['message'][:80]}" for e in top_errors
-            ])
-            send_alert(
-                f"🚨 *Error Spike Detected* — {error_rate:.1f} errors/hour\n"
-                f"Last 6h count : {error_count}\n"
-                f"Top errors:\n{error_lines}"
-            )
-            logger.warning("[error_log_monitor_job] Spike detected: %.1f errors/hr", error_rate)
-        else:
-            logger.info("[error_log_monitor_job] OK. Error rate: %.2f/hr", error_rate)
+    for service_name, threshold in services:
+        try:
+            from modules.cloud_logging import CloudLoggingModule
+            from auth.credentials import get_credentials
+            import os as _os
+            _os.environ["CLOUD_RUN_SERVICE_NAME"] = service_name
+            mod = CloudLoggingModule(get_credentials())
+            summary = mod.get_error_summary(hours_back=6)
 
-    except Exception as e:
-        logger.error("[error_log_monitor_job] Failed: %s", e)
-        send_alert(f"❌ error_log_monitor_job failed: {e}")
+            error_rate  = summary.get("error_rate_per_hour", 0)
+            error_count = summary.get("error_count", 0)
+
+            if error_rate >= threshold:
+                top_errors = summary.get("top_errors", [])[:3]
+                error_lines = "\n".join([
+                    f"  • [{e['count']}x] {e['message'][:80]}" for e in top_errors
+                ])
+                send_alert(
+                    f"🚨 *Error Spike Detected* (`{service_name}`) — {error_rate:.1f} errors/hour\n"
+                    f"Last 6h count : {error_count}\n"
+                    f"Top errors:\n{error_lines}"
+                )
+                logger.warning("[error_log_monitor_job] %s spike: %.1f errors/hr", service_name, error_rate)
+            else:
+                logger.info("[error_log_monitor_job] %s OK. Error rate: %.2f/hr", service_name, error_rate)
+
+        except Exception as e:
+            logger.error("[error_log_monitor_job] %s failed: %s", service_name, e)
+            send_alert(f"❌ error_log_monitor_job ({service_name}) failed: {e}")
 
 
 # ---------------------------------------------------------------------------
