@@ -5,10 +5,12 @@ Receives real-time event payloads from Shopify and dispatches them to
 automation handlers. All requests are HMAC-verified using SHOPIFY_WEBHOOK_SECRET.
 
 Registered topics and their handlers:
-  products/create  → on_product_created()
-  products/update  → on_product_updated()  (only acts when status goes active)
-  orders/paid      → on_order_paid()
-  checkouts/create → on_checkout_created()
+  products/create   → on_product_created()
+  products/update   → on_product_updated()  (only acts when status goes active)
+  orders/paid       → on_order_paid()
+  orders/fulfilled  → on_order_fulfilled()  (shipping confirmation flow)
+  checkouts/create  → on_checkout_event()   (fires Klaviyo if email present)
+  checkouts/update  → on_checkout_event()   (fires Klaviyo when email captured)
 
 Route is mounted WITHOUT the X-API-Key guard (Shopify signs with HMAC instead).
 Mount in api/main.py:
@@ -202,21 +204,27 @@ def _handle_order_paid(payload: dict):
 
 
 # ---------------------------------------------------------------------------
-# Checkout handler
+# Checkout handler (shared by checkouts/create and checkouts/update)
 # ---------------------------------------------------------------------------
 
-def _handle_checkout_created(payload: dict):
+def _handle_checkout_event(payload: dict, topic: str = "checkouts/create"):
     """
-    Called when a checkout is created (potential abandoned cart).
-    Fires a Klaviyo 'Started Checkout' event so the abandoned bag flow
-    can trigger reliably without relying solely on native integration.
+    Called when a checkout is created or updated.
+
+    checkouts/create fires immediately on checkout start — email is absent for
+    new customers at this point. checkouts/update fires when the customer fills
+    in their email on the information step, which is when we first have a profile
+    to enroll in the abandoned bag flow.
+
+    Fires a Klaviyo 'Checkout Started' event (metric YdsnAF) whenever email is
+    present. Klaviyo deduplicates rapid re-fires via the flow trigger window.
     """
     checkout_id = payload.get("id")
     email = payload.get("email", "")
     total_price = payload.get("total_price", "0.00")
     line_items = payload.get("line_items", [])
 
-    logger.info("[webhooks] checkouts/create — id=%s email=%s", checkout_id, email)
+    logger.info("[webhooks] %s — id=%s email=%s", topic, checkout_id, email)
 
     if not email:
         logger.debug("[webhooks] Checkout %s has no email yet — skipping Klaviyo event.", checkout_id)
@@ -248,7 +256,53 @@ def _handle_checkout_created(payload: dict):
         )
         logger.info("[webhooks] Klaviyo 'Checkout Started' event fired for %s", email)
     except Exception as e:
-        logger.error("[webhooks] Klaviyo Started Checkout event failed for checkout %s: %s", checkout_id, e)
+        logger.error("[webhooks] Klaviyo Checkout Started event failed for checkout %s: %s", checkout_id, e)
+
+
+# ---------------------------------------------------------------------------
+# Order fulfilled handler
+# ---------------------------------------------------------------------------
+
+def _handle_order_fulfilled(payload: dict):
+    """
+    Called when an order is fulfilled. Fires a Klaviyo 'Fulfilled Order' event
+    to trigger the Shipping Confirmation flow reliably, bridging any gap in the
+    native Shopify→Klaviyo fulfillment integration.
+    """
+    order_id = payload.get("id")
+    email = payload.get("email", "")
+    order_number = payload.get("order_number", "")
+    fulfillments = payload.get("fulfillments", [])
+
+    tracking_number = ""
+    tracking_url = ""
+    if fulfillments:
+        latest = fulfillments[-1]
+        tracking_number = latest.get("tracking_number", "") or ""
+        tracking_url = latest.get("tracking_url", "") or ""
+
+    logger.info("[webhooks] orders/fulfilled — order=%s email=%s", order_number, email)
+
+    if not email:
+        logger.warning("[webhooks] Order %s fulfilled but has no email — skipping Klaviyo event.", order_id)
+        return
+
+    try:
+        from modules.klaviyo import KlaviyoModule
+        klv = KlaviyoModule()
+        klv.create_event(
+            event_name="Fulfilled Order",
+            email=email,
+            properties={
+                "order_id": order_id,
+                "order_number": order_number,
+                "tracking_number": tracking_number,
+                "tracking_url": tracking_url,
+            },
+        )
+        logger.info("[webhooks] Klaviyo 'Fulfilled Order' event fired for %s", email)
+    except Exception as e:
+        logger.error("[webhooks] Klaviyo Fulfilled Order event failed for order %s: %s", order_id, e)
 
 
 # ---------------------------------------------------------------------------
@@ -291,8 +345,10 @@ async def shopify_webhook(
         _run_async(_handle_product_updated, payload)
     elif topic == "orders/paid":
         _run_async(_handle_order_paid, payload)
-    elif topic == "checkouts/create":
-        _run_async(_handle_checkout_created, payload)
+    elif topic == "orders/fulfilled":
+        _run_async(_handle_order_fulfilled, payload)
+    elif topic in ("checkouts/create", "checkouts/update"):
+        _run_async(_handle_checkout_event, payload, topic)
     else:
         logger.debug("[webhooks] Unhandled topic: %s — acknowledged", topic)
 
