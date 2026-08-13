@@ -126,6 +126,10 @@ APScheduler runs as a background thread in the same Cloud Run container.
 | `blog_writer_morning` | Daily 08:00 CT | Generate + publish one SEO blog post to Shopify |
 | `blog_writer_midday` | Daily 12:00 CT | Generate + publish one SEO blog post to Shopify |
 | `blog_writer_afternoon` | Daily 16:00 CT | Generate + publish one SEO blog post to Shopify |
+| `nightly_compliance_patch` | Daily 02:00 CT | Fill missing COO + HS code on all variants (idempotent) |
+| `nightly_product_type_patch` | Daily 02:30 CT | Standardize product_type to Google Shopping taxonomy (idempotent) |
+| `nightly_product_weight_patch` | Daily 02:45 CT | Fill missing variant weights from taxonomy defaults (idempotent) |
+| `market_health_check` | Daily 06:45 CT | Ensure international markets stay enabled + local currencies active |
 
 Compute-dependent jobs (`vm_health_pulse`, `nightly_idle_shutdown`, `weekly_snapshot_cleanup`)
 self-check API availability at runtime and skip gracefully — do not remove them if Compute

@@ -47,21 +47,16 @@ class SubmitProductsRequest(BaseModel):
 
 
 # ------------------------------------------------------------------
-# Module factory (singleton per request to reuse quota counter)
+# Module factory — new instance per request so credentials stay fresh
 # ------------------------------------------------------------------
 
-_module_instance = None
-
 def _get_module():
-    global _module_instance
-    if _module_instance is None:
-        try:
-            from modules.indexing import IndexingModule
-            _module_instance = IndexingModule(get_credentials())
-        except Exception as e:
-            logger.error("[indexing router] Module init failed: %s", e)
-            raise HTTPException(status_code=500, detail=str(e))
-    return _module_instance
+    try:
+        from modules.indexing import IndexingModule
+        return IndexingModule(get_credentials())
+    except Exception as e:
+        logger.error("[indexing router] Module init failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ------------------------------------------------------------------
