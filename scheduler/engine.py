@@ -39,6 +39,8 @@ from scheduler.jobs import (
     product_type_patch_job,
     product_weight_patch_job,
     market_health_job,
+    gmc_auto_fix_job,
+    gmc_shipping_sync_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -294,6 +296,26 @@ class BotScheduler:
             CronTrigger(hour=6, minute=45),
             id="market_health_check",
             name="Market Health Check (international markets + currencies)",
+            replace_existing=True,
+        )
+
+        # ── GMC Autonomous Fixes ──────────────────────────────────────────────
+
+        # Daily 11:00 — Auto-fix disapprovals + apply attribute rules (after 10:00 check)
+        self.scheduler.add_job(
+            gmc_auto_fix_job,
+            CronTrigger(hour=11, minute=0),
+            id="gmc_auto_fix",
+            name="GMC Auto-Fix (disapprovals + attribute rules)",
+            replace_existing=True,
+        )
+
+        # Wednesday 08:30 — Auto-sync Shopify shipping → GMC (after 08:00 drift check)
+        self.scheduler.add_job(
+            gmc_shipping_sync_job,
+            CronTrigger(day_of_week="wed", hour=8, minute=30),
+            id="gmc_shipping_sync",
+            name="GMC Shipping Sync (Shopify → GMC)",
             replace_existing=True,
         )
 
