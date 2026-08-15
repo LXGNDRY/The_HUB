@@ -1425,3 +1425,99 @@ def market_health_job():
     except Exception as e:
         logger.error("[market_health_job] Failed: %s", e)
         send_alert(f"❌ market_health_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 23 — GMC Auto-Fix  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def gmc_auto_fix_job():
+    """
+    Daily autonomous GMC data quality fix — runs after gmc_disapproval_check (10:00 CT).
+    Steps:
+      1. Patch brand + identifierExists=False on all disapproved products
+      2. Apply standard apparel attribute rules to all active datafeeds
+    Uses the shared helpers in api/routers/gmc.py so logic stays in one place.
+    Requires: GMC_MERCHANT_ID, GCP_SA_KEY_JSON (or ADC).
+    """
+    import os
+    logger.info("[gmc_auto_fix_job] Running...")
+
+    merchant_id = os.getenv("GMC_MERCHANT_ID", "")
+    if not merchant_id:
+        logger.warning("[gmc_auto_fix_job] GMC_MERCHANT_ID not set — skipping.")
+        return
+
+    try:
+        from googleapiclient.discovery import build
+        from auth.credentials import get_credentials
+        from api.routers.gmc import _do_fix_disapprovals, _do_apply_attribute_rules
+
+        service = build("content", "v2.1", credentials=get_credentials(), cache_discovery=False)
+
+        fix_result = _do_fix_disapprovals(merchant_id, service)
+        rules_result = _do_apply_attribute_rules(merchant_id, service)
+
+        send_alert(
+            f"🔧 *GMC Auto-Fix Complete*\n"
+            f"  Disapprovals patched : {fix_result.get('patched', 0)}"
+            f" ({len(fix_result.get('errors', []))} errors)\n"
+            f"  Feeds updated        : {rules_result.get('updated_feeds', 0)}"
+            f" ({len(rules_result.get('errors', []))} errors)"
+        )
+        logger.info(
+            "[gmc_auto_fix_job] Done. patched=%d feeds_updated=%d",
+            fix_result.get("patched", 0), rules_result.get("updated_feeds", 0),
+        )
+
+    except Exception as e:
+        logger.error("[gmc_auto_fix_job] Failed: %s", e)
+        send_alert(f"❌ gmc_auto_fix_job failed: {e}")
+
+
+# ---------------------------------------------------------------------------
+# JOB 24 — GMC Shipping Sync  [NO COMPUTE REQUIRED]
+# ---------------------------------------------------------------------------
+
+def gmc_shipping_sync_job():
+    """
+    Wednesday autonomous shipping sync — runs 30 min after gmc_shipping_drift_check (08:00 CT).
+    Pushes any Shopify shipping countries missing from GMC into GMC shipping settings.
+    Uses the shared helper in api/routers/gmc.py so logic stays in one place.
+    Requires: GMC_MERCHANT_ID, GCP_SA_KEY_JSON (or ADC), SHOPIFY_ADMIN_TOKEN.
+    """
+    import os
+    logger.info("[gmc_shipping_sync_job] Running...")
+
+    merchant_id = os.getenv("GMC_MERCHANT_ID", "")
+    if not merchant_id:
+        logger.warning("[gmc_shipping_sync_job] GMC_MERCHANT_ID not set — skipping.")
+        return
+
+    try:
+        from googleapiclient.discovery import build
+        from auth.credentials import get_credentials
+        from api.routers.gmc import _do_sync_shipping
+
+        service = build("content", "v2.1", credentials=get_credentials(), cache_discovery=False)
+        result = _do_sync_shipping(merchant_id, service)
+
+        if result.get("in_sync"):
+            logger.info("[gmc_shipping_sync_job] Already in sync. %d countries matched.", result.get("matched", 0))
+        else:
+            send_alert(
+                f"🚚 *GMC Shipping Sync Complete*\n"
+                f"  Added        : {', '.join(result.get('added', [])) or 'none'}\n"
+                f"  Conflicts fixed : {', '.join(result.get('conflicts_fixed', [])) or 'none'}\n"
+                f"  Still missing   : {', '.join(result.get('still_missing', [])) or 'none'}"
+            )
+        logger.info(
+            "[gmc_shipping_sync_job] Done. added=%d conflicts_fixed=%d still_missing=%d",
+            len(result.get("added", [])),
+            len(result.get("conflicts_fixed", [])),
+            len(result.get("still_missing", [])),
+        )
+
+    except Exception as e:
+        logger.error("[gmc_shipping_sync_job] Failed: %s", e)
+        send_alert(f"❌ gmc_shipping_sync_job failed: {e}")
