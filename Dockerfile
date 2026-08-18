@@ -1,24 +1,23 @@
-# ── Stage 1: Build ──
-FROM python:3.12-slim AS builder
+# GCP Bot — Cloud Run Dockerfile
+FROM python:3.11-slim
 
+# Set working directory
 WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
 COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
-
-# ── Stage 2: Runtime ──
-FROM python:3.12-slim
-
-WORKDIR /app
-
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-ENV PATH=/root/.local/bin:$PATH
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY . .
 
-# Cloud Run assigns PORT env var (default 8080)
+# Cloud Run sets PORT env variable (default 8080)
 ENV PORT=8080
-EXPOSE 8080
 
-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 2
+# Run uvicorn on the PORT provided by Cloud Run
+CMD uvicorn api.main:app --host 0.0.0.0 --port $PORT

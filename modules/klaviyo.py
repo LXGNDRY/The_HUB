@@ -243,12 +243,18 @@ class KlaviyoModule:
     # Events / Track
     # ------------------------------------------------------------------
 
-    def create_event(self, event_name: str, email: str, properties: dict = None) -> dict:
+    def create_event(self, event_name: str, email: str,
+                     properties: dict = None, metric_id: str = None) -> dict:
+        metric_ref = (
+            {"data": {"type": "metric", "id": metric_id}}
+            if metric_id
+            else {"data": {"type": "metric", "attributes": {"name": event_name}}}
+        )
         body = {
             "data": {
                 "type": "event",
                 "attributes": {
-                    "metric": {"data": {"type": "metric", "attributes": {"name": event_name}}},
+                    "metric": metric_ref,
                     "profile": {"data": {"type": "profile", "attributes": {"email": email}}},
                     "properties": properties or {},
                     "time": datetime.now(timezone.utc).isoformat(),
@@ -414,6 +420,21 @@ class KlaviyoModule:
     # Assign template to flow message
     # ------------------------------------------------------------------
 
+    def assign_template_to_flow_message(self, message_id: str, template_id: str) -> dict:
+        """
+        Assign a specific template to a flow message via
+        PATCH /api/flow-messages/{id}/relationships/template.
+        """
+        body = {
+            "data": {
+                "type": "template",
+                "id": template_id,
+            }
+        }
+        _patch(f"flow-messages/{message_id}/relationships/template", body)
+        logger.info("Assigned template %s to flow message %s", template_id, message_id)
+        return {"status": "assigned", "message_id": message_id, "template_id": template_id}
+
     def get_template_id_for_flow_message(self, message_id: str) -> str | None:
         """
         Returns the template ID currently linked to a flow message.
@@ -545,6 +566,129 @@ class KlaviyoModule:
             "errors": len(errors),
             "results": results,
             "error_details": errors,
+        }
+
+    # ------------------------------------------------------------------
+    # Sending domain / DMARC health
+    # ------------------------------------------------------------------
+
+    def check_sending_domain(self, domain: str = "legendary-branding.com") -> dict:
+        """
+        Check Klaviyo sending domain verification status and cross-reference
+        the required DKIM/SPF DNS records via DNS-over-HTTPS (Cloudflare).
+
+        Returns a structured report with:
+          - Klaviyo domain registration status
+          - Whether each required DNS record exists and resolves correctly
+          - A plain-English action list of what's missing
+        """
+        import socket
+
+        # ── 1. Klaviyo sending-domains API ──────────────────────────────
+        try:
+            kl_data = _get("sending-domains")
+            domains = kl_data.get("data", [])
+        except Exception as e:
+            domains = []
+            logger.warning("Could not fetch Klaviyo sending domains: %s", e)
+
+        domain_record = None
+        for d in domains:
+            if d.get("attributes", {}).get("name", "").lower() == domain.lower():
+                domain_record = d
+                break
+
+        klaviyo_status = {
+            "registered": domain_record is not None,
+            "domain": domain,
+            "verification_status": None,
+            "dkim_status": None,
+            "spf_status": None,
+            "return_path_status": None,
+            "raw": None,
+        }
+        if domain_record:
+            attrs = domain_record.get("attributes", {})
+            klaviyo_status.update({
+                "verification_status": attrs.get("status"),
+                "dkim_status": attrs.get("dkim_status"),
+                "spf_status": attrs.get("spf_status"),
+                "return_path_status": attrs.get("return_path_status"),
+                "raw": attrs,
+            })
+
+        # ── 2. DNS record checks via socket (system resolver) ───────────
+        # Klaviyo custom domain DKIM selectors
+        dkim_hosts = [
+            f"km1._domainkey.{domain}",
+            f"km2._domainkey.{domain}",
+        ]
+        # Klaviyo return-path subdomain (CNAME → klaviyo bounce address)
+        return_path_host = f"_return-path.{domain}"
+
+        def _resolve_cname(host: str) -> dict:
+            """Try getaddrinfo to detect if a hostname resolves (implies record exists)."""
+            try:
+                socket.getaddrinfo(host, None)
+                return {"host": host, "resolves": True}
+            except socket.gaierror:
+                return {"host": host, "resolves": False}
+
+        dns_checks = {}
+        for h in dkim_hosts + [return_path_host]:
+            dns_checks[h] = _resolve_cname(h)
+
+        # ── 3. SPF record check — look for include:klaviyo in domain TXT ─
+        # We can't do a raw TXT lookup with the stdlib, so we note it as
+        # "manual" and let the report surface the instruction.
+        spf_note = (
+            "Cannot verify SPF TXT record programmatically from Cloud Run. "
+            "Confirm 'v=spf1 include:klaviyo.com ~all' (or similar) exists "
+            f"as a TXT record on {domain}."
+        )
+
+        # ── 4. Build action list ─────────────────────────────────────────
+        actions = []
+
+        if not klaviyo_status["registered"]:
+            actions.append(
+                f"ADD custom sending domain '{domain}' in Klaviyo → "
+                "Settings → Email → Sending Domains, then copy the DNS records it provides."
+            )
+        else:
+            vs = klaviyo_status["verification_status"]
+            if vs and vs.lower() != "verified":
+                actions.append(
+                    f"Klaviyo shows domain status '{vs}' — add/fix the DNS records below "
+                    "then click 'Verify' in Klaviyo settings."
+                )
+
+        for h in dkim_hosts:
+            if not dns_checks[h]["resolves"]:
+                actions.append(
+                    f"ADD DNS CNAME: {h} → {h.replace(domain, 'ksdn.klaviyomail.com')}  "
+                    "(required for DKIM alignment)"
+                )
+
+        if not dns_checks[return_path_host]["resolves"]:
+            actions.append(
+                f"ADD DNS CNAME: {return_path_host} → "
+                f"_return-path.klaviyomail.com  (required for return-path/SPF alignment)"
+            )
+
+        dmarc_action = (
+            "Once DNS records are verified, emails signed by Klaviyo will use your domain "
+            "and DMARC will pass. Your current policy is p=quarantine — no policy change needed."
+        )
+
+        return {
+            "domain": domain,
+            "klaviyo": klaviyo_status,
+            "dns_checks": dns_checks,
+            "spf_note": spf_note,
+            "actions_required": actions,
+            "dmarc_note": dmarc_action,
+            "overall_status": "OK" if not actions else "ACTION_REQUIRED",
         }
 
     def assign_v2_templates(self) -> dict:

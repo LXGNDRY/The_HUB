@@ -306,6 +306,80 @@ class GeminiModule:
         logger.info("[gemini] Generating blog outline for: %s", topic)
         return self.generate(prompt, temperature=0.7)
 
+    def generate_blog_post(self, topic: str, target_keywords: list[str] = None) -> dict:
+        """
+        Generate a full SEO blog post for Legendary Branding's Shopify store.
+
+        Args:
+            topic:           Blog post topic (e.g. "How to Style a Heavyweight Hoodie")
+            target_keywords: SEO keywords to weave in naturally.
+
+        Returns:
+            {
+                "title": str,            # H1 / article title
+                "body_html": str,        # Full HTML body (1200-1800 words), Shopify-ready
+                "tags": str,             # Comma-separated SEO tags
+                "meta_title": str,       # ≤60 chars
+                "meta_description": str  # ≤160 chars
+            }
+        """
+        kw_str = ", ".join(target_keywords) if target_keywords else topic
+        prompt = (
+            f"You are an SEO content writer for Legendary Branding, a premium streetwear brand.\n"
+            f"Write a complete, publish-ready blog article for their Shopify store.\n"
+            f"\n"
+            f"Topic: {topic}\n"
+            f"Primary SEO keywords: {kw_str}\n"
+            f"\n"
+            f"REQUIRED HTML STRUCTURE for body_html (follow this exactly):\n"
+            f"\n"
+            f"<h3>[Article Title as first heading]</h3>\n"
+            f"<p>[Intro paragraph — hook the reader, weave in all 3 keywords using <strong>keyword</strong> tags, ~150 words]</p>\n"
+            f"<p>[Second intro paragraph — expand the theme, continue bolding keywords naturally, ~100 words]</p>\n"
+            f"\n"
+            f"Then 4-5 numbered sections, each following this pattern:\n"
+            f"<h3>[Number]. [Section Title]: [Subtitle]</h3>\n"
+            f"<p>[Section intro paragraph with keywords bolded using <strong>]</p>\n"
+            f"<ul>\n"
+            f"<li><strong>[Item Label]:</strong> [Description with keywords bolded]</li>\n"
+            f"... (3-4 list items per section)\n"
+            f"</ul>\n"
+            f"<p><strong>Styling Tip:</strong> [Practical tip that reinforces keywords naturally]</p>\n"
+            f"\n"
+            f"Close with:\n"
+            f"<p>[Closing CTA paragraph — summarize value, bold keywords, include: <a href=\"https://legendary-branding.com\">legendary-branding.com</a>]</p>\n"
+            f"\n"
+            f"HTML RULES:\n"
+            f"- Use ONLY <h3>, <p>, <ul>, <li>, <strong>, <a> tags — nothing else\n"
+            f"- Bold every keyword occurrence with <strong>keyword</strong> (aim for 2-3x per section)\n"
+            f"- NO <html>, <head>, <body>, <h1>, <h2> tags\n"
+            f"- Tone: bold, authentic, knowledgeable — premium streetwear culture\n"
+            f"- Total length: 1200-1800 words\n"
+            f"\n"
+            f"- title: compelling headline, under 65 chars, include primary keyword (plain text, no HTML)\n"
+            f"- tags: 6-8 comma-separated SEO tags (no #)\n"
+            f"- meta_title: ≤60 chars, primary keyword + 'Legendary Branding'\n"
+            f"- meta_description: 150-160 chars, CTA verb + primary keyword\n"
+            f"\n"
+            f"Respond ONLY as valid JSON with exactly these 5 keys: title, body_html, tags, meta_title, meta_description"
+        )
+        logger.info("[gemini] Generating blog post for: %s", topic)
+        raw = self.generate(prompt, temperature=0.75, max_tokens=4096)
+        try:
+            import re as _re
+            cleaned = _re.sub(r"^```(?:json)?\s*", "", raw.strip(), flags=_re.IGNORECASE)
+            cleaned = _re.sub(r"\s*```$", "", cleaned.strip())
+            return json.loads(cleaned)
+        except Exception:
+            logger.warning("[gemini] Blog post JSON parse failed, returning raw content")
+            return {
+                "title": topic,
+                "body_html": f"<p>{raw}</p>",
+                "tags": kw_str,
+                "meta_title": topic[:60],
+                "meta_description": topic[:160],
+            }
+
     def generate_daily_quote(self, theme: str = "motivation", brand_voice: str = "streetwear") -> str:
         """
         Generate a short inspirational/brand quote for daily social posting.

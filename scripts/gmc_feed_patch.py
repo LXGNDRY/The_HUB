@@ -45,13 +45,13 @@ if SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET:
     )
     token_resp.raise_for_status()
     SHOPIFY_TOKEN   = token_resp.json()["access_token"]
-    print("  Token acquired.")
 elif SHOPIFY_ADMIN_TOKEN:
     print("Using SHOPIFY_ADMIN_TOKEN from env.")
     SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
 else:
     raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 SHOPIFY_HEADERS = {"X-Shopify-Access-Token": SHOPIFY_TOKEN}
+print("  Token acquired.")
 
 creds = service_account.Credentials.from_service_account_info(
     json.loads(SA_KEY_JSON),

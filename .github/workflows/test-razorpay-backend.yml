@@ -1,0 +1,67 @@
+# One-shot diagnostic — checks the live lb-razorpay-backend service.
+# Run manually via Actions → "Test Razorpay Backend" → Run workflow.
+# Delete this file once the integration is confirmed working.
+
+name: 🧪 Test Razorpay Backend
+
+on:
+  workflow_dispatch:
+
+env:
+  PROJECT_ID: idx-lngndny
+  SERVICE_URL: https://lb-razorpay-backend-exy37drh4q-uc.a.run.app
+
+jobs:
+  test:
+    name: Probe live service + pull logs
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ env.PROJECT_ID }}
+
+      # ── 1. Health check ──────────────────────────────────────────────────
+      - name: Health check
+        run: |
+          echo "=== GET /health ==="
+          curl -sf "$SERVICE_URL/health" | python3 -m json.tool
+          echo ""
+
+      # ── 2. POST /create-order with a minimal payload ─────────────────────
+      - name: Test /create-order
+        run: |
+          echo "=== POST /create-order ==="
+          curl -s -X POST "$SERVICE_URL/create-order" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "amount": 5000,
+              "currency": "USD",
+              "customer_email": "test@legendary-branding.com",
+              "customer_name": "Test User",
+              "cart_items": [{"variant_id": "123456789", "quantity": 1, "price": 5000}],
+              "shipping_address": {
+                "first_name": "Test",
+                "last_name": "User",
+                "address1": "123 Test St",
+                "city": "Mumbai",
+                "zip": "400001",
+                "country": "IN"
+              }
+            }' | python3 -m json.tool
+          echo ""
+
+      # ── 3. Recent Cloud Run logs (last 50 lines) ─────────────────────────
+      - name: Pull recent Cloud Run logs
+        run: |
+          echo "=== Cloud Run logs (last 50 entries) ==="
+          gcloud logging read \
+            'resource.type="cloud_run_revision" AND resource.labels.service_name="lb-razorpay-backend"' \
+            --project=${{ env.PROJECT_ID }} \
+            --limit=50 \
+            --format="table(timestamp, severity, textPayload)" \
+            --order=desc

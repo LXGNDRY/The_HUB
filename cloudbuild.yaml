@@ -3,6 +3,8 @@ steps:
   - name: "gcr.io/cloud-builders/docker"
     args:
       - "build"
+      - "-f"
+      - "app/Dockerfile"
       - "-t"
       - "us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/hub-backend/app:${SHORT_SHA}"
       - "-t"

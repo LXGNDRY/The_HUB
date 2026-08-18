@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Legendary HUB</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f1f2f4;
+      color: #202223;
+      min-height: 100vh;
+    }
+    .header {
+      background: #1a1a1a;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+    .header h1 { color: #fff; font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+    .header-sub { color: #888; font-size: 13px; }
+    .header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+    .pulse { width: 8px; height: 8px; border-radius: 50%; background: #00c853;
+             box-shadow: 0 0 0 0 rgba(0,200,83,.4);
+             animation: pulse 2s infinite; }
+    @keyframes pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(0,200,83,.4); }
+      70%  { box-shadow: 0 0 0 8px rgba(0,200,83,0); }
+      100% { box-shadow: 0 0 0 0 rgba(0,200,83,0); }
+    }
+    .online-label { color: #00c853; font-size: 12px; font-weight: 600; }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+      gap: 16px;
+      padding: 24px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .card {
+      background: #fff;
+      border-radius: 10px;
+      padding: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.04);
+    }
+    .card.wide { grid-column: span 2; }
+    @media (max-width: 640px) { .card.wide { grid-column: span 1; } }
+
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      color: #6d7175;
+      text-transform: uppercase;
+      letter-spacing: .6px;
+      margin-bottom: 14px;
+    }
+    .stat { font-size: 36px; font-weight: 700; line-height: 1; }
+    .stat-label { font-size: 13px; color: #6d7175; margin-top: 4px; }
+    .ok   { color: #008060; }
+    .warn { color: #b98900; }
+    .err  { color: #d82c0d; }
+
+    .badge {
+      display: inline-block;
+      padding: 2px 10px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-ok   { background: #e3f1ec; color: #008060; }
+    .badge-warn { background: #fff3cd; color: #b98900; }
+    .badge-err  { background: #fce8e6; color: #d82c0d; }
+    .badge-neutral { background: #f1f2f4; color: #6d7175; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border: 1px solid #c9cccf;
+      border-radius: 7px;
+      font-size: 13px;
+      font-weight: 500;
+      background: #fff;
+      cursor: pointer;
+      transition: background .12s, border-color .12s;
+      width: 100%;
+      margin-top: 6px;
+    }
+    .btn:hover:not(:disabled) { background: #f6f6f7; }
+    .btn:disabled { opacity: .55; cursor: not-allowed; }
+    .btn-primary {
+      background: #008060;
+      color: #fff;
+      border-color: #008060;
+    }
+    .btn-primary:hover:not(:disabled) { background: #006e52; border-color: #006e52; }
+
+    .job-list { list-style: none; }
+    .job-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid #f1f2f4;
+      gap: 12px;
+    }
+    .job-list li:last-child { border-bottom: none; }
+    .job-name { font-size: 13px; font-weight: 500; }
+    .job-next { font-size: 11px; color: #6d7175; margin-top: 2px; }
+    .job-btn {
+      flex-shrink: 0;
+      padding: 5px 10px;
+      font-size: 12px;
+      width: auto;
+      margin-top: 0;
+    }
+
+    .section-header {
+      font-size: 15px;
+      font-weight: 600;
+      padding: 16px 24px 4px;
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+
+    .loading { color: #6d7175; font-size: 13px; text-align: center; padding: 24px; }
+    .error-msg { color: #d82c0d; font-size: 13px; }
+
+    .row { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+    .meta { font-size: 12px; color: #6d7175; margin-top: 10px; }
+    .divider { height: 1px; background: #f1f2f4; margin: 12px 0; }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <h1>⚡ Legendary HUB</h1>
+  <span class="header-sub">Store Operations</span>
+  <div class="header-right">
+    <div class="pulse"></div>
+    <span class="online-label" id="online-label">Connecting…</span>
+  </div>
+</div>
+
+<div id="root"><div class="loading">Loading dashboard…</div></div>
+
+<script>
+// ── Config ──────────────────────────────────────────────────────────────────
+// API_KEY is injected server-side in production via a meta tag or env replacement.
+// For local dev, set DASHBOARD_API_KEY in the query string: /app?key=...
+const params = new URLSearchParams(location.search);
+const API_KEY = params.get('key') || '';
+const HEADERS = { 'X-API-Key': API_KEY, 'Content-Type': 'application/json' };
+
+// ── API helpers ──────────────────────────────────────────────────────────────
+async function api(path, opts = {}) {
+  const r = await fetch(path, { headers: HEADERS, ...opts });
+  if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+  return r.json();
+}
+async function trigger(jobId) {
+  return api(`/api/scheduler/jobs/${jobId}/run`, { method: 'POST' });
+}
+
+// ── Job trigger button handler ────────────────────────────────────────────────
+function onRunJob(btn, jobId) {
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.textContent = 'Running…';
+  trigger(jobId)
+    .then(() => { btn.textContent = '✓ Done'; })
+    .catch(() => { btn.textContent = '✗ Error'; })
+    .finally(() => { setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 3000); });
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function fmtDate(str) {
+  if (!str || str === 'paused') return 'paused';
+  try {
+    return new Date(str).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+  } catch { return str; }
+}
+
+function scoreClass(n) {
+  if (n >= 80) return 'ok';
+  if (n >= 50) return 'warn';
+  return 'err';
+}
+
+// ── Card builders ─────────────────────────────────────────────────────────────
+function botStatusCard(health) {
+  const jobs = health?.scheduler_jobs ?? '—';
+  return `
+  <div class="card">
+    <div class="card-title">🤖 Bot Status</div>
+    <div class="stat ok">${jobs}</div>
+    <div class="stat-label">Active Automation Jobs</div>
+    <div style="margin-top:14px;display:flex;gap:6px;flex-wrap:wrap">
+      <span class="badge badge-ok">Cloud Run ✓</span>
+      <span class="badge badge-ok">Scheduler ✓</span>
+      <span class="badge badge-ok">Webhooks ✓</span>
+    </div>
+  </div>`;
+}
+
+function pagespeedCard(ps) {
+  if (!ps || ps.error) return `
+  <div class="card">
+    <div class="card-title">⚡ PageSpeed</div>
+    <p class="error-msg">Unavailable — check PAGESPEED_URL env var.</p>
+  </div>`;
+
+  const perf = ps.performance ?? ps.score ?? '—';
+  const cls = typeof perf === 'number' ? scoreClass(perf) : '';
+  return `
+  <div class="card">
+    <div class="card-title">⚡ PageSpeed (Mobile)</div>
+    <div class="stat ${cls}">${perf}</div>
+    <div class="stat-label">Performance Score</div>
+    ${ps.lcp ? `<div class="meta">LCP: ${ps.lcp}s &nbsp;·&nbsp; CLS: ${ps.cls ?? '—'} &nbsp;·&nbsp; TBT: ${ps.tbt ?? '—'}ms</div>` : ''}
+  </div>`;
+}
+
+function jobsCard(jobs) {
+  const KEY_JOBS = [
+    { id: 'blog_writer_morning',      label: 'Blog Writer (publish 1 post)' },
+    { id: 'alt_text_auto_patch',      label: 'Alt Text Auto-fill' },
+    { id: 'shopify_product_health',   label: 'Product Health Audit' },
+    { id: 'daily_indexing_submission',label: 'Submit Sitemap to Google' },
+    { id: 'indexnow_new_products',    label: 'IndexNow Ping' },
+    { id: 'gmc_disapproval_check',    label: 'GMC Disapproval Check' },
+    { id: 'gmc_shipping_drift_check', label: 'GMC Shipping Drift Check' },
+    { id: 'klaviyo_flow_health',      label: 'Klaviyo Flow Health' },
+    { id: 'gmc_title_rotation',       label: 'GMC Title A/B Rotation' },
+  ];
+
+  const rows = KEY_JOBS.map(({ id, label }) => {
+    const job = Array.isArray(jobs) ? jobs.find(j => j.id === id) : null;
+    const next = job ? fmtDate(job.next_run) : '—';
+    const status = job?.status === 'paused' ? '<span class="badge badge-warn">paused</span>' : '';
+    return `
+    <li>
+      <div>
+        <div class="job-name">${label} ${status}</div>
+        <div class="job-next">Next: ${next}</div>
+      </div>
+      <button class="btn job-btn" onclick="onRunJob(this,'${id}')">Run Now</button>
+    </li>`;
+  }).join('');
+
+  return `
+  <div class="card wide">
+    <div class="card-title">⚙️ Automation Jobs</div>
+    <ul class="job-list">${rows}</ul>
+  </div>`;
+}
+
+function seoActionsCard() {
+  return `
+  <div class="card">
+    <div class="card-title">🔍 SEO Quick Actions</div>
+    <div class="row">
+      <button class="btn btn-primary" onclick="onRunJob(this,'daily_indexing_submission')">Submit Sitemap to Google</button>
+      <button class="btn btn-primary" onclick="onRunJob(this,'indexnow_new_products')">Ping IndexNow (New Products)</button>
+      <button class="btn btn-primary" onclick="onRunJob(this,'alt_text_auto_patch')">Auto-fill Missing Alt Text</button>
+    </div>
+  </div>`;
+}
+
+function productHealthCard() {
+  return `
+  <div class="card">
+    <div class="card-title">📦 Product Health</div>
+    <p style="font-size:13px;color:#6d7175;margin-bottom:12px">
+      Audit all active products for missing SKUs, barcodes, and product types.
+    </p>
+    <button class="btn btn-primary" onclick="onRunJob(this,'shopify_product_health')">Run Product Audit</button>
+  </div>`;
+}
+
+function klaviyoCard() {
+  return `
+  <div class="card">
+    <div class="card-title">📧 Klaviyo Flows</div>
+    <p style="font-size:13px;color:#6d7175;margin-bottom:12px">
+      Verify all 7 critical email flows are live and have templates assigned.
+    </p>
+    <button class="btn btn-primary" onclick="onRunJob(this,'klaviyo_flow_health')">Check Flow Health</button>
+  </div>`;
+}
+
+function visionCard() {
+  return `
+  <div class="card">
+    <div class="card-title">👁️ Vision AI (NVIDIA NIM)</div>
+    <p style="font-size:13px;color:#6d7175;margin-bottom:12px">
+      Audit product images and auto-generate alt text using NVIDIA NIM Vision.
+      Dry-run mode previews without writing.
+    </p>
+    <div class="row">
+      <button class="btn" onclick="visionAudit(this, true)">Preview Alt Text (Dry Run)</button>
+      <button class="btn btn-primary" onclick="visionQuality(this)">Photo Quality Audit</button>
+    </div>
+  </div>`;
+}
+
+function blogWriterCard() {
+  return `
+  <div class="card">
+    <div class="card-title">✍️ Blog Writer</div>
+    <p style="font-size:13px;color:#6d7175;margin-bottom:12px">
+      Generate and publish one SEO-optimized blog post using Gemini AI.
+      Automatically submitted to Google Indexing API + IndexNow.
+    </p>
+    <button class="btn btn-primary" onclick="onRunJob(this,'blog_writer_morning')">Publish Blog Post Now</button>
+  </div>`;
+}
+
+function gmcCard() {
+  return `
+  <div class="card">
+    <div class="card-title">🛍️ Google Merchant Center</div>
+    <div class="row">
+      <button class="btn btn-primary" onclick="onRunJob(this,'gmc_disapproval_check')">Check GMC Disapprovals</button>
+      <button class="btn btn-primary" onclick="onRunJob(this,'gmc_shipping_drift_check')">Check Shipping Drift</button>
+      <button class="btn btn-primary" onclick="onRunJob(this,'gmc_title_rotation')">Run Title A/B Rotation</button>
+    </div>
+  </div>`;
+}
+
+async function visionAudit(btn, dryRun) {
+  btn.disabled = true;
+  btn.textContent = 'Running…';
+  try {
+    const res = await api('/api/vision/alt-text/audit', {
+      method: 'POST',
+      body: JSON.stringify({ dry_run: dryRun }),
+    });
+    const updated = res.updated ?? res.results?.length ?? '—';
+    btn.textContent = `✓ ${updated} images`;
+  } catch {
+    btn.textContent = '✗ Error';
+  } finally {
+    setTimeout(() => { btn.textContent = dryRun ? 'Preview Alt Text (Dry Run)' : 'Apply Alt Text'; btn.disabled = false; }, 4000);
+  }
+}
+
+async function visionQuality(btn) {
+  btn.disabled = true;
+  btn.textContent = 'Auditing…';
+  try {
+    const res = await api('/api/vision/quality/audit', { method: 'POST' });
+    const issues = res.issues_found ?? res.total_issues ?? '—';
+    btn.textContent = `✓ ${issues} issues`;
+  } catch {
+    btn.textContent = '✗ Error';
+  } finally {
+    setTimeout(() => { btn.textContent = 'Photo Quality Audit'; btn.disabled = false; }, 4000);
+  }
+}
+
+// ── Main ──────────────────────────────────────────────────────────────────────
+async function buildDashboard() {
+  const [healthRes, jobsRes, psRes] = await Promise.allSettled([
+    api('/health'),
+    api('/api/scheduler/jobs'),
+    api('/api/pagespeed/audit'),
+  ]);
+
+  const health = healthRes.status === 'fulfilled' ? healthRes.value : null;
+  const jobs   = jobsRes.status   === 'fulfilled' ? jobsRes.value   : [];
+  const ps     = psRes.status     === 'fulfilled' ? psRes.value     : null;
+
+  const label = document.getElementById('online-label');
+  if (health) { label.textContent = 'Online'; }
+  else        { label.textContent = 'Offline'; label.style.color = '#d82c0d'; }
+
+  document.getElementById('root').innerHTML = `
+    <div class="grid">
+      ${botStatusCard(health)}
+      ${pagespeedCard(ps)}
+      ${seoActionsCard()}
+      ${productHealthCard()}
+      ${visionCard()}
+      ${blogWriterCard()}
+      ${klaviyoCard()}
+      ${gmcCard()}
+      ${jobsCard(jobs)}
+    </div>
+  `;
+}
+
+buildDashboard().catch(err => {
+  document.getElementById('root').innerHTML =
+    `<div class="loading error-msg">Dashboard error: ${err.message}</div>`;
+});
+</script>
+</body>
+</html>

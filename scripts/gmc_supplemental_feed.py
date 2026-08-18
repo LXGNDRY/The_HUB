@@ -63,6 +63,8 @@ elif SHOPIFY_ADMIN_TOKEN:
     SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
 else:
     raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
+    print("  Token acquired.")
+
 SHOPIFY_HEADERS = {"X-Shopify-Access-Token": SHOPIFY_TOKEN}
 
 creds = service_account.Credentials.from_service_account_info(

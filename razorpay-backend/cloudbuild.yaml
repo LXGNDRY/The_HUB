@@ -7,12 +7,10 @@
 # Substitutions (set in Cloud Build trigger or pass via --substitutions):
 #   _SERVICE_NAME  : lb-razorpay-backend
 #   _REGION        : us-central1
-#   _PROJECT       : idx-lngndny
 
 substitutions:
   _SERVICE_NAME: lb-razorpay-backend
   _REGION: us-central1
-  _PROJECT: idx-lngndny
 
 steps:
   # Step 1: Build the Docker image
@@ -48,12 +46,18 @@ steps:
       - '--memory=512Mi'
       - '--cpu=1'
       - '--timeout=30'
-      - '--set-secrets=RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,SHOPIFY_ADMIN_TOKEN=SHOPIFY_ADMIN_TOKEN:latest,WEBHOOK_SECRET=WEBHOOK_SECRET:latest,RAZORPAY_SFTP_PRIVATE_KEY=RAZORPAY_SFTP_PRIVATE_KEY:latest'
-      - '--set-env-vars=SHOPIFY_STORE_DOMAIN=lngndny.myshopify.com,GCP_PROJECT_ID=idx-lngndny'
+      # NOTE: KLAVIYO_API_KEY is intentionally omitted here — the KLAVIYO_API_KEY secret
+      # does not exist yet in Secret Manager for this project (idx-lngndny), and
+      # `gcloud run deploy --set-secrets` fails hard on a missing secret, blocking every
+      # deploy. main.py already treats KLAVIYO_API_KEY as optional (os.environ.get(..., "")
+      # and only calls Klaviyo if it's non-empty), so this only disables that one feature
+      # until the secret is created — then add it back to --set-secrets below.
+      - '--set-secrets=RAZORPAY_KEY_ID=RAZORPAY_KEY_ID:latest,RAZORPAY_KEY_SECRET=RAZORPAY_KEY_SECRET:latest,SHOPIFY_CLIENT_ID=SHOPIFY_CLIENT_ID:latest,SHOPIFY_CLIENT_SECRET=SHOPIFY_CLIENT_SECRET:latest,WEBHOOK_SECRET=WEBHOOK_SECRET:latest,RAZORPAY_SFTP_PRIVATE_KEY=RAZORPAY_SFTP_PRIVATE_KEY:latest'
+      - '--set-env-vars=SHOPIFY_STORE_DOMAIN=lngndny.myshopify.com,GCP_PROJECT_ID=idx-lngndny,SFTP_HOST=s-20628a7a7d07456a8.server.transfer.ap-south-1.amazonaws.com,SFTP_PORT=22,SFTP_USER=rzp-legendary-sftp,SFTP_UPLOAD_PATH=.,INDIA_TAX_RATE=0.18'
 
 images:
   - 'gcr.io/$PROJECT_ID/${_SERVICE_NAME}:$COMMIT_SHA'
   - 'gcr.io/$PROJECT_ID/${_SERVICE_NAME}:latest'
 
 options:
-  logging: CLOUD_LOGGING_ONLY
+  logging: LEGACY

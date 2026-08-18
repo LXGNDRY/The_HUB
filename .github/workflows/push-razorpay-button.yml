@@ -1,0 +1,20 @@
+name: 🔵 Push Razorpay Cart Button to Theme
+
+on:
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install requests
+      - name: Push lb-razorpay.js and patch cart-summary.liquid
+        env:
+          SHOPIFY_ADMIN_TOKEN:  ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          RAZORPAY_BACKEND_URL: ${{ secrets.RAZORPAY_BACKEND_URL }}
+          RAZORPAY_KEY_ID:      ${{ secrets.RAZORPAY_KEY_ID }}
+        run: python3 scripts/push_razorpay_cart_button.py

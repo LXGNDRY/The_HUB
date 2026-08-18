@@ -9,8 +9,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from api.middleware.auth import verify_api_key
+from fastapi.staticfiles import StaticFiles
 from api.routers import compute, storage, billing, monitoring, seo, analytics, pagespeed
 from api.routers import gemini, sheets, indexing, tag_manager, secrets, logs, higgsfield, shopify, klaviyo
+from api.routers import webhooks, oauth, app_dashboard, blog_writer, vision, image_gen, gmc
 from scheduler.engine import BotScheduler
 
 logging.basicConfig(
@@ -69,7 +71,23 @@ app.include_router(secrets.router,    prefix="/api/secrets",    tags=["Secrets"]
 app.include_router(logs.router,        prefix="/api/logs",        tags=["Logs"],        **protected)
 app.include_router(higgsfield.router,  prefix="/api/higgsfield",  tags=["Higgsfield AI"], **protected)
 app.include_router(shopify.router,     prefix="/api/shopify",     tags=["Shopify"],        **protected)
-app.include_router(klaviyo.router,     prefix="/api/klaviyo",     tags=["Klaviyo"],        **protected)
+app.include_router(klaviyo.router,      prefix="/api/klaviyo",      tags=["Klaviyo"],      **protected)
+app.include_router(blog_writer.router,  prefix="/api/blog-writer",  tags=["Blog Writer"],  **protected)
+app.include_router(vision.router,       prefix="/api/vision",       tags=["Vision AI"],    **protected)
+app.include_router(image_gen.router,    prefix="/api/image-gen",    tags=["Image Gen"],    **protected)
+app.include_router(gmc.router,          prefix="/api/gmc",          tags=["GMC"],          **protected)
+
+# Webhooks — unauthenticated; Shopify signs with HMAC instead of X-API-Key
+app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
+
+# OAuth — unauthenticated; handles Shopify install + callback redirect flow
+app.include_router(oauth.router, tags=["OAuth"])
+
+# App dashboard — serves the embedded store-ops UI at /app
+app.include_router(app_dashboard.router, tags=["App"])
+
+# Static assets (CSS, JS, images if needed by the frontend)
+app.mount("/frontend", StaticFiles(directory="frontend"), name="frontend")
 
 # -------------------------------------------------------------------------
 # Scheduler control routes

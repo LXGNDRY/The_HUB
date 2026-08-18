@@ -27,6 +27,20 @@ from scheduler.jobs import (
     indexing_submission_job,
     sheets_refresh_job,
     error_log_monitor_job,
+    shopify_product_health_job,
+    gmc_disapproval_check_job,
+    gmc_shipping_drift_check_job,
+    klaviyo_flow_health_job,
+    alt_text_auto_patch_job,
+    indexnow_new_products_job,
+    gmc_title_rotation_job,
+    blog_writer_job,
+    compliance_patch_job,
+    product_type_patch_job,
+    product_weight_patch_job,
+    market_health_job,
+    gmc_auto_fix_job,
+    gmc_shipping_sync_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -52,7 +66,7 @@ class BotScheduler:
         self._register_jobs()
 
     def _register_jobs(self):
-        """Register all 10 automation jobs."""
+        """Register all automation jobs."""
 
         # Daily 8:00 AM — Billing alert (always runs)
         self.scheduler.add_job(
@@ -141,6 +155,167 @@ class BotScheduler:
             IntervalTrigger(hours=6),
             id="error_log_monitor",
             name="Cloud Run Error Log Monitor",
+            replace_existing=True,
+        )
+
+        # ── Shopify & E-commerce Jobs ────────────────────────────────────────
+
+        # Daily 09:00 — Shopify product data quality audit
+        self.scheduler.add_job(
+            shopify_product_health_job,
+            CronTrigger(hour=9, minute=0),
+            id="shopify_product_health",
+            name="Shopify Product Health Check (SKU/barcode/type)",
+            replace_existing=True,
+        )
+
+        # Daily 06:15 — IndexNow ping for products published in last 24h
+        self.scheduler.add_job(
+            indexnow_new_products_job,
+            CronTrigger(hour=6, minute=15),
+            id="indexnow_new_products",
+            name="IndexNow: Ping New Products",
+            replace_existing=True,
+        )
+
+        # Daily 06:30 — Auto-fill missing image alt text
+        self.scheduler.add_job(
+            alt_text_auto_patch_job,
+            CronTrigger(hour=6, minute=30),
+            id="alt_text_auto_patch",
+            name="Alt Text Auto-Patch (images)",
+            replace_existing=True,
+        )
+
+        # ── GMC Jobs ─────────────────────────────────────────────────────────
+
+        # Daily 10:00 — GMC disapproval + data quality alert
+        self.scheduler.add_job(
+            gmc_disapproval_check_job,
+            CronTrigger(hour=10, minute=0),
+            id="gmc_disapproval_check",
+            name="GMC Disapproval & Data Quality Check",
+            replace_existing=True,
+        )
+
+        # Wednesday 08:00 — GMC × Shopify shipping drift (alert only)
+        self.scheduler.add_job(
+            gmc_shipping_drift_check_job,
+            CronTrigger(day_of_week="wed", hour=8, minute=0),
+            id="gmc_shipping_drift_check",
+            name="GMC × Shopify Shipping Drift Check",
+            replace_existing=True,
+        )
+
+        # ── Klaviyo Jobs ──────────────────────────────────────────────────────
+
+        # Tuesday 08:00 — Klaviyo flow health check
+        self.scheduler.add_job(
+            klaviyo_flow_health_job,
+            CronTrigger(day_of_week="tue", hour=8, minute=0),
+            id="klaviyo_flow_health",
+            name="Klaviyo Flow Health Check",
+            replace_existing=True,
+        )
+
+        # ── GMC Title Rotation ────────────────────────────────────────────────
+
+        # Wednesday 10:00 — GMC title A/B rotation (after shipping drift check)
+        self.scheduler.add_job(
+            gmc_title_rotation_job,
+            CronTrigger(day_of_week="wed", hour=10, minute=0),
+            id="gmc_title_rotation",
+            name="GMC Title Rotation (CTR-based A/B)",
+            replace_existing=True,
+        )
+
+        # ── Blog Writer Jobs ──────────────────────────────────────────────────
+        # 3 posts/day spread across the day for SEO freshness signals
+
+        # 08:00 — Morning blog post
+        self.scheduler.add_job(
+            blog_writer_job,
+            CronTrigger(hour=8, minute=0),
+            id="blog_writer_morning",
+            name="Blog Writer — Morning Post (08:00 CT)",
+            replace_existing=True,
+        )
+
+        # 12:00 — Midday blog post
+        self.scheduler.add_job(
+            blog_writer_job,
+            CronTrigger(hour=12, minute=0),
+            id="blog_writer_midday",
+            name="Blog Writer — Midday Post (12:00 CT)",
+            replace_existing=True,
+        )
+
+        # 16:00 — Afternoon blog post
+        self.scheduler.add_job(
+            blog_writer_job,
+            CronTrigger(hour=16, minute=0),
+            id="blog_writer_afternoon",
+            name="Blog Writer — Afternoon Post (16:00 CT)",
+            replace_existing=True,
+        )
+
+        # ── Compliance Jobs ───────────────────────────────────────────────────
+
+        # Daily 02:00 — Fill missing COO + HS code on all variants (idempotent)
+        self.scheduler.add_job(
+            compliance_patch_job,
+            CronTrigger(hour=2, minute=0),
+            id="nightly_compliance_patch",
+            name="Nightly COO + HS Code Compliance Patch",
+            replace_existing=True,
+        )
+
+        # Daily 02:30 — Standardize product_type to Google Shopping taxonomy (idempotent)
+        self.scheduler.add_job(
+            product_type_patch_job,
+            CronTrigger(hour=2, minute=30),
+            id="nightly_product_type_patch",
+            name="Nightly Product Type Taxonomy Patch",
+            replace_existing=True,
+        )
+
+        # Daily 02:45 — Fill missing variant weights from taxonomy defaults (idempotent)
+        self.scheduler.add_job(
+            product_weight_patch_job,
+            CronTrigger(hour=2, minute=45),
+            id="nightly_product_weight_patch",
+            name="Nightly Product Weight Patch",
+            replace_existing=True,
+        )
+
+        # ── International Markets Health ──────────────────────────────────────
+
+        # Daily 06:45 — Ensure all markets stay enabled + local currencies on
+        self.scheduler.add_job(
+            market_health_job,
+            CronTrigger(hour=6, minute=45),
+            id="market_health_check",
+            name="Market Health Check (international markets + currencies)",
+            replace_existing=True,
+        )
+
+        # ── GMC Autonomous Fixes ──────────────────────────────────────────────
+
+        # Daily 11:00 — Auto-fix disapprovals + apply attribute rules (after 10:00 check)
+        self.scheduler.add_job(
+            gmc_auto_fix_job,
+            CronTrigger(hour=11, minute=0),
+            id="gmc_auto_fix",
+            name="GMC Auto-Fix (disapprovals + attribute rules)",
+            replace_existing=True,
+        )
+
+        # Wednesday 08:30 — Auto-sync Shopify shipping → GMC (after 08:00 drift check)
+        self.scheduler.add_job(
+            gmc_shipping_sync_job,
+            CronTrigger(day_of_week="wed", hour=8, minute=30),
+            id="gmc_shipping_sync",
+            name="GMC Shipping Sync (Shopify → GMC)",
             replace_existing=True,
         )
 

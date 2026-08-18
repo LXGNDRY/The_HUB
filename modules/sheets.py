@@ -316,6 +316,32 @@ class SheetsModule:
         self.format_header_row(spreadsheet_id, sheet)
         logger.info("[sheets] Billing sheet updated.")
 
+    def update_ga4_countries_sheet(self, spreadsheet_id: str, country_data: dict):
+        """
+        Write GA4 country breakdown to the 'GA4 Countries' tab.
+        Shows where international traffic is landing — key for validating ad geo-targeting.
+        """
+        sheet = "GA4 Countries"
+        self.ensure_sheet_exists(spreadsheet_id, sheet)
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+        rows = [
+            ["GA4 Traffic by Country", f"Updated: {now}", f"Period: last {country_data.get('period_days', 28)} days"],
+            [],
+            ["Country", "Sessions", "Conversions", "Conv. Rate %"],
+        ]
+        for row in country_data.get("countries", []):
+            rows.append([
+                row.get("country", ""),
+                row.get("sessions", 0),
+                row.get("conversions", 0),
+                row.get("conversion_rate_pct", 0),
+            ])
+
+        self.write_rows(spreadsheet_id, sheet, rows, clear_first=True)
+        self.format_header_row(spreadsheet_id, sheet)
+        logger.info("[sheets] GA4 Countries sheet updated (%d countries).", len(country_data.get("countries", [])))
+
     def log_event(self, spreadsheet_id: str, event_type: str, message: str):
         """
         Append an event to the 'Log' tab for audit trail.
@@ -341,15 +367,18 @@ class SheetsModule:
 
     def refresh_full_dashboard(self, ga4_traffic: dict, ga4_pages: dict,
                                 gsc_data: dict, mobile_ps: dict, desktop_ps: dict,
-                                billing_data: dict) -> str:
+                                billing_data: dict, ga4_countries: dict = None) -> str:
         """
         Update all sheets in one call. Returns the spreadsheet URL.
+        ga4_countries: optional country breakdown dict from AnalyticsModule.get_country_breakdown()
         """
         spreadsheet_id = self.get_or_create_dashboard()
         self.update_ga4_sheet(spreadsheet_id, ga4_traffic, ga4_pages)
         self.update_gsc_sheet(spreadsheet_id, gsc_data)
         self.update_pagespeed_sheet(spreadsheet_id, mobile_ps, desktop_ps)
         self.update_billing_sheet(spreadsheet_id, billing_data)
+        if ga4_countries:
+            self.update_ga4_countries_sheet(spreadsheet_id, ga4_countries)
         self.log_event(spreadsheet_id, "DASHBOARD_REFRESH", "Full dashboard refresh completed.")
         url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}"
         logger.info("[sheets] Full dashboard refresh complete: %s", url)

@@ -1,0 +1,58 @@
+name: PMax — Exclude Junk Placements
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (true = print plan only, false = apply changes)"
+        required: false
+        default: "true"
+      campaign_id:
+        description: "Target a specific campaign ID (leave blank for all ENABLED PMax campaigns)"
+        required: false
+        default: ""
+
+jobs:
+  exclude-placements:
+    name: Add Negative Placement Exclusions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install google-ads
+
+      - name: Run placement exclusion
+        env:
+          GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
+          GCP_SA_KEY_JSON:            ${{ secrets.GCP_SA_KEY }}
+        run: |
+          ARGS=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.campaign_id }}" ]; then
+            ARGS="$ARGS --campaign-id ${{ github.event.inputs.campaign_id }}"
+          fi
+
+          echo "## PMax Placement Exclusions" >> $GITHUB_STEP_SUMMARY
+          echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python scripts/pmax_exclude_placements.py $ARGS 2>&1 | tee exclusion_output.txt
+          cat exclusion_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: placement-exclusion-${{ github.run_id }}
+          path: exclusion_output.txt
+          retention-days: 90
