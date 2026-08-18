@@ -29,12 +29,10 @@ SHOP          = "lngndny.myshopify.com"
 API_VERSION   = "2026-04"
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
-if ADMIN_TOKEN:
-    TOKEN = ADMIN_TOKEN
-else:
+if CLIENT_ID and CLIENT_SECRET:
     token_resp = requests.post(
         f"https://{SHOP}/admin/oauth/access_token",
-        data={
+        json={
             "grant_type":    "client_credentials",
             "client_id":     CLIENT_ID,
             "client_secret": CLIENT_SECRET,
@@ -42,6 +40,10 @@ else:
     )
     token_resp.raise_for_status()
     TOKEN   = token_resp.json()["access_token"]
+elif ADMIN_TOKEN:
+    TOKEN = ADMIN_TOKEN
+else:
+    raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 GQL_URL = f"https://{SHOP}/admin/api/{API_VERSION}/graphql.json"
 HEADERS = {"X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json"}
 

@@ -31,16 +31,12 @@ print(f"IndexNow key : {INDEXNOW_KEY}")
 print(f"Target URL   : {page_url}")
 print(f"Store        : {STORE_DOMAIN}")
 
-if ADMIN_TOKEN:
-    print("Using SHOPIFY_ADMIN_TOKEN from env.")
-    access_token = ADMIN_TOKEN
-else:
+if CLIENT_ID and CLIENT_SECRET:
     # --- Obtain access token via Client Credentials ---
     print("Obtaining access token via Client Credentials...")
     token_resp = requests.post(
         f"https://{STORE_DOMAIN}/admin/oauth/access_token",
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        data={
+        json={
             "grant_type": "client_credentials",
             "client_id": CLIENT_ID,
             "client_secret": CLIENT_SECRET,
@@ -56,6 +52,12 @@ else:
     if not access_token:
         print(f"ERROR: No access_token in response: {token_data}")
         sys.exit(1)
+elif ADMIN_TOKEN:
+    print("Using SHOPIFY_ADMIN_TOKEN from env.")
+    access_token = ADMIN_TOKEN
+else:
+    print("ERROR: Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
+    sys.exit(1)
 
     print("Access token obtained.")
 
