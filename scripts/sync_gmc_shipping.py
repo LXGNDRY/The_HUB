@@ -32,20 +32,20 @@ SHOPIFY_ADMIN_TOKEN = os.environ.get("SHOPIFY_ADMIN_TOKEN")
 CLIENT_ID     = os.environ.get("SHOPIFY_CLIENT_ID")
 CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET")
 
-if SHOPIFY_ADMIN_TOKEN:
-    SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
-else:
-    if not CLIENT_ID or not CLIENT_SECRET:
-        sys.exit("ERROR: SHOPIFY_ADMIN_TOKEN or SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET must be set.")
+if CLIENT_ID and CLIENT_SECRET:
     token_resp = requests.post(
         f"https://{SHOP}/admin/oauth/access_token",
-        data={"grant_type": "client_credentials",
+        json={"grant_type": "client_credentials",
               "client_id": CLIENT_ID,
               "client_secret": CLIENT_SECRET},
     )
     if token_resp.status_code != 200:
         sys.exit(f"ERROR: Shopify token exchange failed: {token_resp.text}")
     SHOPIFY_TOKEN = token_resp.json()["access_token"]
+elif SHOPIFY_ADMIN_TOKEN:
+    SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
+else:
+    sys.exit("ERROR: Set SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 SHOPIFY_HEADERS = {"X-Shopify-Access-Token": SHOPIFY_TOKEN}
 
 # ── GMC Auth ──────────────────────────────────────────────────────────────────

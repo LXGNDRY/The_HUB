@@ -26,14 +26,11 @@ SHOP               = "lngndny.myshopify.com"
 STORE_URL          = "https://legendary-branding.com"
 API_VERSION        = "2026-04"
 
-if SHOPIFY_ADMIN_TOKEN:
-    print("Using SHOPIFY_ADMIN_TOKEN from env.")
-    SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
-else:
+if SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET:
     print("Fetching fresh Shopify Admin API token...")
     token_resp = requests.post(
         f"https://{SHOP}/admin/oauth/access_token",
-        data={
+        json={
             "grant_type":    "client_credentials",
             "client_id":     SHOPIFY_CLIENT_ID,
             "client_secret": SHOPIFY_CLIENT_SECRET,
@@ -42,6 +39,11 @@ else:
     )
     token_resp.raise_for_status()
     SHOPIFY_TOKEN   = token_resp.json()["access_token"]
+elif SHOPIFY_ADMIN_TOKEN:
+    print("Using SHOPIFY_ADMIN_TOKEN from env.")
+    SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
+else:
+    raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 SHOPIFY_HEADERS = {"X-Shopify-Access-Token": SHOPIFY_TOKEN}
 print("  Token acquired.")
 

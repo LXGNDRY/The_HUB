@@ -22,15 +22,12 @@ MERCHANT_ID = "582171114"
 SHOP = "lngndny.myshopify.com"
 API_VERSION = "2026-04"
 
-if SHOPIFY_ADMIN_TOKEN:
-    print("Using SHOPIFY_ADMIN_TOKEN from env.")
-    SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
-else:
+if SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET:
     # Fetch a fresh token via client credentials grant (valid 24h)
     print("Fetching fresh Shopify Admin API token...")
     token_resp = requests.post(
         f"https://{SHOP}/admin/oauth/access_token",
-        data={
+        json={
             "grant_type": "client_credentials",
             "client_id": SHOPIFY_CLIENT_ID,
             "client_secret": SHOPIFY_CLIENT_SECRET,
@@ -38,7 +35,12 @@ else:
     )
     token_resp.raise_for_status()
     SHOPIFY_TOKEN = token_resp.json()["access_token"]
-print(f"  Token acquired (scopes: {token_resp.json().get('scope', 'unknown')})")
+    print(f"  Token acquired (scopes: {token_resp.json().get('scope', 'unknown')})")
+elif SHOPIFY_ADMIN_TOKEN:
+    print("Using SHOPIFY_ADMIN_TOKEN from env.")
+    SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
+else:
+    raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 SHOPIFY_HEADERS = {"X-Shopify-Access-Token": SHOPIFY_TOKEN}
 
 creds = service_account.Credentials.from_service_account_info(

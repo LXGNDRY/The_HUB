@@ -36,16 +36,18 @@ API_VERSION    = "2026-04"
 DRY_RUN        = os.getenv("DRY_RUN", "false").lower() == "true"
 FORCE_OVERWRITE = os.getenv("FORCE_OVERWRITE", "false").lower() == "true"
 
-if ADMIN_TOKEN:
-    TOKEN = ADMIN_TOKEN
-else:
+if CLIENT_ID and CLIENT_SECRET:
     token_resp = requests.post(
         f"https://{SHOP}/admin/oauth/access_token",
-        data={"grant_type": "client_credentials", "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
+        json={"grant_type": "client_credentials", "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET},
         timeout=15,
     )
     token_resp.raise_for_status()
     TOKEN   = token_resp.json()["access_token"]
+elif ADMIN_TOKEN:
+    TOKEN = ADMIN_TOKEN
+else:
+    raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 GQL_URL = f"https://{SHOP}/admin/api/{API_VERSION}/graphql.json"
 HEADERS = {"X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json"}
 
