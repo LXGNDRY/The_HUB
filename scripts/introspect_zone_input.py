@@ -2,16 +2,23 @@
 """Introspect DeliveryLocationGroupZoneInput and DeliveryCountryInput to find valid fields."""
 import os, requests, json
 
-CLIENT_ID     = os.environ["SHOPIFY_CLIENT_ID"]
-CLIENT_SECRET = os.environ["SHOPIFY_CLIENT_SECRET"]
+ADMIN_TOKEN   = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
+CLIENT_ID     = os.environ.get("SHOPIFY_CLIENT_ID", "")
+CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOP          = "lngndny.myshopify.com"
 API_VERSION   = "2026-04"
 
-token_resp = requests.post(
-    f"https://{SHOP}/admin/oauth/access_token",
-    data={"grant_type": "client_credentials", "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET}
-)
-TOKEN = token_resp.json()["access_token"]
+if CLIENT_ID and CLIENT_SECRET:
+    token_resp = requests.post(
+        f"https://{SHOP}/admin/oauth/access_token",
+        json={"grant_type": "client_credentials", "client_id": CLIENT_ID, "client_secret": CLIENT_SECRET}
+    )
+    token_resp.raise_for_status()
+    TOKEN = token_resp.json()["access_token"]
+elif ADMIN_TOKEN:
+    TOKEN = ADMIN_TOKEN
+else:
+    raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 GQL_URL = f"https://{SHOP}/admin/api/{API_VERSION}/graphql.json"
 HEADERS = {"X-Shopify-Access-Token": TOKEN, "Content-Type": "application/json"}
 

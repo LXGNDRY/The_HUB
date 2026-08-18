@@ -1,10 +1,17 @@
 import requests, os
-CLIENT_ID = os.environ["SHOPIFY_CLIENT_ID"]
-CLIENT_SECRET = os.environ["SHOPIFY_CLIENT_SECRET"]
+ADMIN_TOKEN = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
+CLIENT_ID = os.environ.get("SHOPIFY_CLIENT_ID", "")
+CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOP = "lngndny.myshopify.com"
-token_resp = requests.post(f"https://{SHOP}/admin/oauth/access_token",
-    data={"grant_type":"client_credentials","client_id":CLIENT_ID,"client_secret":CLIENT_SECRET})
-token = token_resp.json()["access_token"]
+if CLIENT_ID and CLIENT_SECRET:
+    token_resp = requests.post(f"https://{SHOP}/admin/oauth/access_token",
+        json={"grant_type":"client_credentials","client_id":CLIENT_ID,"client_secret":CLIENT_SECRET})
+    token_resp.raise_for_status()
+    token = token_resp.json()["access_token"]
+elif ADMIN_TOKEN:
+    token = ADMIN_TOKEN
+else:
+    raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 headers = {"X-Shopify-Access-Token": token}
 r = requests.get(f"https://{SHOP}/admin/api/2026-04/shipping_zones.json", headers=headers)
 zones = r.json().get("shipping_zones", [])

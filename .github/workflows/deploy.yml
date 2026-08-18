@@ -1,14 +1,18 @@
 # ============================================================
 # GCP Bot — GitHub Actions CI/CD Workflow
-# Deploy to Google Cloud Run on push to main
+# Manual-only deploy to the legacy gcp-bot Cloud Run service.
+#
+# The auto-deploy-on-push-to-main trigger was removed once main became the
+# saas-build codebase: the new backend (app/main.py) deploys separately via
+# cloudbuild.yaml to the "hub-backend" Cloud Run service, and must never be
+# pushed onto the old "gcp-bot" service by this workflow. This workflow is
+# kept for manual/emergency use only — trigger it explicitly via
+# workflow_dispatch if the legacy gcp-bot service ever needs a manual deploy.
 # ============================================================
 
-name: 🤖 GCP Bot — Build & Deploy
+name: 🤖 GCP Bot — Build & Deploy (manual only)
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
     inputs:
       dry_run:

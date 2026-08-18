@@ -24,27 +24,34 @@ from googleapiclient.errors import HttpError
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 SA_KEY_JSON           = os.environ["GCP_SA_KEY"]
-SHOPIFY_CLIENT_ID     = os.environ["SHOPIFY_CLIENT_ID"]
-SHOPIFY_CLIENT_SECRET = os.environ["SHOPIFY_CLIENT_SECRET"]
+SHOPIFY_ADMIN_TOKEN   = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
+SHOPIFY_CLIENT_ID     = os.environ.get("SHOPIFY_CLIENT_ID", "")
+SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 MERCHANT_ID           = "582171114"
 SHOP                  = "lngndny.myshopify.com"
 STORE_URL             = "https://legendary-branding.com"
 API_VERSION           = "2026-04"
 
-print("Fetching fresh Shopify token...")
-token_resp = requests.post(
-    f"https://{SHOP}/admin/oauth/access_token",
-    data={
-        "grant_type":    "client_credentials",
-        "client_id":     SHOPIFY_CLIENT_ID,
-        "client_secret": SHOPIFY_CLIENT_SECRET,
-    },
-    timeout=15,
-)
-token_resp.raise_for_status()
-SHOPIFY_TOKEN   = token_resp.json()["access_token"]
+if SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET:
+    print("Fetching fresh Shopify token...")
+    token_resp = requests.post(
+        f"https://{SHOP}/admin/oauth/access_token",
+        json={
+            "grant_type":    "client_credentials",
+            "client_id":     SHOPIFY_CLIENT_ID,
+            "client_secret": SHOPIFY_CLIENT_SECRET,
+        },
+        timeout=15,
+    )
+    token_resp.raise_for_status()
+    SHOPIFY_TOKEN   = token_resp.json()["access_token"]
+    print("  Token acquired.")
+elif SHOPIFY_ADMIN_TOKEN:
+    print("Using SHOPIFY_ADMIN_TOKEN from env.")
+    SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
+else:
+    raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 SHOPIFY_HEADERS = {"X-Shopify-Access-Token": SHOPIFY_TOKEN}
-print("  Token acquired.")
 
 creds = service_account.Credentials.from_service_account_info(
     json.loads(SA_KEY_JSON),

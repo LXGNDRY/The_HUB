@@ -48,6 +48,11 @@ jobs:
         run: |
           MODE="${{ github.event.inputs.mode || 'backfill' }}"
           echo "Running in mode: $MODE"
+          if [ "$MODE" = "backfill" ] && [ -z "$CONVERSION_ACTION_ID" ] && [ "${{ github.event_name }}" = "schedule" ]; then
+            echo "CONVERSION_ACTION_ID is not configured (repo variable) — skipping scheduled backfill."
+            echo "Run this workflow manually with mode=list-actions to find the ID, then set it as a repo variable."
+            exit 0
+          fi
           if [ "$MODE" = "list-actions" ]; then
             python scripts/gmc_enhanced_conversions.py --list-actions
           elif [ "$MODE" = "order" ]; then

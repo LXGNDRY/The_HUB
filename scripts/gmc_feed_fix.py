@@ -15,24 +15,31 @@ from googleapiclient.errors import HttpError
 
 # ── Auth ─────────────────────────────────────────────────────
 SA_KEY_JSON = os.environ["GCP_SA_KEY"]
-SHOPIFY_CLIENT_ID = os.environ["SHOPIFY_CLIENT_ID"]
-SHOPIFY_CLIENT_SECRET = os.environ["SHOPIFY_CLIENT_SECRET"]
+SHOPIFY_ADMIN_TOKEN = os.environ.get("SHOPIFY_ADMIN_TOKEN", "")
+SHOPIFY_CLIENT_ID = os.environ.get("SHOPIFY_CLIENT_ID", "")
+SHOPIFY_CLIENT_SECRET = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 MERCHANT_ID = "582171114"
 SHOP = "lngndny.myshopify.com"
 API_VERSION = "2026-04"
 
-# Fetch a fresh token via client credentials grant (valid 24h)
-print("Fetching fresh Shopify Admin API token...")
-token_resp = requests.post(
-    f"https://{SHOP}/admin/oauth/access_token",
-    data={
-        "grant_type": "client_credentials",
-        "client_id": SHOPIFY_CLIENT_ID,
-        "client_secret": SHOPIFY_CLIENT_SECRET,
-    }
-)
-token_resp.raise_for_status()
-SHOPIFY_TOKEN = token_resp.json()["access_token"]
+if SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET:
+    # Fetch a fresh token via client credentials grant (valid 24h)
+    print("Fetching fresh Shopify Admin API token...")
+    token_resp = requests.post(
+        f"https://{SHOP}/admin/oauth/access_token",
+        json={
+            "grant_type": "client_credentials",
+            "client_id": SHOPIFY_CLIENT_ID,
+            "client_secret": SHOPIFY_CLIENT_SECRET,
+        }
+    )
+    token_resp.raise_for_status()
+    SHOPIFY_TOKEN = token_resp.json()["access_token"]
+elif SHOPIFY_ADMIN_TOKEN:
+    print("Using SHOPIFY_ADMIN_TOKEN from env.")
+    SHOPIFY_TOKEN = SHOPIFY_ADMIN_TOKEN
+else:
+    raise RuntimeError("Set SHOPIFY_CLIENT_ID + SHOPIFY_CLIENT_SECRET, or SHOPIFY_ADMIN_TOKEN.")
 print(f"  Token acquired (scopes: {token_resp.json().get('scope', 'unknown')})")
 SHOPIFY_HEADERS = {"X-Shopify-Access-Token": SHOPIFY_TOKEN}
 
