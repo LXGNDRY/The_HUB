@@ -15,6 +15,7 @@ jobs:
       - run: pip install requests google-auth google-api-python-client -q
       - name: Sync GMC shipping to match Shopify
         env:
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}

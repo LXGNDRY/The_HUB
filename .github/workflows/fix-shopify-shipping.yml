@@ -16,6 +16,7 @@ jobs:
         run: pip install requests
       - name: Fix Shopify shipping rates
         env:
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         run: python scripts/fix_shopify_shipping.py
