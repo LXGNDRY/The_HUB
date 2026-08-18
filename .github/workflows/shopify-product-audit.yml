@@ -14,6 +14,7 @@ jobs:
       - run: pip install requests
       - name: Run product audit
         env:
+          SHOPIFY_ADMIN_TOKEN:   ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           SHOPIFY_CLIENT_ID:     ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
         run: python scripts/shopify_product_audit.py
