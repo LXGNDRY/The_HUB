@@ -3,6 +3,13 @@
 Autonomous GCP management and e-commerce operations bot for **Legendary Branding**.
 Deployed as a FastAPI service on Google Cloud Run (`gcp-bot`, region `us-central1`).
 
+This repository also hosts **hub-backend** (`app/`), a separate multi-tenant SaaS
+backend (Stripe billing, its own Postgres database) for the upcoming CTO.new
+product. It deploys independently via `cloudbuild.yaml` to its own Cloud Run
+service (`hub-backend`) and does not share a deploy pipeline, database, or
+runtime with the `gcp-bot` service described below — see `app/` (routers,
+services, models) for its own code.
+
 ---
 
 ## Architecture
