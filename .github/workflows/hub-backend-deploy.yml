@@ -1,0 +1,61 @@
+name: Hub Backend — Secure Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [staging, production]
+        default: staging
+      image_tag:
+        description: Immutable release tag
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: hub-backend-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ secrets.GCP_DEPLOY_SERVICE_ACCOUNT }}
+      - uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: ${{ secrets.GCP_PROJECT_ID }}
+      - name: Build immutable image
+        env:
+          IMAGE: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/hub-backend/app:${{ inputs.image_tag }}
+        run: |
+          gcloud auth configure-docker us-central1-docker.pkg.dev --quiet
+          docker build -f app/Dockerfile -t "${IMAGE}" .
+          docker push "${IMAGE}"
+      - name: Deploy quarantined revision
+        env:
+          IMAGE: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/hub-backend/app:${{ inputs.image_tag }}
+        run: |
+          gcloud run deploy hub-backend-${{ inputs.environment }} \
+            --image "${IMAGE}" \
+            --region us-central1 \
+            --service-account "${{ secrets.GCP_RUNTIME_SERVICE_ACCOUNT }}" \
+            --no-allow-unauthenticated \
+            --set-env-vars "ENVIRONMENT=${{ inputs.environment }},DEBUG=false,SAAS_ENABLED=false" \
+            --set-secrets "DATABASE_URL=hub-database-url:latest,HUB_ADMIN_API_KEY=hub-admin-api-key:latest,OAUTH_STATE_SIGNING_KEY=hub-oauth-state-key:latest,SESSION_SIGNING_KEY=hub-session-signing-key:latest,SHOPIFY_CLIENT_ID=hub-shopify-client-id:latest,SHOPIFY_CLIENT_SECRET=hub-shopify-client-secret:latest,STRIPE_SECRET_KEY=hub-stripe-secret-key:latest,STRIPE_WEBHOOK_SECRET=hub-stripe-webhook-secret:latest" \
+            --quiet
+      - name: Verify quarantine
+        run: |
+          POLICY=$(gcloud run services get-iam-policy hub-backend-${{ inputs.environment }} \
+            --region us-central1 --format=json)
+          if echo "${POLICY}" | grep -q 'allUsers'; then
+            echo "Public invoker binding detected" >&2
+            exit 1
+          fi
