@@ -2,8 +2,8 @@
 FROM python:3.12-slim AS builder
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install --user --no-cache-dir -r requirements.txt
+COPY app/requirements.txt /tmp/hub-requirements.txt
+RUN pip install --user --no-cache-dir -r /tmp/hub-requirements.txt
 
 # ── Stage 2: Runtime ──
 FROM python:3.12-slim
