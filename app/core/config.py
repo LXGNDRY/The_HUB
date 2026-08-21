@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     SAAS_ENABLED: bool = False
     HUB_ADMIN_API_KEY: str = ""
     OAUTH_STATE_SIGNING_KEY: str = ""
+    SESSION_SIGNING_KEY: str = ""
+    SESSION_ISSUER: str = "the-hub"
+    SESSION_AUDIENCE: str = "hub-backend"
     ALLOWED_ORIGINS: Annotated[list[str], BeforeValidator(_split_origins)] = Field(default_factory=list)
 
     DATABASE_URL: str = "postgresql+asyncpg://user:pass@localhost:5432/the_hub"
@@ -62,6 +65,8 @@ class Settings(BaseSettings):
                 raise ValueError("HUB_ADMIN_API_KEY must contain at least 32 characters")
             if self.SAAS_ENABLED and len(self.OAUTH_STATE_SIGNING_KEY) < 32:
                 raise ValueError("OAUTH_STATE_SIGNING_KEY must contain at least 32 characters")
+            if self.SAAS_ENABLED and len(self.SESSION_SIGNING_KEY) < 32:
+                raise ValueError("SESSION_SIGNING_KEY must contain at least 32 characters")
         return self
 
 
