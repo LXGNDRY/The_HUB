@@ -14,6 +14,11 @@ from app.services.stripe_service import handle_verified_webhook
 router = APIRouter()
 
 
+def _ensure_enabled() -> None:
+    if not settings.WEBHOOKS_ENABLED:
+        raise HTTPException(status_code=503, detail="Webhook intake is disabled.")
+
+
 @router.post("/shopify")
 async def shopify_webhook(
     request: Request,
@@ -22,6 +27,7 @@ async def shopify_webhook(
     x_shopify_topic: str = Header(default="unknown"),
     db: AsyncSession = Depends(get_db),
 ):
+    _ensure_enabled()
     body = await request.body()
     if not verify_shopify_webhook(body, x_shopify_hmac_sha256, settings.SHOPIFY_CLIENT_SECRET):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Shopify signature.")
@@ -39,6 +45,7 @@ async def razorpay_webhook(
     x_razorpay_signature: str = Header(default=""),
     db: AsyncSession = Depends(get_db),
 ):
+    _ensure_enabled()
     body = await request.body()
     if not verify_hex_signature(body, x_razorpay_signature, settings.RAZORPAY_WEBHOOK_SECRET):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid Razorpay signature.")
@@ -53,6 +60,7 @@ async def stripe_webhook(
     stripe_signature: str = Header(default="", alias="Stripe-Signature"),
     db: AsyncSession = Depends(get_db),
 ):
+    _ensure_enabled()
     raw_body = await request.body()
     try:
         event = stripe.Webhook.construct_event(
@@ -63,8 +71,13 @@ async def stripe_webhook(
     event_id = str(event.get("id", ""))
     if not event_id:
         raise HTTPException(status_code=400, detail="Missing Stripe event ID.")
-    claimed = await DatabaseEventStore(db).claim("stripe", event_id, str(event.get("type", "")))
+    event_store = DatabaseEventStore(db)
+    claimed = await event_store.claim("stripe", event_id, str(event.get("type", "")))
     if not claimed:
         return {"received": True, "duplicate": True}
-    result = await handle_verified_webhook(event, db)
+    try:
+        result = await handle_verified_webhook(event, db)
+    except Exception:
+        await event_store.release("stripe", event_id)
+        raise
     return {"received": True, "duplicate": False, "result": result}
