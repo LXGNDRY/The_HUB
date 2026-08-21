@@ -8,7 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.core.config import settings
-from app.core.security import require_admin_api_key
+from app.core.identity import Principal, decode_session_token
+from app.core.security import constant_time_equal
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -41,15 +42,27 @@ app.add_middleware(
 @app.middleware("http")
 async def quarantine_and_authenticate(request: Request, call_next):
     path = request.url.path
-    if path in {"/health", "/ready"} or path.startswith("/api/webhooks/"):
+    if (
+        path in {"/health", "/ready", "/api/auth/shopify/callback"}
+        or path.startswith("/api/webhooks/")
+    ):
         return await call_next(request)
     if not settings.SAAS_ENABLED:
         return JSONResponse(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             content={"detail": "hub-backend is quarantined pending production readiness."},
         )
+    admin_key = request.headers.get("X-Hub-Admin-Key", "")
+    if constant_time_equal(admin_key, settings.HUB_ADMIN_API_KEY):
+        request.state.principal = Principal(
+            subject="system-admin", email="", roles=frozenset({"system_admin"})
+        )
+        return await call_next(request)
+    authorization = request.headers.get("Authorization", "")
+    if not authorization.startswith("Bearer "):
+        return JSONResponse(status_code=401, content={"detail": "Authentication required."})
     try:
-        await require_admin_api_key(request, settings.HUB_ADMIN_API_KEY)
+        request.state.principal = decode_session_token(authorization.removeprefix("Bearer ").strip())
     except HTTPException as exc:
         return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
     return await call_next(request)
