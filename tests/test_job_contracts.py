@@ -1,4 +1,5 @@
 from app.jobs.contracts import JobEnvelope, JobRisk
+from app.jobs.registry import resolve_handler
 
 
 def test_high_impact_jobs_require_approval():
@@ -20,3 +21,12 @@ def test_read_only_jobs_do_not_require_approval():
         requested_by="scheduler",
     )
     assert not job.requires_approval()
+
+
+def test_registry_rejects_arbitrary_jobs():
+    try:
+        resolve_handler("python.eval")
+    except ValueError as error:
+        assert "Unsupported job kind" in str(error)
+    else:
+        raise AssertionError("arbitrary job kind was accepted")
