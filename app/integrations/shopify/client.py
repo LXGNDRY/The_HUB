@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any, Awaitable, Callable
+from typing import Any
 
 import httpx
 
@@ -41,13 +42,13 @@ class ShopifyClient:
         *,
         api_version: str = "2026-07",
         timeout_seconds: float = 20.0,
-        retry_policy: RetryPolicy = RetryPolicy(),
+        retry_policy: RetryPolicy | None = None,
     ) -> None:
         self.shop = validate_shop_domain(shop)
         self.token_provider = token_provider
         self.endpoint = f"https://{self.shop}/admin/api/{api_version}/graphql.json"
         self.timeout = httpx.Timeout(timeout_seconds)
-        self.retry_policy = retry_policy
+        self.retry_policy = retry_policy or RetryPolicy()
 
     async def graphql(self, query: str, variables: dict[str, Any] | None = None) -> dict[str, Any]:
         last_error: Exception | None = None
