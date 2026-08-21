@@ -12,7 +12,6 @@ from dataclasses import dataclass
 
 from fastapi import HTTPException, Request, status
 
-
 SHOP_DOMAIN_RE = re.compile(r"^[a-z0-9][a-z0-9-]*\.myshopify\.com$", re.IGNORECASE)
 
 
