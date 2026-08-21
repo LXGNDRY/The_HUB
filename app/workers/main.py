@@ -8,12 +8,12 @@ from app.database import async_session
 from app.jobs.contracts import JobEnvelope
 from app.jobs.registry import resolve_handler
 from app.jobs.repository import claim_job, finish_job
+from app.jobs.policy import MutationPolicy
 
 
 async def run() -> int:
     envelope = JobEnvelope.model_validate(json.loads(os.environ["JOB_ENVELOPE_JSON"]))
-    if envelope.requires_approval() and envelope.approval_id is None:
-        raise RuntimeError("High-impact job requires an approval reference.")
+    MutationPolicy().authorize(envelope)
     async with async_session() as db:
         job_run = await claim_job(db, envelope)
         if job_run is None:
