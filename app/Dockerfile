@@ -14,6 +14,8 @@ WORKDIR /app
 COPY --from=builder /root/.local /root/.local
 ENV PATH=/root/.local/bin:$PATH
 
+RUN groupadd --system hub && useradd --system --gid hub --home-dir /app hub
+
 # Copy application code
 COPY . .
 
@@ -21,4 +23,6 @@ COPY . .
 ENV PORT=8080
 EXPOSE 8080
 
-CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 2
+USER hub
+
+CMD exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT} --workers 1
