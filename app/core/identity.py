@@ -9,6 +9,7 @@ import json
 import time
 import uuid
 from dataclasses import dataclass
+from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
 from sqlalchemy import select
@@ -70,10 +71,14 @@ def get_principal(request: Request) -> Principal:
     return principal
 
 
+PrincipalDependency = Annotated[Principal, Depends(get_principal)]
+DatabaseDependency = Annotated[AsyncSession, Depends(get_db)]
+
+
 async def require_tenant_access(
     tenant_id: uuid.UUID,
-    principal: Principal = Depends(get_principal),
-    db: AsyncSession = Depends(get_db),
+    principal: PrincipalDependency,
+    db: DatabaseDependency,
 ) -> Principal:
     if principal.system_admin:
         return principal
