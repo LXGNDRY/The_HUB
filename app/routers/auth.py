@@ -1,39 +1,38 @@
-"""
-Auth router — OAuth flow for Shopify store connections.
-"""
+"""Shopify OAuth initiation; callback persistence remains closed by design."""
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from urllib.parse import urlencode
 
-from app.database import get_db
-from app.models.tenant import Tenant
+from fastapi import APIRouter, HTTPException, Query, status
+
+from app.core.config import settings
+from app.core.security import create_oauth_state, validate_shop_domain
 
 router = APIRouter()
 
+SCOPES = "read_products,write_products,read_orders,read_themes,write_themes,read_customers"
+
 
 @router.get("/shopify")
-async def shopify_oauth_url(tenant_id: str = Query(...)):
-    """Generate Shopify OAuth URL for a tenant."""
-    from app.core.config import settings
-    scopes = "read_products,write_products,read_orders,read_themes,write_themes,read_customers,write_customers,read_shipping,write_shipping,read_markets"
-    url = (
-        f"https://{settings.SHOPIFY_REDIRECT_URI.split('/')[2]}/admin/oauth/authorize"
-        f"?client_id={settings.SHOPIFY_CLIENT_ID}"
-        f"&scope={scopes}"
-        f"&redirect_uri={settings.SHOPIFY_REDIRECT_URI}"
-        f"&state={tenant_id}"
+async def shopify_oauth_url(tenant_id: str = Query(...), shop: str = Query(...)):
+    shop = validate_shop_domain(shop)
+    if not settings.SHOPIFY_CLIENT_ID or not settings.OAUTH_STATE_SIGNING_KEY or not settings.SHOPIFY_REDIRECT_URI:
+        raise HTTPException(status_code=503, detail="Shopify OAuth is not configured.")
+    state_value = create_oauth_state(tenant_id, shop, settings.OAUTH_STATE_SIGNING_KEY)
+    query = urlencode(
+        {
+            "client_id": settings.SHOPIFY_CLIENT_ID,
+            "scope": SCOPES,
+            "redirect_uri": settings.SHOPIFY_REDIRECT_URI,
+            "state": state_value,
+        }
     )
-    return {"oauth_url": url}
+    return {"oauth_url": f"https://{shop}/admin/oauth/authorize?{query}"}
 
 
-@router.get("/shopify/callback")
-async def shopify_callback(
-    code: str = Query(...),
-    state: str = Query(...),
-    shop: str = Query(...),
-    db: AsyncSession = Depends(get_db),
-):
-    """Handle Shopify OAuth callback."""
-    # TODO: Exchange code for access token, update tenant
-    return {"shop": shop, "tenant_id": state, "status": "connected"}
+@router.get("/shopify/callback", include_in_schema=False)
+async def shopify_callback():
+    # Token persistence stays fail-closed until tenant-bound Secret Manager storage lands.
+    raise HTTPException(
+        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+        detail="OAuth callback is quarantined pending secure tenant credential storage.",
+    )
