@@ -56,7 +56,7 @@ class Settings(BaseSettings):
         return self.ENVIRONMENT.lower() == "production"
 
     @model_validator(mode="after")
-    def validate_security_posture(self) -> "Settings":
+    def validate_security_posture(self) -> Settings:
         if self.production:
             if self.DEBUG:
                 raise ValueError("DEBUG must be false in production")
