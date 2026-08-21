@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     DEBUG: bool = False
     SAAS_ENABLED: bool = False
+    WEBHOOKS_ENABLED: bool = False
     HUB_ADMIN_API_KEY: str = ""
     OAUTH_STATE_SIGNING_KEY: str = ""
     SESSION_SIGNING_KEY: str = ""
