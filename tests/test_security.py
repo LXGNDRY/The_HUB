@@ -1,8 +1,6 @@
 import base64
 import hashlib
 import hmac
-import time
-
 import pytest
 from fastapi import HTTPException
 
