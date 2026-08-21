@@ -24,10 +24,10 @@ jobs:
       - run: python -m pip install --upgrade pip
       - run: pip install -r requirements.txt pytest pytest-cov ruff mypy bandit pip-audit
       - run: test -d tests
-      - run: ruff check app/core/security.py app/core/webhooks.py tests
-      - run: bandit -q -r app/core -x tests
+      - run: ruff check app/core app/integrations app/jobs tests
+      - run: bandit -q -r app/core app/integrations app/jobs -x tests
       - run: pip-audit --strict
-      - run: pytest -q tests/test_security.py --cov=app.core --cov-report=term-missing --cov-fail-under=75
+      - run: pytest -q tests/test_security.py tests/test_job_contracts.py --cov=app.core --cov=app.jobs --cov-report=term-missing --cov-fail-under=75
 
   workflow-validation:
     runs-on: ubuntu-latest
