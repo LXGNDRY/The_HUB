@@ -1,5 +1,6 @@
 from app.jobs.contracts import JobEnvelope, JobRisk
 from app.jobs.registry import resolve_handler
+from app.jobs.policy import MutationPolicy, MutationPolicyViolation
 
 
 def test_high_impact_jobs_require_approval():
@@ -30,3 +31,19 @@ def test_registry_rejects_arbitrary_jobs():
         assert "Unsupported job kind" in str(error)
     else:
         raise AssertionError("arbitrary job kind was accepted")
+
+
+def test_policy_rejects_oversized_batch():
+    job = JobEnvelope(
+        kind="shopify.catalog.audit",
+        idempotency_key="catalog-large-batch",
+        risk=JobRisk.READ_ONLY,
+        requested_by="operator",
+        payload={"batch_size": 101},
+    )
+    try:
+        MutationPolicy().authorize(job)
+    except MutationPolicyViolation:
+        pass
+    else:
+        raise AssertionError("oversized batch was accepted")
