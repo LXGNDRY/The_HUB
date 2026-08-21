@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: pip install -r app/requirements.txt pytest pytest-cov ruff mypy bandit pip-audit
+      - run: pip install -r requirements.txt pytest pytest-cov ruff mypy bandit pip-audit
       - run: test -d tests
       - run: ruff check app/core app/integrations app/jobs tests
       - run: bandit -q -r app/core app/integrations app/jobs -x tests
@@ -30,7 +30,7 @@ jobs:
       - run: >-
           pytest -q tests/test_security.py tests/test_identity.py tests/test_job_contracts.py
           --cov=app.core.security --cov=app.core.identity
-          --cov=app.jobs.contracts --cov=app.jobs.registry
+          --cov=app.jobs.contracts --cov=app.jobs.registry --cov=app.jobs.policy
           --cov-report=term-missing --cov-fail-under=70
 
   workflow-validation:
