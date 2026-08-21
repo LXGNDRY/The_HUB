@@ -1,6 +1,6 @@
 from app.jobs.contracts import JobEnvelope, JobRisk
-from app.jobs.registry import resolve_handler
 from app.jobs.policy import MutationPolicy, MutationPolicyViolation
+from app.jobs.registry import resolve_handler
 
 
 def test_high_impact_jobs_require_approval():
