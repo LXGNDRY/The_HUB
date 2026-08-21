@@ -10,3 +10,8 @@ variable "region" {
 variable "worker_image" {
   type = string
 }
+
+variable "github_repository" {
+  type    = string
+  default = "LXGNDRY/The_HUB"
+}
