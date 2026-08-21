@@ -3,13 +3,16 @@
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.identity import Principal, decode_session_token
 from app.core.security import constant_time_equal
+from app.database import get_db
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
@@ -74,9 +77,10 @@ def health():
 
 
 @app.get("/ready", include_in_schema=False)
-def readiness():
+async def readiness(db: AsyncSession = Depends(get_db)):
     if not settings.SAAS_ENABLED:
         raise HTTPException(status_code=503, detail="SaaS surface is intentionally disabled.")
+    await db.execute(text("SELECT 1"))
     return {"status": "ready"}
 
 
