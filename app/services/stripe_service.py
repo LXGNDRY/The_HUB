@@ -3,6 +3,7 @@
 import uuid
 
 import stripe
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -36,13 +37,27 @@ async def handle_verified_webhook(event: dict, db: AsyncSession) -> dict:
     data = event.get("data", {}).get("object", {})
     metadata = data.get("metadata", {}) or {}
     tenant_raw = metadata.get("tenant_id")
-    if not tenant_raw:
-        return {"event": event_type, "handled": False, "reason": "missing_tenant"}
-    try:
-        tenant_id = uuid.UUID(str(tenant_raw))
-    except ValueError:
-        return {"event": event_type, "handled": False, "reason": "invalid_tenant"}
-    tenant = await db.get(Tenant, tenant_id)
+    tenant = None
+    tenant_id = None
+    if tenant_raw:
+        try:
+            tenant_id = uuid.UUID(str(tenant_raw))
+        except ValueError:
+            return {"event": event_type, "handled": False, "reason": "invalid_tenant"}
+        tenant = await db.get(Tenant, tenant_id)
+    if tenant is None:
+        customer_id = str(data.get("customer", ""))
+        subscription_id = str(data.get("subscription", "") or data.get("id", ""))
+        predicates = []
+        if customer_id:
+            predicates.append(Tenant.stripe_customer_id == customer_id)
+        if subscription_id:
+            predicates.append(Tenant.stripe_subscription_id == subscription_id)
+        if predicates:
+            tenant = (
+                await db.execute(select(Tenant).where(or_(*predicates)))
+            ).scalar_one_or_none()
+        tenant_id = tenant.id if tenant else None
     if tenant is None:
         return {"event": event_type, "handled": False, "reason": "unknown_tenant"}
 
