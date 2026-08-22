@@ -12,7 +12,7 @@ apscheduler>=3.10.0
 
 # Google Cloud
 google-cloud-billing>=1.13.0
-google-cloud-compute>=1.20.0
+google-cloud-compute>=1.50.0
 google-cloud-monitoring>=2.20.0
 google-cloud-storage>=2.16.0
 google-analytics-data>=0.18.0
