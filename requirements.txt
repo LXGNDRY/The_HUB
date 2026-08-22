@@ -28,7 +28,7 @@ google-api-python-client>=2.150.0
 # Environment
 python-dotenv>=1.0.0
 pydantic[email]>=2.0.0
-pydantic-settings>=2.0.0
+pydantic-settings>=2.15.0
 
 # AI / Content (Gemini, Vertex AI)
 google-generativeai>=0.8.0
