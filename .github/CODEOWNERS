@@ -1,0 +1,11 @@
+/.github/ @LXGNDRY
+/app/core/ @LXGNDRY
+/app/models/ @LXGNDRY
+/app/routers/auth.py @LXGNDRY
+/app/routers/billing.py @LXGNDRY
+/app/routers/webhooks.py @LXGNDRY
+/app/services/secret_store.py @LXGNDRY
+/app/services/stripe_service.py @LXGNDRY
+/migrations/ @LXGNDRY
+/infra/ @LXGNDRY
+/razorpay-backend/ @LXGNDRY

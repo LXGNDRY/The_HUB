@@ -1,64 +1,79 @@
-"""
-The HUB — Central configuration.
-Reads from environment variables with sensible defaults.
-"""
+"""Validated runtime configuration for the multi-tenant hub-backend."""
 
-import os
-from typing import Optional
+from __future__ import annotations
+
+from functools import lru_cache
+from typing import Annotated
+
+from pydantic import BeforeValidator, Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-class Settings:
-    # ── App ──
+def _split_origins(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [item.strip() for item in value.split(",") if item.strip()]
+    return list(value or [])
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", case_sensitive=True)
+
     APP_NAME: str = "The HUB — Shopify Operations Platform"
-    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
-    SECRET_KEY: str = os.getenv("DASHBOARD_API_KEY", "change-me-in-production")
-    ALLOWED_ORIGINS: list = os.getenv("ALLOWED_ORIGINS", "*").split(",")
+    ENVIRONMENT: str = "development"
+    DEBUG: bool = False
+    SAAS_ENABLED: bool = False
+    WEBHOOKS_ENABLED: bool = False
+    HUB_ADMIN_API_KEY: str = ""
+    OAUTH_STATE_SIGNING_KEY: str = ""
+    SESSION_SIGNING_KEY: str = ""
+    SESSION_ISSUER: str = "the-hub"
+    SESSION_AUDIENCE: str = "hub-backend"
+    ALLOWED_ORIGINS: Annotated[list[str], BeforeValidator(_split_origins)] = Field(default_factory=list)
 
-    # ── Database (Cloud SQL PostgreSQL) ──
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "postgresql+asyncpg://user:pass@localhost:5432/the_hub",
-    )
+    DATABASE_URL: str = "postgresql+asyncpg://user:pass@localhost:5432/the_hub"
 
-    # ── Stripe ──
-    STRIPE_SECRET_KEY: str = os.getenv("STRIPE_SECRET_KEY", "")
-    STRIPE_WEBHOOK_SECRET: str = os.getenv("STRIPE_WEBHOOK_SECRET", "")
-    STRIPE_PRICE_CORE: str = os.getenv("STRIPE_PRICE_CORE", "")       # $99/mo
-    STRIPE_PRICE_GROWTH: str = os.getenv("STRIPE_PRICE_GROWTH", "")   # $249/mo
-    STRIPE_PRICE_ENTERPRISE: str = os.getenv("STRIPE_PRICE_ENTERPRISE", "")  # $499/mo
-    STRIPE_PRICE_AGENCY: str = os.getenv("STRIPE_PRICE_AGENCY", "")   # $999/mo
+    STRIPE_SECRET_KEY: str = ""
+    STRIPE_WEBHOOK_SECRET: str = ""
+    RAZORPAY_WEBHOOK_SECRET: str = ""
+    STRIPE_PRICE_CORE: str = ""
+    STRIPE_PRICE_GROWTH: str = ""
+    STRIPE_PRICE_ENTERPRISE: str = ""
+    STRIPE_PRICE_AGENCY: str = ""
 
-    # ── Shopify OAuth ──
-    SHOPIFY_CLIENT_ID: str = os.getenv("SHOPIFY_CLIENT_ID", "")
-    SHOPIFY_CLIENT_SECRET: str = os.getenv("SHOPIFY_CLIENT_SECRET", "")
-    SHOPIFY_REDIRECT_URI: str = os.getenv(
-        "SHOPIFY_REDIRECT_URI",
-        "https://legendary-branding.com/api/auth/shopify/callback",
-    )
+    SHOPIFY_CLIENT_ID: str = ""
+    SHOPIFY_CLIENT_SECRET: str = ""
+    SHOPIFY_REDIRECT_URI: str = ""
 
-    # ── GCP ──
-    GCP_PROJECT_ID: str = os.getenv("GCP_PROJECT_ID", "")
-    GOOGLE_APPLICATION_CREDENTIALS: str = os.getenv(
-        "GOOGLE_APPLICATION_CREDENTIALS", ""
-    )
+    GCP_PROJECT_ID: str = ""
+    KLAVIYO_API_KEY: str = ""
+    GOOGLE_API_KEY: str = ""
+    GEMINI_MODEL: str = "gemini-2.5-flash"
+    DOMAIN: str = "legendary-branding.com"
+    DASHBOARD_URL: str = "https://legendary-branding.com"
 
-    # ── Klaviyo ──
-    KLAVIYO_API_KEY: str = os.getenv("KLAVIYO_API_KEY", "")
+    @property
+    def production(self) -> bool:
+        return self.ENVIRONMENT.lower() == "production"
 
-    # ── Gemini AI ──
-    GOOGLE_API_KEY: str = os.getenv("GOOGLE_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
-
-    # ── Scheduler ──
-    BUDGET_THRESHOLD: float = float(os.getenv("BUDGET_THRESHOLD", "100.0"))
-    IDLE_CPU_THRESHOLD: float = float(os.getenv("IDLE_CPU_THRESHOLD", "2.0"))
-    SNAPSHOT_MAX_AGE_DAYS: int = int(os.getenv("SNAPSHOT_MAX_AGE_DAYS", "30"))
-
-    # ── Domain ──
-    DOMAIN: str = os.getenv("DOMAIN", "legendary-branding.com")
-    DASHBOARD_URL: str = os.getenv(
-        "DASHBOARD_URL", "https://legendary-branding.com"
-    )
+    @model_validator(mode="after")
+    def validate_security_posture(self) -> Settings:
+        if self.production:
+            if self.DEBUG:
+                raise ValueError("DEBUG must be false in production")
+            if "*" in self.ALLOWED_ORIGINS:
+                raise ValueError("Wildcard CORS is forbidden in production")
+            if self.SAAS_ENABLED and len(self.HUB_ADMIN_API_KEY) < 32:
+                raise ValueError("HUB_ADMIN_API_KEY must contain at least 32 characters")
+            if self.SAAS_ENABLED and len(self.OAUTH_STATE_SIGNING_KEY) < 32:
+                raise ValueError("OAUTH_STATE_SIGNING_KEY must contain at least 32 characters")
+            if self.SAAS_ENABLED and len(self.SESSION_SIGNING_KEY) < 32:
+                raise ValueError("SESSION_SIGNING_KEY must contain at least 32 characters")
+        return self
 
 
-settings = Settings()
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+
+
+settings = get_settings()
