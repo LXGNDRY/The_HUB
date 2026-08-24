@@ -218,6 +218,10 @@ GitHub Actions pipeline. Secrets are injected via Secret Manager at deploy time.
 | `GCP_SA_KEY_JSON` | Raw JSON service account key |
 | `GA4_PROPERTY_ID` | Google Analytics 4 property |
 | `GOOGLE_API_KEY` | Google API key (PageSpeed, etc.) |
+| `GOOGLE_ADS_DEVELOPER_TOKEN` | Google Ads API developer token |
+| `GOOGLE_ADS_CLIENT_ID` | Google Ads OAuth client ID |
+| `GOOGLE_ADS_CLIENT_SECRET` | Google Ads OAuth client secret |
+| `GOOGLE_ADS_REFRESH_TOKEN` | Google Ads OAuth refresh token |
 | `BUDGET_THRESHOLD` | Billing alert threshold (USD, default 100) |
 | `IDLE_CPU_THRESHOLD` | CPU % below which a VM is considered idle (default 2.0) |
 | `QUOTA_ALERT_PERCENT` | Quota usage % to trigger alert (default 80) |
@@ -245,6 +249,23 @@ GitHub Actions pipeline. Secrets are injected via Secret Manager at deploy time.
 | `INDEXNOW_API_KEY` | IndexNow API key for real-time search engine pings |
 | `SITE_DOMAIN` | Public storefront domain (default `legendary-branding.com`) |
 
+### Google Ads connection
+
+Used via the `google-ads` Python SDK (`GoogleAdsClient`), authenticated with the
+four `GOOGLE_ADS_*` secrets above. Ads account (`login_customer_id`) is hardcoded
+per-script as `CUSTOMER_ID` (currently `1137623123`) rather than read from an env
+var. Used by:
+
+| Script | Workflow | Purpose |
+|---|---|---|
+| `scripts/pmax_report.py` | `pmax-report.yml` | Performance Max campaign reporting (scheduled) |
+| `scripts/pmax_campaign_setup.py`, `scripts/pmax_rest_setup.py` | `pmax-campaign-setup.yml` | Set up PMax campaigns |
+| `scripts/pmax_geo_expand.py` | `pmax-geo-expand.yml` | Geo-targeting expansion |
+| `scripts/pmax_exclude_placements.py` | `pmax-exclude-placements.yml` | Placement exclusions |
+| `scripts/check_asset_groups.py` | `check-asset-groups.yml` | Asset group audit |
+| `scripts/google_ads_checkout_audit.py` | `google-ads-checkout-audit.yml` | Checkout/conversion audit |
+| `scripts/gtm_purchase_fix.py` | `gtm-purchase-fix.yml` | GTM purchase-tracking fix (touches Ads conversion tags) |
+
 ---
 
 ## CI/CD (`.github/workflows/deploy.yml`)
@@ -266,6 +287,12 @@ Triggers on push to `main` or manual `workflow_dispatch`.
 `PAGESPEED_URL`, `PAGESPEED_API_KEY`, `HIGGSFIELD_API_KEY_ID`, `HIGGSFIELD_API_KEY_SECRET`,
 `SHOPIFY_CLIENT_ID`, `SHOPIFY_CLIENT_SECRET`, `SHOPIFY_ADMIN_TOKEN`,
 `KLAVIYO_API_KEY`, `NVIDIA_API_KEY`, `GSC_TOKEN_JSON`
+
+**Additional secrets used by Google Ads workflows** (not part of the main
+`deploy.yml` pipeline, but required by the workflows listed under
+[Google Ads connection](#google-ads-connection)):
+`GOOGLE_ADS_DEVELOPER_TOKEN`, `GOOGLE_ADS_CLIENT_ID`, `GOOGLE_ADS_CLIENT_SECRET`,
+`GOOGLE_ADS_REFRESH_TOKEN`
 
 **Lint rules:** `flake8` max line length 120, max complexity 10. Fatal on `E9,F63,F7,F82` only.
 
