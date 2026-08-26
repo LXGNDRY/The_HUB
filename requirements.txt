@@ -11,6 +11,11 @@ aiofiles>=23.2.1
 apscheduler>=3.10.0
 
 # Google Cloud
+# protobuf is pinned to a range compatible with google-cloud-aiplatform /
+# google-generativeai below — without this, pip's resolver has to backtrack
+# through the entire protobuf/grpcio version space to reconcile this group
+# with the AI/Content group, which can hang for 30+ minutes in CI.
+protobuf>=5.29.0,<6.0.0
 google-cloud-billing>=1.13.0
 google-cloud-compute>=1.50.0
 google-cloud-monitoring>=2.20.0
