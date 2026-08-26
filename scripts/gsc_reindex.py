@@ -68,6 +68,8 @@ def get_credentials():
         print("ERROR: GCP_SA_KEY not set", file=sys.stderr)
         sys.exit(1)
     sa_info = json.loads(sa_key_json)
+    print(f"Service account: {sa_info.get('client_email')}")
+    print(f"Project ID:      {sa_info.get('project_id')}")
     return service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
 
 
