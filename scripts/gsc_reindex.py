@@ -30,6 +30,12 @@ Usage:
   python gsc_reindex.py --dry-run                # no submissions, just counts
   python gsc_reindex.py --limit 10                # cap Step B/C URL count
   python gsc_reindex.py --sitemap-url https://legendary-branding.com/sitemap.xml
+  python gsc_reindex.py --site-url sc-domain:legendary-branding.com  # skip auto-resolution
+
+Note: the GSC siteUrl is auto-resolved via webmasters.sites.list at runtime
+(a Domain property like sc-domain:legendary-branding.com and a URL-prefix
+property like https://legendary-branding.com/ are different resources to
+the API, so this avoids guessing at the format).
 """
 import argparse
 import json
@@ -45,8 +51,9 @@ from googleapiclient.errors import HttpError
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from modules.indexing import IndexingModule  # noqa: E402
 
-SITE_URL = "https://legendary-branding.com/"
+FALLBACK_SITE_URL = "https://legendary-branding.com/"
 SITEMAP_URL = "https://legendary-branding.com/sitemap.xml"
+SITES_LIST_URL = "https://www.googleapis.com/webmasters/v3/sites"
 INSPECT_URL = "https://searchconsole.googleapis.com/v1/urlInspection/index:inspect"
 
 SCOPES = [
@@ -64,12 +71,54 @@ def get_credentials():
     return service_account.Credentials.from_service_account_info(sa_info, scopes=SCOPES)
 
 
-def submit_sitemap(creds, sitemap_url, dry_run):
+def resolve_site_url(creds):
+    """
+    Ask Google which GSC properties this service account actually has verified
+    access to, and use that exact siteUrl (rather than guessing at the
+    URL-prefix vs. sc-domain: form) for all subsequent API calls. A Domain
+    property (sc-domain:example.com) and a URL-prefix property
+    (https://example.com/) are different resources to the Search Console
+    API even when both "cover" the same site — Owner access on one does not
+    grant access to the other.
+    """
+    print("Resolving verified GSC site (webmasters.sites.list)...")
+    from google.auth.transport.requests import Request as GoogleRequest
+    creds.refresh(GoogleRequest())
+    resp = requests.get(
+        SITES_LIST_URL,
+        headers={"Authorization": f"Bearer {creds.token}"},
+        timeout=15,
+    )
+    if resp.status_code != 200:
+        print(f"  WARNING: sites.list returned HTTP {resp.status_code} — falling back to {FALLBACK_SITE_URL}")
+        return FALLBACK_SITE_URL
+
+    entries = resp.json().get("siteEntry", [])
+    if not entries:
+        print(f"  WARNING: sites.list returned no properties — falling back to {FALLBACK_SITE_URL}")
+        return FALLBACK_SITE_URL
+
+    print(f"  Service account has access to {len(entries)} propert{'y' if len(entries) == 1 else 'ies'}:")
+    for entry in entries:
+        print(f"    - {entry.get('siteUrl')} (permission: {entry.get('permissionLevel')})")
+
+    for entry in entries:
+        site_url = entry.get("siteUrl", "")
+        if "legendary-branding.com" in site_url:
+            print(f"  Using: {site_url}")
+            return site_url
+
+    site_url = entries[0]["siteUrl"]
+    print(f"  No legendary-branding.com match found; using first property: {site_url}")
+    return site_url
+
+
+def submit_sitemap(creds, site_url, sitemap_url, dry_run):
     """Step A — the real, ToS-compliant recrawl request."""
     print("=" * 70)
     print("STEP A: Sitemap resubmission (Search Console API)")
     print("=" * 70)
-    print(f"  Site:    {SITE_URL}")
+    print(f"  Site:    {site_url}")
     print(f"  Sitemap: {sitemap_url}")
 
     if dry_run:
@@ -78,16 +127,16 @@ def submit_sitemap(creds, sitemap_url, dry_run):
 
     try:
         service = build("searchconsole", "v1", credentials=creds, cache_discovery=False)
-        service.sitemaps().submit(siteUrl=SITE_URL, feedpath=sitemap_url).execute()
+        service.sitemaps().submit(siteUrl=site_url, feedpath=sitemap_url).execute()
         print("  Sitemap resubmitted successfully.")
         print("  This asks Google to re-fetch and re-evaluate the sitemap; crawl")
         print("  timing/priority is still entirely at Google's discretion.")
         return {"status": "submitted"}
     except HttpError as e:
         print(f"  ERROR submitting sitemap: {e}")
-        print("  If this is a 403/404 and URL Inspection below still works,")
-        print("  the property may be registered as a Domain property —")
-        print("  try SITE_URL = 'sc-domain:legendary-branding.com' instead.")
+        print("  site_url above was resolved from webmasters.sites.list, so this")
+        print("  is unlikely to be a property-format mismatch — check that the")
+        print("  service account still has Owner/Full access on that property.")
         raise
 
 
@@ -117,7 +166,7 @@ def submit_web_indexing(creds, urls, dry_run):
     return result
 
 
-def inspect_urls(creds, urls):
+def inspect_urls(creds, site_url, urls):
     """Step C — real, read-only index status per URL."""
     print()
     print("=" * 70)
@@ -130,12 +179,15 @@ def inspect_urls(creds, urls):
     headers = {"Authorization": f"Bearer {creds.token}", "Content-Type": "application/json"}
     rows = []
     verdict_counts = {}
+    first_error_body = None
 
     for url in urls:
-        payload = {"inspectionUrl": url, "siteUrl": SITE_URL}
+        payload = {"inspectionUrl": url, "siteUrl": site_url}
         try:
             resp = requests.post(INSPECT_URL, headers=headers, json=payload, timeout=15)
             if resp.status_code != 200:
+                if first_error_body is None:
+                    first_error_body = resp.text[:500]
                 rows.append({"url": url, "verdict": f"HTTP_{resp.status_code}", "coverageState": "", "lastCrawlTime": ""})
                 verdict_counts[f"HTTP_{resp.status_code}"] = verdict_counts.get(f"HTTP_{resp.status_code}", 0) + 1
                 continue
@@ -156,6 +208,8 @@ def inspect_urls(creds, urls):
     print("  Verdict breakdown:")
     for verdict, count in sorted(verdict_counts.items(), key=lambda kv: -kv[1]):
         print(f"    {verdict}: {count}")
+    if first_error_body:
+        print(f"  First error response body: {first_error_body}")
 
     print()
     print("  Per-URL detail:")
@@ -170,18 +224,20 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Skip real submissions, just report counts")
     parser.add_argument("--limit", type=int, default=200, help="Max URLs for Web Indexing push + Inspection (default 200)")
     parser.add_argument("--sitemap-url", default=SITEMAP_URL, help="Override sitemap URL")
+    parser.add_argument("--site-url", default=None, help="Override GSC siteUrl (skips auto-resolution)")
     args = parser.parse_args()
 
     creds = get_credentials()
+    site_url = args.site_url or resolve_site_url(creds)
 
-    sitemap_result = submit_sitemap(creds, args.sitemap_url, args.dry_run)
+    sitemap_result = submit_sitemap(creds, site_url, args.sitemap_url, args.dry_run)
 
     idx = IndexingModule(creds)
     urls = idx.get_urls_from_sitemap(sitemap_url=args.sitemap_url, limit=args.limit)
     print(f"\nLoaded {len(urls)} URLs from live sitemap (limit={args.limit}).")
 
     web_indexing_result = submit_web_indexing(creds, urls, args.dry_run)
-    inspection_rows = inspect_urls(creds, urls)
+    inspection_rows = inspect_urls(creds, site_url, urls)
 
     print()
     print("=" * 70)
