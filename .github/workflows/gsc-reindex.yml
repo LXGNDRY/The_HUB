@@ -1,0 +1,57 @@
+name: GSC Re-Index Pages
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max URLs to process (daily Web Indexing quota is 200)"
+        required: false
+        default: "200"
+      dry_run:
+        description: "Dry run (no submissions, just report counts)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  reindex:
+    name: Re-index Legendary Branding pages in GSC
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests google-auth google-api-python-client
+
+      - name: Run GSC re-index
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          set -o pipefail
+          ARGS="--limit ${{ github.event.inputs.limit || '200' }}"
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "## GSC Re-Index Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python scripts/gsc_reindex.py $ARGS 2>&1 | tee report_output.txt
+          cat report_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload report as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gsc-reindex-report-${{ github.run_id }}
+          path: report_output.txt
+          retention-days: 90
