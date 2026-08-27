@@ -1,6 +1,15 @@
 name: GSC Re-Index Pages
 
 on:
+  schedule:
+    # Both times are pinned safely after the GSC/Indexing API daily quota
+    # reset (midnight Pacific = 07:00 UTC in PDT / 08:00 UTC in PST) year
+    # round, landing around 2:15/2:50 AM Central in winter and
+    # 3:15/3:50 AM Central in summer (US DST moves Chicago and Pacific
+    # together, just not by the same UTC offset relative to a fixed cron).
+    - cron: "15 8 * * *"   # full-site pass (limit=200)
+    - cron: "50 8 * * *"   # blogs-only pass, staggered ~35min later so the
+                            # two don't contend for the same GSC API rate limit
   workflow_dispatch:
     inputs:
       limit:
@@ -42,12 +51,22 @@ jobs:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           set -o pipefail
-          ARGS="--limit ${{ github.event.inputs.limit || '200' }}"
-          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
-            ARGS="$ARGS --dry-run"
-          fi
-          if [ -n "${{ github.event.inputs.sitemap_url }}" ]; then
-            ARGS="$ARGS --sitemap-url ${{ github.event.inputs.sitemap_url }}"
+          SCHEDULE="${{ github.event.schedule }}"
+          if [ "$SCHEDULE" = "50 8 * * *" ]; then
+            # Staggered blogs-only scheduled pass
+            ARGS="--limit 100 --sitemap-url https://legendary-branding.com/sitemap_blogs_1.xml"
+          elif [ "$SCHEDULE" = "15 8 * * *" ]; then
+            # Scheduled full-site pass
+            ARGS="--limit 200"
+          else
+            # Manual workflow_dispatch run
+            ARGS="--limit ${{ github.event.inputs.limit || '200' }}"
+            if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+              ARGS="$ARGS --dry-run"
+            fi
+            if [ -n "${{ github.event.inputs.sitemap_url }}" ]; then
+              ARGS="$ARGS --sitemap-url ${{ github.event.inputs.sitemap_url }}"
+            fi
           fi
           echo "## GSC Re-Index Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
