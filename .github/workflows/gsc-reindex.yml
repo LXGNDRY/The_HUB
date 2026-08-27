@@ -15,6 +15,10 @@ on:
         options:
           - "false"
           - "true"
+      sitemap_url:
+        description: "Override sitemap URL (e.g. blogs-only sub-sitemap)"
+        required: false
+        default: ""
 
 jobs:
   reindex:
@@ -41,6 +45,9 @@ jobs:
           ARGS="--limit ${{ github.event.inputs.limit || '200' }}"
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             ARGS="$ARGS --dry-run"
+          fi
+          if [ -n "${{ github.event.inputs.sitemap_url }}" ]; then
+            ARGS="$ARGS --sitemap-url ${{ github.event.inputs.sitemap_url }}"
           fi
           echo "## GSC Re-Index Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
