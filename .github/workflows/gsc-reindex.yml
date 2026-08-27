@@ -20,7 +20,7 @@ jobs:
   reindex:
     name: Re-index Legendary Branding pages in GSC
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v4
@@ -44,7 +44,7 @@ jobs:
           fi
           echo "## GSC Re-Index Report" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          python scripts/gsc_reindex.py $ARGS 2>&1 | tee report_output.txt
+          python -u scripts/gsc_reindex.py $ARGS 2>&1 | tee report_output.txt
           cat report_output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
