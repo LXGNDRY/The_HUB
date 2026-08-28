@@ -5,12 +5,16 @@ name: Google Ads — Generate Refresh Token
 # auth). Uses the GOOGLE_ADS_CLIENT_ID/SECRET already stored as repo
 # secrets — never exposes them outside this runner.
 #
-# Step 1: run with auth_code left blank -> prints an authorization URL in
-#         the job summary. Open it in YOUR browser, log in with the Google
-#         account that has access to the Ads account (or its manager
-#         account), and grant consent. You'll land on a "site can't be
-#         reached" localhost page — that's expected. Copy the `code=...`
-#         value from that page's URL.
+# Step 1: run with auth_code left blank -> writes an authorization URL to
+#         a downloadable artifact (GitHub's log/summary masking would
+#         otherwise redact the client_id since it matches a stored secret,
+#         even though it's not sensitive on its own — masking only spares
+#         artifact file contents). Download the artifact from this run's
+#         page, open the URL inside it in YOUR browser, log in with the
+#         Google account that has access to the Ads account (or its
+#         manager account), and grant consent. You'll land on a "site
+#         can't be reached" localhost page — that's expected. Copy the
+#         `code=...` value from that page's URL.
 # Step 2: run again, pasting that code into the auth_code input. This
 #         exchanges it for a refresh token and prints it in the job
 #         summary. Copy that value into the GOOGLE_ADS_REFRESH_TOKEN
@@ -47,15 +51,28 @@ jobs:
               "prompt": "consent",
           }
           url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
-          print(url)
+          with open("auth_url.txt", "w") as f:
+              f.write(url + "\n")
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
-              f.write("## Step 1: Open this URL in your browser\n\n")
-              f.write(f"{url}\n\n")
-              f.write("Log in with the Google account that has access to the Ads account, ")
-              f.write("grant consent, then copy the `code=` value from the resulting ")
-              f.write("(failed to load) localhost redirect URL. Re-run this workflow with ")
-              f.write("that value as the `auth_code` input.\n")
+              f.write("## Step 1: Download the auth-url artifact from this run\n\n")
+              f.write("The URL itself is withheld from this log/summary because it contains "
+                      "the client_id, which GitHub auto-redacts anywhere it matches a stored "
+                      "secret value — even in the summary. Open the `auth-url` artifact "
+                      "attached to this workflow run (scroll to the bottom of the run page) "
+                      "to get the real URL.\n\n")
+              f.write("Open it in your browser, log in with the Google account that has "
+                      "access to the Ads account, grant consent, then copy the `code=` value "
+                      "from the resulting (failed to load) localhost redirect URL. Re-run "
+                      "this workflow with that value as the `auth_code` input.\n")
           PYEOF
+
+      - name: Upload authorization URL as artifact
+        if: ${{ github.event.inputs.auth_code == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-url
+          path: auth_url.txt
+          retention-days: 1
 
       - name: Exchange code for refresh token (step 2)
         if: ${{ github.event.inputs.auth_code != '' }}
