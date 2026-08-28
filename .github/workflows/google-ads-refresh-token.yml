@@ -68,7 +68,7 @@ jobs:
 
       - name: Upload authorization URL as artifact
         if: ${{ github.event.inputs.auth_code == '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: auth-url
           path: auth_url.txt
