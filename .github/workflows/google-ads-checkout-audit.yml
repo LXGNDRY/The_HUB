@@ -36,10 +36,11 @@ jobs:
           GA4_PROPERTY_ID:            ${{ secrets.GA4_PROPERTY_ID }}
           GA4_TOKEN_JSON:             ${{ secrets.GA4_TOKEN_JSON }}
         run: |
+          set -o pipefail
           DAYS="${{ github.event.inputs.days || '30' }}"
           echo "## Google Ads + Checkout Audit — Last ${DAYS} Days" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          python scripts/google_ads_checkout_audit.py --days "$DAYS" 2>&1 | tee audit_output.txt
+          python -u scripts/google_ads_checkout_audit.py --days "$DAYS" 2>&1 | tee audit_output.txt
           cat audit_output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 

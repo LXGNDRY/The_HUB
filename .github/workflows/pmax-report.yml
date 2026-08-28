@@ -36,10 +36,11 @@ jobs:
           GOOGLE_ADS_CLIENT_SECRET:   ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
           GOOGLE_ADS_REFRESH_TOKEN:   ${{ secrets.GOOGLE_ADS_REFRESH_TOKEN }}
         run: |
+          set -o pipefail
           DAYS="${{ github.event.inputs.days || '30' }}"
           echo "## LXGNDRY PMax — Last ${DAYS} Days" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          python scripts/pmax_report.py --days "$DAYS" 2>&1 | tee report_output.txt
+          python -u scripts/pmax_report.py --days "$DAYS" 2>&1 | tee report_output.txt
           cat report_output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 

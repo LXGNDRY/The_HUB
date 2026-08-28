@@ -34,6 +34,7 @@ jobs:
           GOOGLE_ADS_DEVELOPER_TOKEN: ${{ secrets.GOOGLE_ADS_DEVELOPER_TOKEN }}
           GCP_SA_KEY_JSON:            ${{ secrets.GCP_SA_KEY }}
         run: |
+          set -o pipefail
           ARGS=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
             ARGS="$ARGS --dry-run"
@@ -45,7 +46,7 @@ jobs:
           echo "## PMax Placement Exclusions" >> $GITHUB_STEP_SUMMARY
           echo "dry_run=${{ github.event.inputs.dry_run }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          python scripts/pmax_exclude_placements.py $ARGS 2>&1 | tee exclusion_output.txt
+          python -u scripts/pmax_exclude_placements.py $ARGS 2>&1 | tee exclusion_output.txt
           cat exclusion_output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
