@@ -31,7 +31,7 @@ google-cloud-logging>=3.10.0
 # Google Auth
 google-auth>=2.30.0
 google-auth-oauthlib>=1.2.0
-google-api-python-client>=2.150.0
+google-api-python-client>=2.199.0
 
 # Environment
 python-dotenv>=1.2.3
