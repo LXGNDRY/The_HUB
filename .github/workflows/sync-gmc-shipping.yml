@@ -20,7 +20,7 @@ jobs:
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: python scripts/sync_gmc_shipping.py
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: shipping-sync-report
