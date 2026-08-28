@@ -1,0 +1,112 @@
+name: Google Ads — Generate Refresh Token
+
+# Two-step, manual-only helper to mint the one-time OAuth refresh token
+# the Google Ads API requires (it does not support service-account/GCP-IAM
+# auth). Uses the GOOGLE_ADS_CLIENT_ID/SECRET already stored as repo
+# secrets — never exposes them outside this runner.
+#
+# Step 1: run with auth_code left blank -> prints an authorization URL in
+#         the job summary. Open it in YOUR browser, log in with the Google
+#         account that has access to the Ads account (or its manager
+#         account), and grant consent. You'll land on a "site can't be
+#         reached" localhost page — that's expected. Copy the `code=...`
+#         value from that page's URL.
+# Step 2: run again, pasting that code into the auth_code input. This
+#         exchanges it for a refresh token and prints it in the job
+#         summary. Copy that value into the GOOGLE_ADS_REFRESH_TOKEN
+#         repo secret (Settings -> Secrets and variables -> Actions).
+
+on:
+  workflow_dispatch:
+    inputs:
+      auth_code:
+        description: "Leave blank for step 1 (get URL). Paste the code= value from the redirect URL for step 2."
+        required: false
+        default: ""
+
+jobs:
+  oauth-helper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Build authorization URL (step 1)
+        if: ${{ github.event.inputs.auth_code == '' }}
+        env:
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          from urllib.parse import urlencode
+
+          params = {
+              "client_id": os.environ["GOOGLE_ADS_CLIENT_ID"],
+              "redirect_uri": "http://localhost",
+              "response_type": "code",
+              "scope": "https://www.googleapis.com/auth/adwords",
+              "access_type": "offline",
+              "prompt": "consent",
+          }
+          url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+          print(url)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("## Step 1: Open this URL in your browser\n\n")
+              f.write(f"{url}\n\n")
+              f.write("Log in with the Google account that has access to the Ads account, ")
+              f.write("grant consent, then copy the `code=` value from the resulting ")
+              f.write("(failed to load) localhost redirect URL. Re-run this workflow with ")
+              f.write("that value as the `auth_code` input.\n")
+          PYEOF
+
+      - name: Exchange code for refresh token (step 2)
+        if: ${{ github.event.inputs.auth_code != '' }}
+        env:
+          GOOGLE_ADS_CLIENT_ID:     ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          AUTH_CODE:                ${{ github.event.inputs.auth_code }}
+        run: |
+          pip install -q requests
+          python3 - <<'PYEOF'
+          import os
+          import sys
+          import requests
+
+          resp = requests.post(
+              "https://oauth2.googleapis.com/token",
+              data={
+                  "client_id": os.environ["GOOGLE_ADS_CLIENT_ID"],
+                  "client_secret": os.environ["GOOGLE_ADS_CLIENT_SECRET"],
+                  "code": os.environ["AUTH_CODE"],
+                  "grant_type": "authorization_code",
+                  "redirect_uri": "http://localhost",
+              },
+              timeout=15,
+          )
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+
+          if resp.status_code != 200:
+              print("ERROR exchanging code:", resp.status_code, resp.text, file=sys.stderr)
+              with open(summary_path, "a") as f:
+                  f.write("## Exchange failed\n\n")
+                  f.write(f"HTTP {resp.status_code}: `{resp.text}`\n\n")
+                  f.write("Auth codes are single-use and expire quickly — re-run step 1 for a fresh URL.\n")
+              sys.exit(1)
+
+          data = resp.json()
+          refresh_token = data.get("refresh_token")
+
+          if not refresh_token:
+              with open(summary_path, "a") as f:
+                  f.write("## No refresh_token in response\n\n")
+                  f.write("This usually means the account already granted consent before without "
+                          "`prompt=consent`/`access_type=offline` sticking — try step 1 again; "
+                          "Google only returns a refresh_token on a fresh consent grant.\n")
+              sys.exit(1)
+
+          with open(summary_path, "a") as f:
+              f.write("## Success — copy this into the GOOGLE_ADS_REFRESH_TOKEN repo secret\n\n")
+              f.write("Settings -> Secrets and variables -> Actions -> GOOGLE_ADS_REFRESH_TOKEN\n\n")
+              f.write("```\n")
+              f.write(refresh_token + "\n")
+              f.write("```\n")
+          print("Refresh token generated — see job summary.")
+          PYEOF
