@@ -18,7 +18,7 @@ jobs:
     env:
       PYTHONPATH: .
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -38,7 +38,7 @@ jobs:
   workflow-validation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker://rhysd/actionlint:latest
         with:
           args: .github/workflows/enterprise-ci.yml .github/workflows/deploy.yml .github/workflows/hub-backend-deploy.yml
@@ -46,7 +46,7 @@ jobs:
   secret-scan:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v3
@@ -60,7 +60,7 @@ jobs:
       matrix:
         dockerfile: [Dockerfile, app/Dockerfile]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v7
         with:
