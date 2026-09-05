@@ -1,0 +1,155 @@
+name: GA4 — Generate Token JSON
+
+# Two-step, manual-only helper to mint the GA4_TOKEN_JSON credential the
+# GA4 Data API needs (modules/analytics.py, scripts/google_ads_checkout_audit.py,
+# scripts/ga4_bot_traffic_audit.py). Reuses the existing GOOGLE_ADS_CLIENT_ID/SECRET
+# OAuth client (OAuth clients aren't tied to one API — only the requested scope
+# matters), just requesting the analytics.readonly scope instead of adwords.
+#
+# Step 1: run with auth_code left blank -> uploads an 'auth-url' artifact
+#         containing the authorization URL (kept out of logs/summary since
+#         GitHub auto-redacts any text matching the client_id secret value).
+#         Download it, open the URL in a browser, log in with the Google
+#         account that has access to the GA4 property, grant consent. You'll
+#         land on a "site can't be reached" localhost page — expected. Copy
+#         the `code=...` value from that page's URL.
+# Step 2: run again, pasting that code into the auth_code input. This
+#         exchanges it for tokens and uploads a 'ga4-token-json' artifact
+#         containing the full GA4_TOKEN_JSON value (also kept out of the
+#         log/summary since it embeds the client_secret). Copy that file's
+#         contents into the GA4_TOKEN_JSON repo secret.
+
+on:
+  workflow_dispatch:
+    inputs:
+      auth_code:
+        description: "Leave blank for step 1 (get URL). Paste the code= value from the redirect URL for step 2."
+        required: false
+        default: ""
+
+jobs:
+  oauth-helper:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Build authorization URL (step 1)
+        if: ${{ github.event.inputs.auth_code == '' }}
+        env:
+          GOOGLE_ADS_CLIENT_ID: ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+        run: |
+          python3 - <<'PYEOF'
+          import os
+          from urllib.parse import urlencode
+
+          params = {
+              "client_id": os.environ["GOOGLE_ADS_CLIENT_ID"],
+              "redirect_uri": "http://localhost",
+              "response_type": "code",
+              "scope": "https://www.googleapis.com/auth/analytics.readonly",
+              "access_type": "offline",
+              "prompt": "consent",
+          }
+          url = "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
+          with open("auth_url.txt", "w") as f:
+              f.write(url + "\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("## Step 1: Download the auth-url artifact from this run\n\n")
+              f.write("The URL itself is withheld from this log/summary because it contains "
+                      "the client_id, which GitHub auto-redacts anywhere it matches a stored "
+                      "secret value — even in the summary. Open the `auth-url` artifact "
+                      "attached to this workflow run (scroll to the bottom of the run page) "
+                      "to get the real URL.\n\n")
+              f.write("Open it in your browser, log in with the Google account that has "
+                      "access to the GA4 property, grant consent, then copy the `code=` "
+                      "value from the resulting (failed to load) localhost redirect URL. "
+                      "Re-run this workflow with that value as the `auth_code` input.\n")
+          PYEOF
+
+      - name: Upload authorization URL as artifact
+        if: ${{ github.event.inputs.auth_code == '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: auth-url
+          path: auth_url.txt
+          retention-days: 1
+
+      - name: Exchange code for GA4_TOKEN_JSON (step 2)
+        if: ${{ github.event.inputs.auth_code != '' }}
+        env:
+          GOOGLE_ADS_CLIENT_ID:     ${{ secrets.GOOGLE_ADS_CLIENT_ID }}
+          GOOGLE_ADS_CLIENT_SECRET: ${{ secrets.GOOGLE_ADS_CLIENT_SECRET }}
+          AUTH_CODE:                ${{ github.event.inputs.auth_code }}
+        run: |
+          pip install -q requests
+          python3 - <<'PYEOF'
+          import json
+          import os
+          import sys
+          import requests
+
+          client_id = os.environ["GOOGLE_ADS_CLIENT_ID"]
+          client_secret = os.environ["GOOGLE_ADS_CLIENT_SECRET"]
+
+          resp = requests.post(
+              "https://oauth2.googleapis.com/token",
+              data={
+                  "client_id": client_id,
+                  "client_secret": client_secret,
+                  "code": os.environ["AUTH_CODE"],
+                  "grant_type": "authorization_code",
+                  "redirect_uri": "http://localhost",
+              },
+              timeout=15,
+          )
+          summary_path = os.environ["GITHUB_STEP_SUMMARY"]
+
+          if resp.status_code != 200:
+              print("ERROR exchanging code:", resp.status_code, resp.text, file=sys.stderr)
+              with open(summary_path, "a") as f:
+                  f.write("## Exchange failed\n\n")
+                  f.write(f"HTTP {resp.status_code}: `{resp.text}`\n\n")
+                  f.write("Auth codes are single-use and expire quickly — re-run step 1 for a fresh URL.\n")
+              sys.exit(1)
+
+          data = resp.json()
+          refresh_token = data.get("refresh_token")
+
+          if not refresh_token:
+              with open(summary_path, "a") as f:
+                  f.write("## No refresh_token in response\n\n")
+                  f.write("This usually means the account already granted consent before without "
+                          "`prompt=consent`/`access_type=offline` sticking — try step 1 again; "
+                          "Google only returns a refresh_token on a fresh consent grant.\n")
+              sys.exit(1)
+
+          # modules/analytics.py._build_client() reads access_token, refresh_token,
+          # client_id, client_secret from this JSON to build a Credentials object
+          # that self-refreshes via token_uri using client_id/client_secret.
+          token_json = {
+              "access_token": data.get("access_token"),
+              "refresh_token": refresh_token,
+              "client_id": client_id,
+              "client_secret": client_secret,
+              "token_type": data.get("token_type", "Bearer"),
+              "scope": data.get("scope", "https://www.googleapis.com/auth/analytics.readonly"),
+          }
+
+          with open("ga4_token.json", "w") as f:
+              json.dump(token_json, f, indent=2)
+
+          with open(summary_path, "a") as f:
+              f.write("## Success — download the ga4-token-json artifact\n\n")
+              f.write("Its contents (kept out of this log because they embed the client_secret) "
+                      "go directly into the GA4_TOKEN_JSON repo secret: "
+                      "Settings -> Secrets and variables -> Actions -> GA4_TOKEN_JSON. "
+                      "Paste the entire JSON file content as the secret value.\n")
+          print("GA4 token JSON generated — see job summary and download the artifact.")
+          PYEOF
+
+      - name: Upload GA4 token JSON as artifact
+        if: ${{ github.event.inputs.auth_code != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ga4-token-json
+          path: ga4_token.json
+          retention-days: 1
