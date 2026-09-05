@@ -1,0 +1,48 @@
+name: GA4 Checkout Traffic Quality Audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Number of days to look back (7, 14, 30, 60, 90)"
+        required: false
+        default: "30"
+
+jobs:
+  audit:
+    name: Run GA4 Checkout Traffic Quality Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install google-analytics-data google-auth
+
+      - name: Run audit
+        id: audit
+        env:
+          GA4_PROPERTY_ID: ${{ secrets.GA4_PROPERTY_ID }}
+          GA4_TOKEN_JSON:  ${{ secrets.GA4_TOKEN_JSON }}
+        run: |
+          set -o pipefail
+          DAYS="${{ github.event.inputs.days || '30' }}"
+          echo "## GA4 Checkout Traffic Quality Audit — Last ${DAYS} Days" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python -u scripts/ga4_bot_traffic_audit.py --days "$DAYS" 2>&1 | tee audit_output.txt
+          cat audit_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload audit as artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ga4-bot-traffic-audit-${{ github.run_id }}
+          path: audit_output.txt
+          retention-days: 90
