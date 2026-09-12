@@ -52,4 +52,4 @@ psycopg2-binary>=2.9.12
 alembic>=1.13.0
 
 # ── Stripe (hub-backend / app) ──
-stripe>=10.0.0
+stripe>=15.5.1
