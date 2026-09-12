@@ -88,10 +88,17 @@ supplier letter).
 
 ## How this gets used
 
-- `scripts/compliance_v2_audit.py` (and the nightly `compliance_v2_audit_job`)
-  loads this file, evaluates every live Shopify variant, and reports which
-  ones are `READY` vs `REVIEW_REQUIRED` and why. It never writes to Shopify.
-- `scripts/compliance_v2_apply.py` is the only path that writes HS
-  code/country of origin to Shopify, and only for variants the audit marked
-  `READY`, and only after an explicit `--approved-by` / `--approval-reference`
-  human sign-off matched against the exact planned values.
+- `scripts/compliance_v2_audit.py` loads this file, evaluates every live
+  Shopify variant, and reports which ones are `READY` vs `REVIEW_REQUIRED`
+  and why. Read-only — never writes to Shopify.
+- The nightly `compliance_v2_audit_job` runs the same evaluation, then
+  **automatically writes** every plan the classifier marked evidence-verified
+  `READY` — no human approval step. This is safe because a plan only ever
+  exists for a variant with verified supplier/manufacturer evidence (never
+  guessed), and each write re-checks Shopify's live state immediately
+  beforehand via `modules/international_compliance_runner.py::apply_ready_plans()`,
+  skipping anything that's drifted since the audit ran.
+- `scripts/compliance_v2_apply.py` is a manual, single-item version of the
+  same write path (e.g. to apply one variant on demand) — it no longer
+  requires a human name/reference either; those are optional audit-trail
+  labels only.

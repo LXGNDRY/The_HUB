@@ -1032,30 +1032,40 @@ def compliance_patch_job():
 
 def compliance_v2_audit_job():
     """
-    Nightly automated Compliance V2 catalog audit. Read-only — evaluates every
-    live Shopify variant and alerts on the READY/REVIEW_REQUIRED breakdown and
-    top blocking reasons. Never writes to Shopify; see
-    scripts/compliance_v2_apply.py for the human-approval-gated write path.
+    Nightly automated Compliance V2 catalog audit + auto-apply. Evaluates every
+    live Shopify variant; any plan the classifier marked evidence-verified
+    READY is automatically written to Shopify — no human approval step. Safety
+    is upstream: the classifier only ever produces a plan from verified
+    supplier/manufacturer evidence (never guessed), and each write re-checks
+    Shopify's live state immediately beforehand, skipping anything that's gone
+    stale since the audit ran. See
+    modules/international_compliance_runner.py::apply_ready_plans().
     """
     logger.info("[compliance_v2_audit_job] Running...")
     try:
-        from modules.international_compliance_runner import run_audit
+        from modules.international_compliance_runner import apply_ready_plans, run_audit
 
         report = run_audit()
         logger.info(
-            "[compliance_v2_audit_job] %d variants: %d READY, %d REVIEW_REQUIRED, %d plans awaiting approval",
+            "[compliance_v2_audit_job] %d variants: %d READY, %d REVIEW_REQUIRED, %d plans to apply",
             report.total_variants, report.ready_count, report.review_required_count,
             len(report.planned_writes),
         )
 
         lines = ["🌍 *Compliance V2 — Nightly Catalog Audit*", ""]
         lines.extend(f"  {line}" for line in report.summary_lines())
+
         if report.planned_writes:
-            lines.append("")
-            lines.append(
-                f"  {len(report.planned_writes)} evidence-verified plan(s) awaiting approval — "
-                "run scripts/compliance_v2_apply.py to review and approve."
+            apply_report = apply_ready_plans(report)
+            logger.info(
+                "[compliance_v2_audit_job] auto-apply: %d applied, %d skipped",
+                len(apply_report.applied), len(apply_report.skipped),
             )
+            lines.append("")
+            lines.extend(f"  {line}" for line in apply_report.summary_lines())
+            if apply_report.skipped:
+                lines.append("  (skipped items had gone stale since the audit ran — will re-evaluate next run)")
+
         send_alert("\n".join(lines))
     except Exception as e:
         logger.error("[compliance_v2_audit_job] Failed: %s", e)
