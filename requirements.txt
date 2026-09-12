@@ -8,7 +8,7 @@ requests>=2.34.2
 aiofiles>=23.2.1
 
 # Scheduler
-apscheduler>=3.10.0
+apscheduler>=3.11.3
 
 # Google Cloud
 # protobuf is pinned to a range compatible with google-cloud-aiplatform /
