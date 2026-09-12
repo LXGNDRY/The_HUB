@@ -4,6 +4,7 @@ Mounts all routers and starts the APScheduler on app startup.
 """
 
 import logging
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Depends, HTTPException
@@ -42,13 +43,16 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS — restrict in production to your dashboard origin
+# CORS is explicit in every environment; wildcard origins are never combined with credentials.
+allowed_origins = [origin.strip() for origin in os.getenv(
+    "ALLOWED_ORIGINS", "https://legendary-branding.com"
+).split(",") if origin.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-Id"],
 )
 
 # -------------------------------------------------------------------------

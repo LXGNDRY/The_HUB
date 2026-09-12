@@ -18,9 +18,9 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -36,16 +36,17 @@ jobs:
           GA4_PROPERTY_ID:            ${{ secrets.GA4_PROPERTY_ID }}
           GA4_TOKEN_JSON:             ${{ secrets.GA4_TOKEN_JSON }}
         run: |
+          set -o pipefail
           DAYS="${{ github.event.inputs.days || '30' }}"
           echo "## Google Ads + Checkout Audit — Last ${DAYS} Days" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          python scripts/google_ads_checkout_audit.py --days "$DAYS" 2>&1 | tee audit_output.txt
+          python -u scripts/google_ads_checkout_audit.py --days "$DAYS" 2>&1 | tee audit_output.txt
           cat audit_output.txt >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
 
       - name: Upload audit as artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: checkout-audit-${{ github.run_id }}
           path: audit_output.txt

@@ -1,0 +1,83 @@
+name: GSC Re-Index Pages
+
+on:
+  schedule:
+    # Both times are pinned safely after the GSC/Indexing API daily quota
+    # reset (midnight Pacific = 07:00 UTC in PDT / 08:00 UTC in PST) year
+    # round, landing around 2:15/2:50 AM Central in winter and
+    # 3:15/3:50 AM Central in summer (US DST moves Chicago and Pacific
+    # together, just not by the same UTC offset relative to a fixed cron).
+    - cron: "15 8 * * *"   # full-site pass (limit=200)
+    - cron: "50 8 * * *"   # blogs-only pass, staggered ~35min later so the
+                            # two don't contend for the same GSC API rate limit
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max URLs to process (daily Web Indexing quota is 200)"
+        required: false
+        default: "200"
+      dry_run:
+        description: "Dry run (no submissions, just report counts)"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      sitemap_url:
+        description: "Override sitemap URL (e.g. blogs-only sub-sitemap)"
+        required: false
+        default: ""
+
+jobs:
+  reindex:
+    name: Re-index Legendary Branding pages in GSC
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests google-auth google-api-python-client
+
+      - name: Run GSC re-index
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          set -o pipefail
+          SCHEDULE="${{ github.event.schedule }}"
+          if [ "$SCHEDULE" = "50 8 * * *" ]; then
+            # Staggered blogs-only scheduled pass
+            ARGS="--limit 100 --sitemap-url https://legendary-branding.com/sitemap_blogs_1.xml"
+          elif [ "$SCHEDULE" = "15 8 * * *" ]; then
+            # Scheduled full-site pass
+            ARGS="--limit 200"
+          else
+            # Manual workflow_dispatch run
+            ARGS="--limit ${{ github.event.inputs.limit || '200' }}"
+            if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+              ARGS="$ARGS --dry-run"
+            fi
+            if [ -n "${{ github.event.inputs.sitemap_url }}" ]; then
+              ARGS="$ARGS --sitemap-url ${{ github.event.inputs.sitemap_url }}"
+            fi
+          fi
+          echo "## GSC Re-Index Report" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python -u scripts/gsc_reindex.py $ARGS 2>&1 | tee report_output.txt
+          cat report_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload report as artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gsc-reindex-report-${{ github.run_id }}
+          path: report_output.txt
+          retention-days: 90

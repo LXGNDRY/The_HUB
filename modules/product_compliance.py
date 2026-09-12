@@ -8,20 +8,11 @@ Used by:
   - api/routers/webhooks.py  (automatic on products/create)
   - scripts/fix_shopify_country_hs.py  (batch correction runs)
 
-COO resolution order:
-  1. Product tag matching `coo:XX`  (e.g. `coo:US` for rare US-origin items)
-  2. DEFAULT_COO env var (default: CN — most products ship direct from China)
-
-HS codes are resolved from the product's taxonomy type string, with a
-keyword-based title fallback. All codes are 6-digit, no separator.
+This module still provides legacy catalog-taxonomy helpers, but it is no
+longer an authority for customs classification. HS and country-of-origin
+values must come from the evidence-backed V2 pipeline. Titles, product types,
+tags, warehouse locations, and environment defaults are not customs evidence.
 """
-
-import os
-import logging
-
-logger = logging.getLogger("gcp-bot.product_compliance")
-
-DEFAULT_COO: str = os.getenv("DEFAULT_COO", "CN")
 
 # ── Google Shopping taxonomy map ─────────────────────────────────────────────
 # Maps informal/legacy Shopify product_type values → canonical full taxonomy string.
@@ -94,7 +85,7 @@ def resolve_product_type(product_type: str, title: str = "") -> str:
 
 
 # ── HS code map keyed on product-type taxonomy strings ───────────────────────
-# Primary cotton composition assumed — most common for branded apparel.
+# Deprecated reference only. It is not an approved classification source.
 HS_CODE_MAP: dict[str, str] = {
     "Apparel & Accessories > Clothing > Shirts & Tops":          "610910",  # cotton knit T-shirts/vests
     "Apparel & Accessories > Clothing > Activewear > Hoodies":   "611020",  # cotton jerseys/sweatshirts
@@ -108,36 +99,15 @@ HS_CODE_MAP: dict[str, str] = {
 }
 
 
-def infer_hs_code(product_type: str, title: str) -> str:
-    """
-    Return an HS code for a product.
+def infer_hs_code(product_type: str, title: str) -> None:
+    """Never infer a customs code from storefront metadata.
 
-    Tries an exact match on the taxonomy product_type string first,
-    then falls back to keyword scanning of type + title.
-    Default: 610910 (cotton knit T-shirts — broadest branded-apparel bucket).
+    Kept as a compatibility boundary while legacy callers migrate to V2.
+    Missing or ambiguous classification is review-required, never a generic
+    apparel fallback.
     """
-    exact = HS_CODE_MAP.get(product_type.strip())
-    if exact:
-        return exact
-
-    t = (product_type + " " + title).lower()
-    if any(k in t for k in ["hoodie", "sweatshirt", "hooded", "fleece", "crewneck"]):
-        return "611020"
-    if any(k in t for k in ["pant", "jogger", "trackpant", "sweatpant", "jean", "denim"]):
-        return "610342"
-    if "short" in t:
-        return "610342"
-    if any(k in t for k in ["hat", "cap", "beanie", "snapback", "trucker"]):
-        return "650500"
-    if any(k in t for k in ["sunglass", "shade"]):
-        return "900410"
-    if any(k in t for k in ["jacket", "windbreaker", "bomber", "outerwear"]):
-        return "610120"
-    if any(k in t for k in ["set", "tracksuit", "outfit", "lounge"]):
-        return "621133"
-    if "polo" in t:
-        return "610510"
-    return "610910"
+    del product_type, title
+    return None
 
 
 # ── GMC numeric category ID map ──────────────────────────────────────────────
@@ -192,17 +162,7 @@ def resolve_product_weight_g(canonical_type: str) -> float:
     return WEIGHT_MAP_G.get(canonical_type.strip(), _DEFAULT_WEIGHT_G)
 
 
-def resolve_coo(tags: list) -> str:
-    """
-    Return the country of origin code for a product.
-
-    Checks for a `coo:XX` tag first (e.g. `coo:US` for US-origin items).
-    Falls back to DEFAULT_COO env var (default: CN).
-    """
-    for tag in tags:
-        tag = tag.strip()
-        if tag.lower().startswith("coo:"):
-            code = tag.split(":", 1)[1].upper()
-            logger.debug("COO resolved from tag '%s' → %s", tag, code)
-            return code
-    return DEFAULT_COO
+def resolve_coo(tags: list) -> None:
+    """Never infer manufacturing origin from tags or a deployment default."""
+    del tags
+    return None
