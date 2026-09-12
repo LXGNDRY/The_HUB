@@ -33,7 +33,8 @@ import io
 import json
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
 
 from app.core.international_compliance.models import (
     ComplianceEvidence,
@@ -45,7 +46,17 @@ from app.core.international_compliance.orchestrator import (
     SupplierBinding,
     evaluate_variant,
 )
-from app.core.international_compliance.persistence import plan_compliance_write
+from app.core.international_compliance.persistence import (
+    PlannedComplianceWrite,
+    execute_compliance_write,
+    plan_compliance_write,
+)
+from app.core.international_compliance.remediation import (
+    RemediationApproval,
+    RemediationApprovalError,
+    StaleRemediationPlanError,
+    authorize_remediation,
+)
 from app.core.international_compliance.shopify_catalog import parse_product_node
 from app.core.international_compliance.suppliers.base import SupplierComplianceFacts
 from app.core.international_compliance.suppliers.printful import PrintfulEvidenceAdapter
@@ -53,6 +64,8 @@ from app.core.international_compliance.suppliers.registry import (
     StaticSupplierEvidenceAdapter,
     SupplierRegistry,
 )
+
+_AUTOMATION_APPROVED_BY = "compliance_v2_automation"
 
 logger = logging.getLogger("gcp-bot.international_compliance")
 
@@ -214,6 +227,177 @@ def fetch_all_variant_records():
             break
         cursor = page["pageInfo"]["endCursor"]
     return records
+
+
+FETCH_BY_INVENTORY_ITEM = """
+query($id: ID!) {
+  inventoryItem(id: $id) {
+    id
+    variant {
+      id
+      product {
+        id
+        title
+        status
+        vendor
+        productType
+        category { fullName name }
+        tags
+        printfulSyncMetafield: metafield(namespace: "printful", key: "is_synced") { value }
+        variants(first: 100) {
+          nodes {
+            id
+            title
+            sku
+            taxable
+            availableForSale
+            selectedOptions { name value }
+            inventoryItem {
+              id
+              requiresShipping
+              harmonizedSystemCode
+              countryCodeOfOrigin
+              measurement { weight { value unit } }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+"""
+
+UPDATE_INVENTORY_ITEM = """
+mutation inventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+  inventoryItemUpdate(id: $id, input: $input) {
+    inventoryItem {
+      id
+      countryCodeOfOrigin
+      harmonizedSystemCode
+      measurement { weight { value unit } }
+    }
+    userErrors { field message }
+  }
+}
+"""
+
+
+class ShopifyComplianceWriter:
+    """The only place that mutates Shopify HS code/country of origin/weight."""
+
+    def apply(self, plan: PlannedComplianceWrite) -> None:
+        from modules.shopify import _graphql
+
+        result = _graphql(
+            UPDATE_INVENTORY_ITEM,
+            {
+                "id": plan.inventory_item_id,
+                "input": {
+                    "harmonizedSystemCode": plan.new_hs_code,
+                    "countryCodeOfOrigin": plan.new_country_of_origin,
+                    "measurement": {"weight": {"value": plan.new_weight_grams, "unit": "GRAMS"}},
+                },
+            },
+        )
+        errors = result.get("data", {}).get("inventoryItemUpdate", {}).get("userErrors", [])
+        if errors:
+            raise RuntimeError(f"Shopify inventoryItemUpdate userErrors: {errors}")
+
+
+def fetch_variant_record_by_inventory_item(inventory_item_id: str):
+    """Fetch one variant's current live Shopify state, fresh, by inventory item ID."""
+    from modules.shopify import _graphql
+
+    data = _graphql(FETCH_BY_INVENTORY_ITEM, {"id": inventory_item_id})
+    inventory_item = data["data"]["inventoryItem"]
+    if inventory_item is None:
+        raise LookupError(f"No inventory item found for {inventory_item_id}")
+    variant_id = inventory_item["variant"]["id"]
+    product = inventory_item["variant"]["product"]
+
+    records = parse_product_node(product)
+    for record in records:
+        if record.variant_id == variant_id:
+            return record
+    raise LookupError(f"Variant {variant_id} not found on its own product node — unexpected.")
+
+
+@dataclass(frozen=True, slots=True)
+class AppliedWriteResult:
+    inventory_item_id: str
+    applied: bool
+    reasons: tuple[str, ...]
+    error: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AutoApplyReport:
+    applied: tuple[AppliedWriteResult, ...] = field(default_factory=tuple)
+    skipped: tuple[AppliedWriteResult, ...] = field(default_factory=tuple)
+
+    def summary_lines(self) -> list:
+        return [
+            f"Auto-applied writes: {len(self.applied)}",
+            f"Skipped (stale/unresolvable at write time): {len(self.skipped)}",
+        ]
+
+
+def apply_ready_plans(
+    audit_report,
+    *,
+    writer=None,
+    approved_by: str = _AUTOMATION_APPROVED_BY,
+) -> AutoApplyReport:
+    """Automatically write every plan the audit marked evidence-verified READY.
+
+    No human sign-off is required or accepted here — the safety guarantee is
+    entirely upstream: plan_compliance_write() (via classify()/can_write_to_shopify())
+    only ever produces a plan for evidence-verified, high/verified-confidence
+    classifications. This function re-fetches each variant's *current* live
+    Shopify state immediately before writing and re-authorizes against it, so a
+    plan that has gone stale since the audit ran is skipped, never force-applied.
+    """
+    writer = writer or ShopifyComplianceWriter()
+    applied: list[AppliedWriteResult] = []
+    skipped: list[AppliedWriteResult] = []
+
+    for plan in audit_report.planned_writes:
+        try:
+            current_record = fetch_variant_record_by_inventory_item(plan.inventory_item_id)
+            approval = RemediationApproval(
+                inventory_item_id=plan.inventory_item_id,
+                classification_fingerprint=plan.classification_fingerprint,
+                approved_hs6=plan.new_hs_code,
+                approved_country_of_origin=plan.new_country_of_origin,
+                approved_weight_grams=plan.new_weight_grams,
+                approved_by=approved_by,
+                approval_reference=(
+                    f"auto-applied {datetime.now(timezone.utc).isoformat()}, "
+                    f"rule_version={plan.rule_version}"
+                ),
+            )
+            authorized_plan = authorize_remediation(plan, approval, current_record.compliance)
+            executed = execute_compliance_write(writer, authorized_plan, dry_run=False)
+            result = AppliedWriteResult(
+                inventory_item_id=plan.inventory_item_id,
+                applied=executed,
+                reasons=plan.reasons,
+            )
+            (applied if executed else skipped).append(result)
+        except (StaleRemediationPlanError, RemediationApprovalError, LookupError) as exc:
+            logger.warning(
+                "[compliance_v2] Skipped auto-apply for %s: %s", plan.inventory_item_id, exc
+            )
+            skipped.append(
+                AppliedWriteResult(
+                    inventory_item_id=plan.inventory_item_id,
+                    applied=False,
+                    reasons=plan.reasons,
+                    error=str(exc),
+                )
+            )
+
+    return AutoApplyReport(applied=tuple(applied), skipped=tuple(skipped))
 
 
 @dataclass(frozen=True, slots=True)

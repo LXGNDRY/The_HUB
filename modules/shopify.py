@@ -1752,7 +1752,7 @@ def audit_shipping_profiles() -> dict:
 
     # ── Check 2: Every profile has at least one active location ──
     for p in profiles:
-        active_locs = [l for l in p["locations"] if l["is_active"]]
+        active_locs = [loc for loc in p["locations"] if loc["is_active"]]
         if not active_locs:
             issues.append({
                 "severity": "critical",
@@ -1762,7 +1762,7 @@ def audit_shipping_profiles() -> dict:
         else:
             summary.append(
                 f"✓ '{p['name']}': {len(active_locs)} active location(s) — "
-                + ", ".join(l["name"] for l in active_locs)
+                + ", ".join(loc["name"] for loc in active_locs)
             )
 
     # ── Check 3: Every profile has at least one zone ──
