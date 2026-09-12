@@ -29,6 +29,8 @@ class ShopifyVariantRecord:
     inventory_item_id: str
     requires_shipping: bool
     compliance: ShopifyComplianceSnapshot
+    printful_catalog_product_id: str | None = None
+    variant_color: str | None = None
 
 
 def weight_to_grams(value: float | None, unit: str | None) -> float | None:
@@ -52,12 +54,24 @@ def parse_product_node(product: dict) -> tuple[ShopifyVariantRecord, ...]:
     if isinstance(tags, str):
         tags = [tag.strip() for tag in tags.split(",") if tag.strip()]
 
+    printful_metafield = product.get("printfulSyncMetafield") or {}
+    printful_catalog_product_id = printful_metafield.get("value") or None
+
     records: list[ShopifyVariantRecord] = []
     variants = ((product.get("variants") or {}).get("nodes") or [])
     for variant in variants:
         inventory = variant.get("inventoryItem") or {}
         measurement = inventory.get("measurement") or {}
         weight = measurement.get("weight") or {}
+        selected_options = variant.get("selectedOptions") or []
+        variant_color = next(
+            (
+                str(option.get("value") or "").strip() or None
+                for option in selected_options
+                if str(option.get("name") or "").strip().lower() == "color"
+            ),
+            None,
+        )
         records.append(
             ShopifyVariantRecord(
                 product_id=str(product.get("id") or ""),
@@ -80,6 +94,8 @@ def parse_product_node(product: dict) -> tuple[ShopifyVariantRecord, ...]:
                     weight_grams=weight_to_grams(weight.get("value"), weight.get("unit")),
                     taxonomy=taxonomy,
                 ),
+                printful_catalog_product_id=printful_catalog_product_id,
+                variant_color=variant_color,
             )
         )
     return tuple(records)

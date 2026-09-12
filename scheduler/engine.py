@@ -40,6 +40,7 @@ from scheduler.jobs import (
     market_health_job,
     gmc_auto_fix_job,
     gmc_shipping_sync_job,
+    compliance_v2_audit_job,
 )
 
 logger = logging.getLogger("gcp-bot.scheduler")
@@ -306,6 +307,18 @@ class BotScheduler:
             CronTrigger(day_of_week="wed", hour=8, minute=30),
             id="gmc_shipping_sync",
             name="GMC Shipping Sync (Shopify → GMC)",
+            replace_existing=True,
+        )
+
+        # ── Compliance V2 ──────────────────────────────────────────────────────
+
+        # Daily 02:15 — Read-only catalog audit: HS/COO evidence-verified vs
+        # review-required, with a plan-awaiting-approval summary. Never writes.
+        self.scheduler.add_job(
+            compliance_v2_audit_job,
+            CronTrigger(hour=2, minute=15),
+            id="compliance_v2_audit",
+            name="Compliance V2 — Nightly Catalog Audit (read-only)",
             replace_existing=True,
         )
 

@@ -1030,6 +1030,38 @@ def compliance_patch_job():
     )
 
 
+def compliance_v2_audit_job():
+    """
+    Nightly automated Compliance V2 catalog audit. Read-only — evaluates every
+    live Shopify variant and alerts on the READY/REVIEW_REQUIRED breakdown and
+    top blocking reasons. Never writes to Shopify; see
+    scripts/compliance_v2_apply.py for the human-approval-gated write path.
+    """
+    logger.info("[compliance_v2_audit_job] Running...")
+    try:
+        from modules.international_compliance_runner import run_audit
+
+        report = run_audit()
+        logger.info(
+            "[compliance_v2_audit_job] %d variants: %d READY, %d REVIEW_REQUIRED, %d plans awaiting approval",
+            report.total_variants, report.ready_count, report.review_required_count,
+            len(report.planned_writes),
+        )
+
+        lines = ["🌍 *Compliance V2 — Nightly Catalog Audit*", ""]
+        lines.extend(f"  {line}" for line in report.summary_lines())
+        if report.planned_writes:
+            lines.append("")
+            lines.append(
+                f"  {len(report.planned_writes)} evidence-verified plan(s) awaiting approval — "
+                "run scripts/compliance_v2_apply.py to review and approve."
+            )
+        send_alert("\n".join(lines))
+    except Exception as e:
+        logger.error("[compliance_v2_audit_job] Failed: %s", e)
+        send_alert(f"❌ compliance_v2_audit_job failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # JOB 19 — Product Type Patch  [NO COMPUTE REQUIRED]
 # ---------------------------------------------------------------------------
