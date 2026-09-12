@@ -122,38 +122,51 @@ class _TokenCache:
 _token_cache = _TokenCache()
 
 
-def _headers() -> dict:
+def _headers(force_fresh_token: bool = False) -> dict:
+    if force_fresh_token:
+        with _token_cache._lock:
+            _token_cache._expires_at = 0.0
     return {
         "X-Shopify-Access-Token": _token_cache.get(),
         "Content-Type": "application/json",
     }
 
 
+def _request_with_retry(send) -> requests.Response:
+    """Send a request built by `send(headers)`. If the cached token (which may
+    be a stale bootstrapped SHOPIFY_ADMIN_TOKEN the cache blindly trusted for
+    its assumed TTL) is rejected with 401, force one client-credentials
+    refresh and retry once before giving up. Never retries any other status.
+    """
+    r = send(_headers())
+    if r.status_code == 401 and SHOPIFY_CLIENT_ID and SHOPIFY_CLIENT_SECRET:
+        logger.warning("Shopify API returned 401 — forcing a token refresh and retrying once.")
+        r = send(_headers(force_fresh_token=True))
+    r.raise_for_status()
+    return r
+
+
 def _get(path: str, params: Optional[dict] = None) -> dict:
     url = f"{BASE_URL}{path}"
-    r = requests.get(url, headers=_headers(), params=params or {}, timeout=30)
-    r.raise_for_status()
+    r = _request_with_retry(lambda headers: requests.get(url, headers=headers, params=params or {}, timeout=30))
     return r.json()
 
 
 def _post(path: str, payload: dict) -> dict:
     url = f"{BASE_URL}{path}"
-    r = requests.post(url, headers=_headers(), json=payload, timeout=30)
-    r.raise_for_status()
+    r = _request_with_retry(lambda headers: requests.post(url, headers=headers, json=payload, timeout=30))
     return r.json()
 
 
 def _put(path: str, payload: dict) -> dict:
     url = f"{BASE_URL}{path}"
-    r = requests.put(url, headers=_headers(), json=payload, timeout=30)
-    r.raise_for_status()
+    r = _request_with_retry(lambda headers: requests.put(url, headers=headers, json=payload, timeout=30))
     return r.json()
 
 
 def _delete(path: str) -> dict:
     url = f"{BASE_URL}{path}"
-    r = requests.delete(url, headers=_headers(), timeout=30)
-    r.raise_for_status()
+    r = _request_with_retry(lambda headers: requests.delete(url, headers=headers, timeout=30))
     return {"deleted": True, "status_code": r.status_code}
 
 
@@ -185,13 +198,9 @@ def _graphql(query: str, variables: Optional[dict] = None) -> dict:
     if variables:
         payload["variables"] = variables
 
-    r = requests.post(
-        GRAPHQL_URL,
-        headers=_headers(),
-        json=payload,
-        timeout=30,
+    r = _request_with_retry(
+        lambda headers: requests.post(GRAPHQL_URL, headers=headers, json=payload, timeout=30)
     )
-    r.raise_for_status()
     data = r.json()
 
     if "errors" in data:
