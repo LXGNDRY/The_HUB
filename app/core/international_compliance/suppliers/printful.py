@@ -35,7 +35,9 @@ from app.core.international_compliance.models import (
     MaterialComponent,
 )
 from app.core.international_compliance.suppliers.base import SupplierComplianceFacts
-from app.core.international_compliance.suppliers.registry import UnknownSupplierProductError
+from app.core.international_compliance.suppliers.registry import (
+    UnknownSupplierProductError,
+)
 
 logger = logging.getLogger("gcp-bot.international_compliance.printful")
 
