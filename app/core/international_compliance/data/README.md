@@ -65,6 +65,27 @@ tag. If it's not in this file, it isn't verified.
   Every field must trace back to a real supplier spec, COO certificate, or
   manufacturer document — that's the entire point of the V2 evidence model.
 
+## Auto-detected Printful evidence (no curation needed)
+
+Any product carrying a `printful.is_synced` metafield (written by the real
+Printful sync integration — never guessed from title/tag/vendor) is
+automatically bound to Printful's public catalog API
+(`app/core/international_compliance/suppliers/printful.py`), no entry in this
+file required. That unlocks **verified** material composition (and therefore
+HS6) automatically wherever Printful's catalog data can be matched to the
+specific Shopify variant (via a "Color" option, or when every colorway of that
+catalog product shares identical composition).
+
+**Country of origin stays unverified from this source on purpose.** Printful
+publishes blank-sourcing as a list of several countries (the real facility
+varies per order), not one fixed answer, so the adapter surfaces a *candidate*
+COO for human review but never marks it verified — it can never alone move a
+variant to READY. A real verified COO requires either a written sourcing
+statement from the POD supplier for this account, or per-shipment
+fulfillment records. A curated `bindings`/`products` entry for a variant
+always overrides the Printful auto-detection (e.g. once you have that
+supplier letter).
+
 ## How this gets used
 
 - `scripts/compliance_v2_audit.py` (and the nightly `compliance_v2_audit_job`)

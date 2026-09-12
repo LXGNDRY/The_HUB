@@ -7,12 +7,25 @@ every variant, evaluates it through the V2 orchestrator, and reports the
 result. It never writes to Shopify — see scripts/compliance_v2_apply.py for
 the human-approval-gated write path.
 
-Supplier evidence comes from a curated, human-maintained JSON file
-(app/core/international_compliance/data/supplier_evidence.json), never from
-Shopify title/tag/vendor inference — the orchestrator explicitly forbids that.
-Until real entries are added there, every variant will correctly show
-REVIEW_REQUIRED (missing_required_field: supplier, garment_type, ...) — that
-is the fail-closed design working as intended, not a bug.
+Supplier evidence comes from two places, neither of which is Shopify
+title/tag/vendor inference — the orchestrator explicitly forbids that:
+
+1. Auto-detected Printful bindings: if a product carries the `printful.is_synced`
+   metafield (written by the real Printful sync integration), its catalog
+   product ID and per-variant color are read directly from Shopify and used to
+   fetch real manufacturer specs from Printful's public catalog API
+   (see suppliers/printful.py). This unlocks material/HS6 verification
+   automatically, but manufacturing_country stays unverified/REVIEW_REQUIRED —
+   Printful documents multi-country blank sourcing, not one fixed country.
+2. A curated, human-maintained JSON file
+   (app/core/international_compliance/data/supplier_evidence.json) for
+   anything else (non-POD products, or overriding/supplementing the Printful
+   auto-detection with real supplier-confirmed facts). Curated bindings always
+   take precedence over the Printful auto-detection.
+
+Until real evidence exists for a given variant (via either path), it will
+correctly show REVIEW_REQUIRED — that is the fail-closed design working as
+intended, not a bug.
 """
 
 import csv
@@ -35,6 +48,7 @@ from app.core.international_compliance.orchestrator import (
 from app.core.international_compliance.persistence import plan_compliance_write
 from app.core.international_compliance.shopify_catalog import parse_product_node
 from app.core.international_compliance.suppliers.base import SupplierComplianceFacts
+from app.core.international_compliance.suppliers.printful import PrintfulEvidenceAdapter
 from app.core.international_compliance.suppliers.registry import (
     StaticSupplierEvidenceAdapter,
     SupplierRegistry,
@@ -59,6 +73,7 @@ query($cursor: String) {
       productType
       category { fullName name }
       tags
+      printfulSyncMetafield: metafield(namespace: "printful", key: "is_synced") { value }
       variants(first: 100) {
         nodes {
           id
@@ -66,6 +81,7 @@ query($cursor: String) {
           sku
           taxable
           availableForSale
+          selectedOptions { name value }
           inventoryItem {
             id
             requiresShipping
@@ -153,6 +169,7 @@ def load_supplier_registry(evidence_path: str = _EVIDENCE_PATH):
                 products=products,
             )
         )
+    registry.register(PrintfulEvidenceAdapter())
 
     bindings_by_variant: dict[str, SupplierBinding] = {}
     for variant_id, supplier_product_id in raw.get("bindings", {}).items():
@@ -162,6 +179,24 @@ def load_supplier_registry(evidence_path: str = _EVIDENCE_PATH):
         )
 
     return registry, bindings_by_variant
+
+
+def resolve_supplier_binding(record, curated_bindings: dict) -> SupplierBinding | None:
+    """Curated bindings always win. Otherwise, auto-detect Printful fulfillment
+    from the product's own `printful.is_synced` sync metafield (written by the
+    real Printful integration, never guessed from title/tag/vendor).
+    """
+    curated = curated_bindings.get(record.variant_id)
+    if curated is not None:
+        return curated
+
+    if record.printful_catalog_product_id:
+        supplier_product_id = record.printful_catalog_product_id
+        if record.variant_color:
+            supplier_product_id = f"{supplier_product_id}:{record.variant_color}"
+        return SupplierBinding(supplier_name="printful", supplier_product_id=supplier_product_id)
+
+    return None
 
 
 def fetch_all_variant_records():
@@ -240,7 +275,7 @@ def run_audit(destinations: tuple = ()) -> AuditReport:
     ready_count = 0
 
     for record in records:
-        binding = bindings.get(record.variant_id)
+        binding = resolve_supplier_binding(record, bindings)
         evaluation = evaluate_variant(
             record,
             registry=registry,
