@@ -17,18 +17,18 @@ from modules.international_compliance_runner import AuditReport, apply_ready_pla
 
 
 def _make_plan(**overrides):
-    defaults = dict(
-        inventory_item_id="gid://shopify/InventoryItem/1",
-        classification_fingerprint="abc123",
-        old_hs_code=None,
-        new_hs_code="610910",
-        old_country_of_origin=None,
-        new_country_of_origin="US",
-        old_weight_grams=None,
-        new_weight_grams=180.0,
-        rule_version="v2.1.0",
-        reasons=("matched_rule:knit_cotton_tshirt_or_tank", "origin_evidence_verified"),
-    )
+    defaults = {
+        "inventory_item_id": "gid://shopify/InventoryItem/1",
+        "classification_fingerprint": "abc123",
+        "old_hs_code": None,
+        "new_hs_code": "610910",
+        "old_country_of_origin": None,
+        "new_country_of_origin": "US",
+        "old_weight_grams": None,
+        "new_weight_grams": 180.0,
+        "rule_version": "v2.1.0",
+        "reasons": ("matched_rule:knit_cotton_tshirt_or_tank", "origin_evidence_verified"),
+    }
     defaults.update(overrides)
     return PlannedComplianceWrite(**defaults)
 
