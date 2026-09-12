@@ -132,6 +132,7 @@ APScheduler runs as a background thread in the same Cloud Run container.
 | `market_health_check` | Daily 06:45 CT | Ensure international markets stay enabled + local currencies active |
 | `gmc_auto_fix` | Daily 11:00 CT | Auto-fix GMC disapprovals (patch brand + identifierExists) + apply apparel attribute rules to all feeds |
 | `gmc_shipping_sync` | Wednesday 08:30 CT | Auto-sync Shopify shipping zones → GMC (add missing countries); runs after shipping drift check |
+| `compliance_v2_audit` | Daily 02:15 CT | Compliance V2 nightly catalog audit — evaluates every live variant's HS code/COO readiness (evidence-verified only, fail-closed); alerts with READY/REVIEW_REQUIRED counts and any plans awaiting human approval. Read-only — never writes to Shopify (see `scripts/compliance_v2_apply.py` for the approval-gated write path) |
 
 Compute-dependent jobs (`vm_health_pulse`, `nightly_idle_shutdown`, `weekly_snapshot_cleanup`)
 self-check API availability at runtime and skip gracefully — do not remove them if Compute

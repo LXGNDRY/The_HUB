@@ -1,0 +1,5 @@
+{
+  "_comment": "See README.md in this directory. Populate 'products' with real, verified supplier/manufacturer facts and 'bindings' with explicit Shopify variant GID -> supplier_product_id mappings. Never inferred automatically from titles/tags/vendor.",
+  "bindings": {},
+  "products": {}
+}

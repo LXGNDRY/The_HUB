@@ -1,0 +1,50 @@
+name: Compliance V2 — Catalog Audit
+
+# Read-only: evaluates every live Shopify variant through Compliance V2 and
+# reports READY vs REVIEW_REQUIRED with reasons. Never writes to Shopify.
+# The nightly scheduler job (compliance_v2_audit_job, 02:15 CT) runs the same
+# logic automatically and alerts on the summary; this workflow is for an
+# on-demand run with the full per-variant CSV as a downloadable artifact.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  audit:
+    name: Run Compliance V2 Catalog Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run audit
+        env:
+          SHOPIFY_ADMIN_TOKEN:   ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_CLIENT_ID:     ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: |
+          set -o pipefail
+          echo "## Compliance V2 Catalog Audit" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python -u scripts/compliance_v2_audit.py --csv-out compliance_v2_report.csv 2>&1 | tee audit_output.txt
+          cat audit_output.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-v2-audit-${{ github.run_id }}
+          path: |
+            audit_output.txt
+            compliance_v2_report.csv
+          retention-days: 90

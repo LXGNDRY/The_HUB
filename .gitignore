@@ -11,6 +11,7 @@ auth/*.json
 *.json
 !package.json
 !package-lock.json
+!app/core/international_compliance/data/*.json
 
 # --- Python ---
 __pycache__/
