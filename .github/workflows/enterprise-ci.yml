@@ -31,6 +31,7 @@ jobs:
       - run: pip-audit --strict
       - run: >-
           pytest -q tests/test_security.py tests/test_identity.py tests/test_job_contracts.py
+          tests/test_international_compliance_guardrails_v2.py
           --cov=app.core.security --cov=app.core.identity
           --cov=app.jobs.contracts --cov=app.jobs.registry --cov=app.jobs.policy
           --cov-report=term-missing --cov-fail-under=70

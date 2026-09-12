@@ -2,17 +2,9 @@
 """
 fix_shopify_country_hs.py
 
-Audits every Shopify product variant for missing countryCodeOfOrigin and
-harmonizedSystemCode, then fills in defaults derived from each product's type.
-
-COO logic (same as the webhook handler):
-  - Check for a `coo:XX` product tag first (e.g. `coo:US`)
-  - Fall back to DEFAULT_COO env var (default: CN)
-
-Set FORCE_OVERWRITE=true to overwrite COO even when already set
-(use this to correct a bad previous batch run, e.g. incorrect US stamping).
-
-Set DRY_RUN=true to preview changes without writing to Shopify.
+Legacy utility retained as an audit-only compatibility entry point. Customs
+facts may not be inferred from product type, title, tags, or defaults. V2
+reviewed remediation is the only authorized correction path.
 """
 
 import os
@@ -33,8 +25,8 @@ CLIENT_ID      = os.environ.get("SHOPIFY_CLIENT_ID", "")
 CLIENT_SECRET  = os.environ.get("SHOPIFY_CLIENT_SECRET", "")
 SHOP           = os.getenv("SHOPIFY_STORE_DOMAIN", "lngndny.myshopify.com")
 API_VERSION    = "2026-04"
-DRY_RUN        = os.getenv("DRY_RUN", "false").lower() == "true"
-FORCE_OVERWRITE = os.getenv("FORCE_OVERWRITE", "false").lower() == "true"
+DRY_RUN = True
+FORCE_OVERWRITE = False
 
 if CLIENT_ID and CLIENT_SECRET:
     token_resp = requests.post(
@@ -107,7 +99,7 @@ print("=" * 65)
 print("Shopify Country of Origin + HS Code Fixer")
 print(f"  Shop:            {SHOP}")
 print(f"  DRY RUN:         {DRY_RUN}")
-print(f"  FORCE_OVERWRITE: {FORCE_OVERWRITE}")
+print("  WRITE MODE:      disabled — V2 reviewed remediation is required")
 print("=" * 65)
 print("\nFetching all products...")
 
@@ -188,9 +180,8 @@ if not updates:
     print("\nAll variants are up to date. Nothing to do.")
     sys.exit(0)
 
-if DRY_RUN:
-    print("\n[DRY RUN] No changes written to Shopify.")
-    sys.exit(0)
+print("\n[READ-ONLY] No changes written to Shopify. Use the V2 reviewed remediation flow.")
+sys.exit(0)
 
 # ── Apply changes ─────────────────────────────────────────────────────────────
 print("\n" + "=" * 65)

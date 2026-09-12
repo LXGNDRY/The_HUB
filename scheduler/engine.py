@@ -35,7 +35,6 @@ from scheduler.jobs import (
     indexnow_new_products_job,
     gmc_title_rotation_job,
     blog_writer_job,
-    compliance_patch_job,
     product_type_patch_job,
     product_weight_patch_job,
     market_health_job,
@@ -260,15 +259,6 @@ class BotScheduler:
         )
 
         # ── Compliance Jobs ───────────────────────────────────────────────────
-
-        # Daily 02:00 — Fill missing COO + HS code on all variants (idempotent)
-        self.scheduler.add_job(
-            compliance_patch_job,
-            CronTrigger(hour=2, minute=0),
-            id="nightly_compliance_patch",
-            name="Nightly COO + HS Code Compliance Patch",
-            replace_existing=True,
-        )
 
         # Daily 02:30 — Standardize product_type to Google Shopping taxonomy (idempotent)
         self.scheduler.add_job(
