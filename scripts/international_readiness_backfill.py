@@ -107,21 +107,24 @@ WEIGHT_FALLBACKS_G = {
     "trucker": 120.0,
     "tank": 240.0,
     "polo": 260.0,
-    "t-shirt": 300.0,
-    "t shirt": 300.0,
-    "tee": 300.0,
-    "shirt": 300.0,
     "shorts": 350.0,
     "sweatpants": 650.0,
     "pants": 650.0,
     "jean": 750.0,
     "jeans": 750.0,
+    # Ordered before "shirt"/"tee": "sweatshirt" and "crewneck" contain the
+    # substring "shirt", so keyword_lookup's first-match iteration would
+    # otherwise misclassify them as a light t-shirt (300g vs. 800-900g+).
     "hoodie": 900.0,
     "sweatshirt": 800.0,
     "crewneck": 800.0,
     "fleece": 850.0,
     "jacket": 900.0,
     "outerwear": 900.0,
+    "t-shirt": 300.0,
+    "t shirt": 300.0,
+    "tee": 300.0,
+    "shirt": 300.0,
 }
 
 HS_FALLBACKS = {
