@@ -102,6 +102,7 @@ def test_jean_under_pants_taxonomy_is_classified_as_woven_denim_not_knit_pants()
 
     assert infer_hs_code(product, variant)[0] == "620342"
     weight, reason = infer_weight_grams(product, variant)
+    assert weight == 640.0  # 400 avg gsm (jean) x 1.6 bottom multiplier
     assert "bottom" in reason
 
 
