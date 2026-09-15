@@ -74,7 +74,7 @@ query($cursor: String) {
 """
 
 UPDATE_INVENTORY_ITEM = """
-mutation inventoryItemUpdate($id: ID!, $input: InventoryItemUpdateInput!) {
+mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
   inventoryItemUpdate(id: $id, input: $input) {
     inventoryItem {
       id
