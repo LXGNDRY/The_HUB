@@ -1,0 +1,92 @@
+name: International Readiness Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Write changes to Shopify"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+      allow_estimated_customs:
+        description: "Fill missing HS/COO using conservative fallback rules"
+        required: true
+        default: "true"
+        type: choice
+        options:
+          - "true"
+          - "false"
+      fallback_coo:
+        description: "2-letter COO fallback for missing COO"
+        required: true
+        default: "CN"
+        type: string
+      overwrite:
+        description: "Overwrite existing Shopify values instead of only filling blanks"
+        required: true
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run international readiness backfill
+        env:
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+          SHOPIFY_STORE_DOMAIN: ${{ secrets.SHOPIFY_STORE_DOMAIN }}
+          FALLBACK_COO: ${{ inputs.fallback_coo }}
+        run: |
+          set -o pipefail
+          ARGS="--csv-out international_readiness_backfill_report.csv --fallback-coo '${{ inputs.fallback_coo }}'"
+          if [ "${{ inputs.apply }}" = "true" ]; then
+            ARGS="$ARGS --apply"
+          fi
+          if [ "${{ inputs.allow_estimated_customs }}" = "true" ]; then
+            ARGS="$ARGS --allow-estimated-customs"
+          fi
+          if [ "${{ inputs.overwrite }}" = "true" ]; then
+            ARGS="$ARGS --overwrite"
+          fi
+
+          echo "## International Readiness Backfill" >> "$GITHUB_STEP_SUMMARY"
+          echo "apply=${{ inputs.apply }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "allow_estimated_customs=${{ inputs.allow_estimated_customs }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "fallback_coo=${{ inputs.fallback_coo }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "overwrite=${{ inputs.overwrite }}" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          python -u scripts/international_readiness_backfill.py $ARGS 2>&1 | tee international_readiness_backfill_output.txt
+          cat international_readiness_backfill_output.txt >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload report artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: international-readiness-backfill-${{ github.run_id }}
+          path: |
+            international_readiness_backfill_output.txt
+            international_readiness_backfill_report.csv
+          retention-days: 90
