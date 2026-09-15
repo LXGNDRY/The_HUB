@@ -144,7 +144,13 @@ DEFAULT_AVERAGE_GSM = 180.0  # generic lightweight-knit fallback (t-shirt-equiva
 # crewneck t-shirt as heavy.
 _HEAVY_TOP_KEYWORDS = ("hoodie", "sweatshirt", "fleece")
 _BOTTOM_KEYWORDS = ("pants", "jean", "shorts", "sweatpants")
-_HEAVY_TOP_MULTIPLIER = 1.9
+# A finished hoodie/sweatshirt weighs meaningfully more than gsm x 1 m^2:
+# double-layered hood, drawcords, ribbing, kangaroo pocket, and >1 m^2 of
+# total fabric. Industry weight bands (lightweight 200-280gsm ~0.8-1.2lb,
+# mid-weight 280-350gsm ~1.3-1.8lb, heavy 350gsm+ ~1.8-2.5lb+) put the
+# actual-weight/gsm ratio at ~1.9-2.5x depending on band; our average-GSM
+# hoodie/sweatshirt/fleece values sit in the mid-weight band, so 2.2x.
+_HEAVY_TOP_MULTIPLIER = 2.2
 _BOTTOM_MULTIPLIER = 1.6
 _TOP_MULTIPLIER = 1.15
 
