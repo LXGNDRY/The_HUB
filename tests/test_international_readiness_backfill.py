@@ -88,6 +88,23 @@ def test_crewneck_tshirt_is_not_misclassified_as_heavy_sweatshirt():
     assert "heavy_top" not in reason
 
 
+def test_jean_under_pants_taxonomy_is_classified_as_woven_denim_not_knit_pants():
+    """Real catalog case: productType/category is ".../Pants" (contains the
+    substring "pants"), but the title says "Jean" — jeans are woven (Ch. 62),
+    not knit pants (Ch. 61), and must not be misclassified by the "pants"
+    substring winning first."""
+    product = _product(
+        "GOAT Dept. Heavyweight Multi-Pocket Jean",
+        product_type="Apparel & Accessories > Clothing > Pants",
+        tags=["Baggy Jeans", "Denim"],
+    )
+    variant = _variant(product)
+
+    assert infer_hs_code(product, variant)[0] == "620342"
+    weight, reason = infer_weight_grams(product, variant)
+    assert "bottom" in reason
+
+
 def test_existing_values_are_not_overwritten_by_default():
     product = _product("Complete Tee")
     inv = product["variants"]["nodes"][0]["inventoryItem"]

@@ -116,16 +116,20 @@ ACCESSORY_WEIGHT_FALLBACKS_G = {
 # style used on t-shirts too, not just sweatshirts, and every genuine
 # crewneck-sweatshirt product in this catalog also says "sweatshirt" — so it
 # only needs to catch a bare "crewneck" mention with no other cue.
+# "jean"/"jeans" are ordered before "sweatpants"/"pants": this store's own
+# product taxonomy strings jeans under ".../Clothing > Pants > Jeans", which
+# contains the substring "pants", so keyword_lookup's first-match iteration
+# would otherwise misclassify denim jeans as generic knit pants.
 AVERAGE_GSM_BY_CATEGORY = {
     "hoodie": 320.0,
     "sweatshirt": 280.0,
     "fleece": 300.0,
     "jacket": 300.0,
     "outerwear": 300.0,
-    "sweatpants": 280.0,
-    "pants": 280.0,
     "jean": 400.0,
     "jeans": 400.0,
+    "sweatpants": 280.0,
+    "pants": 280.0,
     "shorts": 220.0,
     "polo": 200.0,
     "tank": 160.0,
@@ -159,11 +163,16 @@ HS_FALLBACKS = {
     "cap": "650500",
     "trucker": "650500",
     "polo": "610510",
+    # Ordered before "sweatpants"/"pants": this store's own product taxonomy
+    # strings jeans under ".../Clothing > Pants > Jeans", which contains the
+    # substring "pants" — without this ordering, keyword_lookup's first-match
+    # iteration misclassifies denim jeans (woven, Ch. 62) as generic knit
+    # pants (Ch. 61).
+    "jean": "620342",
+    "jeans": "620342",
     "sweatpants": "610342",
     "pants": "610342",
     "shorts": "610342",
-    "jean": "620342",
-    "jeans": "620342",
     "jacket": "610120",
     "outerwear": "610120",
     "hoodie": "611020",
