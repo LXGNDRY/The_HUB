@@ -76,6 +76,18 @@ def test_hoodie_without_stated_gsm_uses_category_average_not_light_flat_weight()
     assert "average" in reason
 
 
+def test_crewneck_tshirt_is_not_misclassified_as_heavy_sweatshirt():
+    """"Crewneck" is a neckline shared with t-shirts, not exclusively a
+    sweatshirt cue — an explicit t-shirt must win over it."""
+    product = _product("Classic Crewneck Cotton T-Shirt | 180 GSM")
+    variant = _variant(product)
+
+    assert infer_hs_code(product, variant)[0] == "610910"
+    weight, reason = infer_weight_grams(product, variant)
+    assert weight < 500
+    assert "heavy_top" not in reason
+
+
 def test_existing_values_are_not_overwritten_by_default():
     product = _product("Complete Tee")
     inv = product["variants"]["nodes"][0]["inventoryItem"]

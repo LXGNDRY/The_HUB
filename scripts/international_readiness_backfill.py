@@ -109,13 +109,16 @@ ACCESSORY_WEIGHT_FALLBACKS_G = {
 # category, used only when the listing itself doesn't state a GSM. This feeds
 # the same gsm-to-garment-weight formula as an explicitly stated GSM (see
 # infer_weight_grams) rather than standing in as a flat garment weight.
-# Ordered before "shirt"/"tee": "sweatshirt" and "crewneck" contain the
-# substring "shirt", so keyword_lookup's first-match iteration would
-# otherwise misclassify them as a light t-shirt.
+# "hoodie"/"sweatshirt"/"fleece" are ordered before "shirt"/"tee": "sweatshirt"
+# contains the literal substring "shirt", so keyword_lookup's first-match
+# iteration would otherwise misclassify it as a light t-shirt. "crewneck" is
+# deliberately kept LOW priority (after t-shirt/tee/shirt): it's a neckline
+# style used on t-shirts too, not just sweatshirts, and every genuine
+# crewneck-sweatshirt product in this catalog also says "sweatshirt" — so it
+# only needs to catch a bare "crewneck" mention with no other cue.
 AVERAGE_GSM_BY_CATEGORY = {
     "hoodie": 320.0,
     "sweatshirt": 280.0,
-    "crewneck": 280.0,
     "fleece": 300.0,
     "jacket": 300.0,
     "outerwear": 300.0,
@@ -130,12 +133,16 @@ AVERAGE_GSM_BY_CATEGORY = {
     "t shirt": 180.0,
     "tee": 180.0,
     "shirt": 180.0,
+    "crewneck": 280.0,
 }
 DEFAULT_AVERAGE_GSM = 180.0  # generic lightweight-knit fallback (t-shirt-equivalent)
 
 # Garment area/weight multipliers applied to GSM (stated or averaged) to
-# estimate finished garment weight, grouped by cut.
-_HEAVY_TOP_KEYWORDS = ("hoodie", "sweatshirt", "fleece", "crewneck")
+# estimate finished garment weight, grouped by cut. "crewneck" is excluded
+# here for the same reason as above: "sweatshirt"/"hoodie"/"fleece" already
+# catch genuine heavy crewneck products without misclassifying a plain
+# crewneck t-shirt as heavy.
+_HEAVY_TOP_KEYWORDS = ("hoodie", "sweatshirt", "fleece")
 _BOTTOM_KEYWORDS = ("pants", "jean", "shorts", "sweatpants")
 _HEAVY_TOP_MULTIPLIER = 1.9
 _BOTTOM_MULTIPLIER = 1.6
@@ -155,12 +162,16 @@ HS_FALLBACKS = {
     "outerwear": "610120",
     "hoodie": "611020",
     "sweatshirt": "611020",
-    "crewneck": "611020",
     "fleece": "611020",
     "tank": "610910",
     "t-shirt": "610910",
     "t shirt": "610910",
     "tee": "610910",
+    # Kept low priority: "crewneck" is a neckline used on t-shirts too, not
+    # just sweatshirts (see AVERAGE_GSM_BY_CATEGORY above for the same
+    # reasoning). "sweatshirt" above already catches genuine crewneck
+    # sweatshirts in this catalog.
+    "crewneck": "611020",
     "shirt": "610910",
 }
 
