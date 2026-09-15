@@ -56,19 +56,18 @@ jobs:
           SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
           SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
-          SHOPIFY_STORE_DOMAIN: ${{ secrets.SHOPIFY_STORE_DOMAIN }}
           FALLBACK_COO: ${{ inputs.fallback_coo }}
         run: |
           set -o pipefail
-          ARGS="--csv-out international_readiness_backfill_report.csv --fallback-coo '${{ inputs.fallback_coo }}'"
+          ARGS=(--csv-out international_readiness_backfill_report.csv --fallback-coo "${{ inputs.fallback_coo }}")
           if [ "${{ inputs.apply }}" = "true" ]; then
-            ARGS="$ARGS --apply"
+            ARGS+=(--apply)
           fi
           if [ "${{ inputs.allow_estimated_customs }}" = "true" ]; then
-            ARGS="$ARGS --allow-estimated-customs"
+            ARGS+=(--allow-estimated-customs)
           fi
           if [ "${{ inputs.overwrite }}" = "true" ]; then
-            ARGS="$ARGS --overwrite"
+            ARGS+=(--overwrite)
           fi
 
           echo "## International Readiness Backfill" >> "$GITHUB_STEP_SUMMARY"
@@ -77,7 +76,7 @@ jobs:
           echo "fallback_coo=${{ inputs.fallback_coo }}" >> "$GITHUB_STEP_SUMMARY"
           echo "overwrite=${{ inputs.overwrite }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          python -u scripts/international_readiness_backfill.py $ARGS 2>&1 | tee international_readiness_backfill_output.txt
+          python -u scripts/international_readiness_backfill.py "${ARGS[@]}" 2>&1 | tee international_readiness_backfill_output.txt
           cat international_readiness_backfill_output.txt >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
 
