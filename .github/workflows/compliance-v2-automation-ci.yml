@@ -1,9 +1,9 @@
 name: Compliance V2 Automation CI
 
 # Covers the pieces compliance-v2-ci.yml doesn't: the Shopify-wiring modules
-# and scripts that drive the (now fully automated, no-human-approval-step)
-# audit + write pipeline. Lint + build (import/compile) + test on every
-# change to this code.
+# and scripts that drive the audit + write pipeline and operational
+# international-readiness backfill. Lint + build (import/compile) + test on
+# every change to this code.
 
 on:
   pull_request:
@@ -12,11 +12,14 @@ on:
       - "modules/shopify.py"
       - "scripts/compliance_v2_audit.py"
       - "scripts/compliance_v2_apply.py"
+      - "scripts/international_readiness_backfill.py"
       - "scheduler/jobs.py"
       - "scheduler/engine.py"
       - "app/core/international_compliance/**"
       - "tests/test_international_compliance*_v2.py"
+      - "tests/test_international_readiness_backfill.py"
       - ".github/workflows/compliance-v2-automation-ci.yml"
+      - ".github/workflows/international-readiness-backfill.yml"
   push:
     branches:
       - "main"
@@ -25,11 +28,14 @@ on:
       - "modules/shopify.py"
       - "scripts/compliance_v2_audit.py"
       - "scripts/compliance_v2_apply.py"
+      - "scripts/international_readiness_backfill.py"
       - "scheduler/jobs.py"
       - "scheduler/engine.py"
       - "app/core/international_compliance/**"
       - "tests/test_international_compliance*_v2.py"
+      - "tests/test_international_readiness_backfill.py"
       - ".github/workflows/compliance-v2-automation-ci.yml"
+      - ".github/workflows/international-readiness-backfill.yml"
 
 permissions:
   contents: read
@@ -62,8 +68,10 @@ jobs:
             modules/shopify.py \
             scripts/compliance_v2_audit.py \
             scripts/compliance_v2_apply.py \
+            scripts/international_readiness_backfill.py \
             app/core/international_compliance \
-            tests/test_international_compliance*_v2.py
+            tests/test_international_compliance*_v2.py \
+            tests/test_international_readiness_backfill.py
 
       - name: Build (import / compile check)
         run: |
@@ -72,10 +80,12 @@ jobs:
             modules/shopify.py \
             scripts/compliance_v2_audit.py \
             scripts/compliance_v2_apply.py \
+            scripts/international_readiness_backfill.py \
             scheduler/jobs.py \
             scheduler/engine.py
           python -c "import modules.international_compliance_runner"
           python -c "import modules.shopify"
+          python -c "import scripts.international_readiness_backfill"
 
       - name: Test
-        run: pytest -q tests/test_international_compliance*_v2.py
+        run: pytest -q tests/test_international_compliance*_v2.py tests/test_international_readiness_backfill.py
