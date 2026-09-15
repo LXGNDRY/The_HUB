@@ -98,52 +98,95 @@ _WEIGHT_UNIT_FACTORS = {
     "OUNCES": 28.349523125,
 }
 
-# Conservative sellable shipping weights. These are deliberately a little high
-# so checkout/shipping does not undercharge when exact supplier weights are not
-# present. Replace with PODplusers/Tapstitch exact values as they are collected.
-WEIGHT_FALLBACKS_G = {
+# Flat weights for accessories that aren't sold/measured by fabric GSM.
+ACCESSORY_WEIGHT_FALLBACKS_G = {
     "hat": 120.0,
     "cap": 120.0,
     "trucker": 120.0,
-    "tank": 240.0,
-    "polo": 260.0,
-    "t-shirt": 300.0,
-    "t shirt": 300.0,
-    "tee": 300.0,
-    "shirt": 300.0,
-    "shorts": 350.0,
-    "sweatpants": 650.0,
-    "pants": 650.0,
-    "jean": 750.0,
-    "jeans": 750.0,
-    "hoodie": 900.0,
-    "sweatshirt": 800.0,
-    "crewneck": 800.0,
-    "fleece": 850.0,
-    "jacket": 900.0,
-    "outerwear": 900.0,
 }
+
+# National/industry-average fabric weight (grams per square meter) by garment
+# category, used only when the listing itself doesn't state a GSM. This feeds
+# the same gsm-to-garment-weight formula as an explicitly stated GSM (see
+# infer_weight_grams) rather than standing in as a flat garment weight.
+# "hoodie"/"sweatshirt"/"fleece" are ordered before "shirt"/"tee": "sweatshirt"
+# contains the literal substring "shirt", so keyword_lookup's first-match
+# iteration would otherwise misclassify it as a light t-shirt. "crewneck" is
+# deliberately kept LOW priority (after t-shirt/tee/shirt): it's a neckline
+# style used on t-shirts too, not just sweatshirts, and every genuine
+# crewneck-sweatshirt product in this catalog also says "sweatshirt" — so it
+# only needs to catch a bare "crewneck" mention with no other cue.
+# "jean"/"jeans" are ordered before "sweatpants"/"pants": this store's own
+# product taxonomy strings jeans under ".../Clothing > Pants > Jeans", which
+# contains the substring "pants", so keyword_lookup's first-match iteration
+# would otherwise misclassify denim jeans as generic knit pants.
+AVERAGE_GSM_BY_CATEGORY = {
+    "hoodie": 320.0,
+    "sweatshirt": 280.0,
+    "fleece": 300.0,
+    "jacket": 300.0,
+    "outerwear": 300.0,
+    "jean": 400.0,
+    "jeans": 400.0,
+    "sweatpants": 280.0,
+    "pants": 280.0,
+    "shorts": 220.0,
+    "polo": 200.0,
+    "tank": 160.0,
+    "t-shirt": 180.0,
+    "t shirt": 180.0,
+    "tee": 180.0,
+    "shirt": 180.0,
+    "crewneck": 280.0,
+}
+DEFAULT_AVERAGE_GSM = 180.0  # generic lightweight-knit fallback (t-shirt-equivalent)
+
+# Garment area/weight multipliers applied to GSM (stated or averaged) to
+# estimate finished garment weight, grouped by cut. "crewneck" is excluded
+# here for the same reason as above: "sweatshirt"/"hoodie"/"fleece" already
+# catch genuine heavy crewneck products without misclassifying a plain
+# crewneck t-shirt as heavy.
+_HEAVY_TOP_KEYWORDS = ("hoodie", "sweatshirt", "fleece")
+_BOTTOM_KEYWORDS = ("pants", "jean", "shorts", "sweatpants")
+# A finished hoodie/sweatshirt weighs meaningfully more than gsm x 1 m^2:
+# double-layered hood, drawcords, ribbing, kangaroo pocket, and >1 m^2 of
+# total fabric. Industry weight bands (lightweight 200-280gsm ~0.8-1.2lb,
+# mid-weight 280-350gsm ~1.3-1.8lb, heavy 350gsm+ ~1.8-2.5lb+) put the
+# actual-weight/gsm ratio at ~1.9-2.5x depending on band; our average-GSM
+# hoodie/sweatshirt/fleece values sit in the mid-weight band, so 2.2x.
+_HEAVY_TOP_MULTIPLIER = 2.2
+_BOTTOM_MULTIPLIER = 1.6
+_TOP_MULTIPLIER = 1.15
 
 HS_FALLBACKS = {
     "hat": "650500",
     "cap": "650500",
     "trucker": "650500",
     "polo": "610510",
+    # Ordered before "sweatpants"/"pants": this store's own product taxonomy
+    # strings jeans under ".../Clothing > Pants > Jeans", which contains the
+    # substring "pants" — without this ordering, keyword_lookup's first-match
+    # iteration misclassifies denim jeans (woven, Ch. 62) as generic knit
+    # pants (Ch. 61).
+    "jean": "620342",
+    "jeans": "620342",
     "sweatpants": "610342",
     "pants": "610342",
     "shorts": "610342",
-    "jean": "620342",
-    "jeans": "620342",
     "jacket": "610120",
     "outerwear": "610120",
     "hoodie": "611020",
     "sweatshirt": "611020",
-    "crewneck": "611020",
     "fleece": "611020",
     "tank": "610910",
     "t-shirt": "610910",
     "t shirt": "610910",
     "tee": "610910",
+    # Kept low priority: "crewneck" is a neckline used on t-shirts too, not
+    # just sweatshirts (see AVERAGE_GSM_BY_CATEGORY above for the same
+    # reasoning). "sweatshirt" above already catches genuine crewneck
+    # sweatshirts in this catalog.
+    "crewneck": "611020",
     "shirt": "610910",
 }
 
@@ -195,20 +238,27 @@ def infer_weight_grams(product: dict, variant: dict) -> tuple[float, str]:
         (product.get("category") or {}).get("fullName"),
         " ".join(product.get("tags") or []),
         variant.get("title"),
+        product.get("descriptionHtml"),
     )
-    base = keyword_lookup(text, WEIGHT_FALLBACKS_G) or 300.0
+
+    accessory_weight = keyword_lookup(text, ACCESSORY_WEIGHT_FALLBACKS_G)
+    if accessory_weight is not None:
+        return accessory_weight, "fixed_weight_accessory"
 
     gsm_match = _GSM_RE.search(text)
     if gsm_match:
-        gsm = int(gsm_match.group(1))
-        if "hoodie" in text or "sweatshirt" in text or "fleece" in text or "crewneck" in text:
-            # Heavy streetwear tops often move from ~650g into 900g+ territory.
-            return max(base, round(gsm * 1.9, 0)), f"estimated_weight_from_{gsm}gsm_heavy_top"
-        if "pants" in text or "jean" in text or "shorts" in text:
-            return max(base, round(gsm * 1.6, 0)), f"estimated_weight_from_{gsm}gsm_bottom"
-        return max(base, round(gsm * 1.15, 0)), f"estimated_weight_from_{gsm}gsm_top"
+        gsm = float(gsm_match.group(1))
+        gsm_source = f"stated_{gsm_match.group(1)}gsm"
+    else:
+        gsm = keyword_lookup(text, AVERAGE_GSM_BY_CATEGORY) or DEFAULT_AVERAGE_GSM
+        gsm_source = f"average_{int(gsm)}gsm_for_category"
 
-    return base, "estimated_weight_from_product_type"
+    if any(keyword in text for keyword in _HEAVY_TOP_KEYWORDS):
+        # Heavy streetwear tops often move from ~650g into 900g+ territory.
+        return round(gsm * _HEAVY_TOP_MULTIPLIER, 0), f"estimated_weight_from_{gsm_source}_heavy_top"
+    if any(keyword in text for keyword in _BOTTOM_KEYWORDS):
+        return round(gsm * _BOTTOM_MULTIPLIER, 0), f"estimated_weight_from_{gsm_source}_bottom"
+    return round(gsm * _TOP_MULTIPLIER, 0), f"estimated_weight_from_{gsm_source}_top"
 
 
 def infer_hs_code(product: dict, variant: dict) -> tuple[str, str]:

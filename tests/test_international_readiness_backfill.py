@@ -42,7 +42,8 @@ def test_tshirt_hs_and_weight_fallback():
     variant = _variant(product)
 
     assert infer_hs_code(product, variant)[0] == "610910"
-    assert infer_weight_grams(product, variant)[0] >= 300
+    # 260 stated GSM x top multiplier (1.15) = 299g; no artificial floor.
+    assert infer_weight_grams(product, variant)[0] == 299.0
 
 
 def test_polo_hs_fallback():
@@ -59,6 +60,50 @@ def test_hoodie_hs_and_heavy_weight_fallback():
 
     assert infer_hs_code(product, variant)[0] == "611020"
     assert infer_weight_grams(product, variant)[0] >= 874
+
+
+def test_hoodie_without_stated_gsm_uses_category_average_not_light_flat_weight():
+    """A hoodie/sweatshirt with no GSM in its listing must not fall back to a
+    light t-shirt weight just because "sweatshirt" contains "shirt"."""
+    product = _product(
+        "Marque Legendaire Oversized Crewneck Sweatshirt",
+        product_type="Apparel & Accessories > Clothing > Activewear > Sweatshirts & Hoodies",
+    )
+    variant = _variant(product)
+
+    weight, reason = infer_weight_grams(product, variant)
+    assert weight >= 500
+    assert "average" in reason
+
+
+def test_crewneck_tshirt_is_not_misclassified_as_heavy_sweatshirt():
+    """"Crewneck" is a neckline shared with t-shirts, not exclusively a
+    sweatshirt cue — an explicit t-shirt must win over it."""
+    product = _product("Classic Crewneck Cotton T-Shirt | 180 GSM")
+    variant = _variant(product)
+
+    assert infer_hs_code(product, variant)[0] == "610910"
+    weight, reason = infer_weight_grams(product, variant)
+    assert weight < 500
+    assert "heavy_top" not in reason
+
+
+def test_jean_under_pants_taxonomy_is_classified_as_woven_denim_not_knit_pants():
+    """Real catalog case: productType/category is ".../Pants" (contains the
+    substring "pants"), but the title says "Jean" — jeans are woven (Ch. 62),
+    not knit pants (Ch. 61), and must not be misclassified by the "pants"
+    substring winning first."""
+    product = _product(
+        "GOAT Dept. Heavyweight Multi-Pocket Jean",
+        product_type="Apparel & Accessories > Clothing > Pants",
+        tags=["Baggy Jeans", "Denim"],
+    )
+    variant = _variant(product)
+
+    assert infer_hs_code(product, variant)[0] == "620342"
+    weight, reason = infer_weight_grams(product, variant)
+    assert weight == 640.0  # 400 avg gsm (jean) x 1.6 bottom multiplier
+    assert "bottom" in reason
 
 
 def test_existing_values_are_not_overwritten_by_default():
