@@ -98,34 +98,48 @@ _WEIGHT_UNIT_FACTORS = {
     "OUNCES": 28.349523125,
 }
 
-# Conservative sellable shipping weights. These are deliberately a little high
-# so checkout/shipping does not undercharge when exact supplier weights are not
-# present. Replace with PODplusers/Tapstitch exact values as they are collected.
-WEIGHT_FALLBACKS_G = {
+# Flat weights for accessories that aren't sold/measured by fabric GSM.
+ACCESSORY_WEIGHT_FALLBACKS_G = {
     "hat": 120.0,
     "cap": 120.0,
     "trucker": 120.0,
-    "tank": 240.0,
-    "polo": 260.0,
-    "shorts": 350.0,
-    "sweatpants": 650.0,
-    "pants": 650.0,
-    "jean": 750.0,
-    "jeans": 750.0,
-    # Ordered before "shirt"/"tee": "sweatshirt" and "crewneck" contain the
-    # substring "shirt", so keyword_lookup's first-match iteration would
-    # otherwise misclassify them as a light t-shirt (300g vs. 800-900g+).
-    "hoodie": 900.0,
-    "sweatshirt": 800.0,
-    "crewneck": 800.0,
-    "fleece": 850.0,
-    "jacket": 900.0,
-    "outerwear": 900.0,
-    "t-shirt": 300.0,
-    "t shirt": 300.0,
-    "tee": 300.0,
-    "shirt": 300.0,
 }
+
+# National/industry-average fabric weight (grams per square meter) by garment
+# category, used only when the listing itself doesn't state a GSM. This feeds
+# the same gsm-to-garment-weight formula as an explicitly stated GSM (see
+# infer_weight_grams) rather than standing in as a flat garment weight.
+# Ordered before "shirt"/"tee": "sweatshirt" and "crewneck" contain the
+# substring "shirt", so keyword_lookup's first-match iteration would
+# otherwise misclassify them as a light t-shirt.
+AVERAGE_GSM_BY_CATEGORY = {
+    "hoodie": 320.0,
+    "sweatshirt": 280.0,
+    "crewneck": 280.0,
+    "fleece": 300.0,
+    "jacket": 300.0,
+    "outerwear": 300.0,
+    "sweatpants": 280.0,
+    "pants": 280.0,
+    "jean": 400.0,
+    "jeans": 400.0,
+    "shorts": 220.0,
+    "polo": 200.0,
+    "tank": 160.0,
+    "t-shirt": 180.0,
+    "t shirt": 180.0,
+    "tee": 180.0,
+    "shirt": 180.0,
+}
+DEFAULT_AVERAGE_GSM = 180.0  # generic lightweight-knit fallback (t-shirt-equivalent)
+
+# Garment area/weight multipliers applied to GSM (stated or averaged) to
+# estimate finished garment weight, grouped by cut.
+_HEAVY_TOP_KEYWORDS = ("hoodie", "sweatshirt", "fleece", "crewneck")
+_BOTTOM_KEYWORDS = ("pants", "jean", "shorts", "sweatpants")
+_HEAVY_TOP_MULTIPLIER = 1.9
+_BOTTOM_MULTIPLIER = 1.6
+_TOP_MULTIPLIER = 1.15
 
 HS_FALLBACKS = {
     "hat": "650500",
@@ -198,20 +212,27 @@ def infer_weight_grams(product: dict, variant: dict) -> tuple[float, str]:
         (product.get("category") or {}).get("fullName"),
         " ".join(product.get("tags") or []),
         variant.get("title"),
+        product.get("descriptionHtml"),
     )
-    base = keyword_lookup(text, WEIGHT_FALLBACKS_G) or 300.0
+
+    accessory_weight = keyword_lookup(text, ACCESSORY_WEIGHT_FALLBACKS_G)
+    if accessory_weight is not None:
+        return accessory_weight, "fixed_weight_accessory"
 
     gsm_match = _GSM_RE.search(text)
     if gsm_match:
-        gsm = int(gsm_match.group(1))
-        if "hoodie" in text or "sweatshirt" in text or "fleece" in text or "crewneck" in text:
-            # Heavy streetwear tops often move from ~650g into 900g+ territory.
-            return max(base, round(gsm * 1.9, 0)), f"estimated_weight_from_{gsm}gsm_heavy_top"
-        if "pants" in text or "jean" in text or "shorts" in text:
-            return max(base, round(gsm * 1.6, 0)), f"estimated_weight_from_{gsm}gsm_bottom"
-        return max(base, round(gsm * 1.15, 0)), f"estimated_weight_from_{gsm}gsm_top"
+        gsm = float(gsm_match.group(1))
+        gsm_source = f"stated_{gsm_match.group(1)}gsm"
+    else:
+        gsm = keyword_lookup(text, AVERAGE_GSM_BY_CATEGORY) or DEFAULT_AVERAGE_GSM
+        gsm_source = f"average_{int(gsm)}gsm_for_category"
 
-    return base, "estimated_weight_from_product_type"
+    if any(keyword in text for keyword in _HEAVY_TOP_KEYWORDS):
+        # Heavy streetwear tops often move from ~650g into 900g+ territory.
+        return round(gsm * _HEAVY_TOP_MULTIPLIER, 0), f"estimated_weight_from_{gsm_source}_heavy_top"
+    if any(keyword in text for keyword in _BOTTOM_KEYWORDS):
+        return round(gsm * _BOTTOM_MULTIPLIER, 0), f"estimated_weight_from_{gsm_source}_bottom"
+    return round(gsm * _TOP_MULTIPLIER, 0), f"estimated_weight_from_{gsm_source}_top"
 
 
 def infer_hs_code(product: dict, variant: dict) -> tuple[str, str]:
