@@ -2,14 +2,15 @@
 """
 international_readiness_backfill.py
 
-Operational Shopify international-readiness backfill for active products.
+Operational Shopify international-readiness backfill for active and draft
+products (archived products are excluded).
 
 This is intentionally separate from Compliance V2's evidence-first customs
 pipeline. Compliance V2 remains the audited source of truth for verified customs
 facts. This script exists for store readiness: it fills missing Shopify inventory
 item weight, HS code, and country of origin using the best available live product
-signals and conservative fallback values so active products are not blocked from
-international checkout.
+signals and conservative fallback values so products are not blocked from
+international checkout once published.
 
 Rules:
 - Never overwrites existing values unless --overwrite is passed.
@@ -17,11 +18,14 @@ Rules:
 - Customs fallbacks require --allow-estimated-customs.
 - Fallback COO is configurable with --fallback-coo or FALLBACK_COO.
 - Writes Shopify InventoryItem fields via inventoryItemUpdate.
+- Product statuses scanned are configurable with --statuses (default:
+  active,draft).
 
 Usage:
   python scripts/international_readiness_backfill.py
   python scripts/international_readiness_backfill.py --allow-estimated-customs
   python scripts/international_readiness_backfill.py --allow-estimated-customs --apply
+  python scripts/international_readiness_backfill.py --statuses active
 """
 
 from __future__ import annotations
@@ -40,9 +44,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from modules.shopify import _graphql  # noqa: E402
 
-FETCH_ACTIVE_PRODUCTS = """
-query($cursor: String) {
-  products(first: 50, after: $cursor, query: "status:active") {
+FETCH_PRODUCTS_BY_STATUS = """
+query($cursor: String, $statusQuery: String!) {
+  products(first: 50, after: $cursor, query: $statusQuery) {
     pageInfo { hasNextPage endCursor }
     nodes {
       id
@@ -226,11 +230,12 @@ def normalize_hs(value: str | None) -> str | None:
     return normalized if _VALID_HS_RE.match(normalized) else None
 
 
-def fetch_active_products() -> list[dict]:
+def fetch_products_by_status(statuses: list[str]) -> list[dict]:
+    status_query = " OR ".join(f"status:{status}" for status in statuses)
     products: list[dict] = []
     cursor = None
     while True:
-        data = _graphql(FETCH_ACTIVE_PRODUCTS, {"cursor": cursor})
+        data = _graphql(FETCH_PRODUCTS_BY_STATUS, {"cursor": cursor, "statusQuery": status_query})
         page = data["data"]["products"]
         products.extend(page["nodes"])
         if not page["pageInfo"]["hasNextPage"]:
@@ -363,9 +368,15 @@ def main() -> None:
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing values. Default only fills missing values.")
     parser.add_argument("--csv-out", default="international_readiness_backfill_report.csv")
     parser.add_argument("--sleep", type=float, default=0.2, help="Delay between writes to avoid rate pressure")
+    parser.add_argument(
+        "--statuses",
+        default="active,draft",
+        help="Comma-separated Shopify product statuses to scan (e.g. active,draft). Default: active,draft",
+    )
     args = parser.parse_args()
 
-    products = fetch_active_products()
+    statuses = [s.strip() for s in args.statuses.split(",") if s.strip()]
+    products = fetch_products_by_status(statuses)
     plans = build_plan(
         products,
         fallback_coo=args.fallback_coo,
@@ -377,7 +388,8 @@ def main() -> None:
         f.write(plans_to_csv(plans))
 
     print("International readiness backfill")
-    print(f"  Active products fetched: {len(products)}")
+    print(f"  Product statuses scanned: {', '.join(statuses)}")
+    print(f"  Products fetched: {len(products)}")
     print(f"  Planned variant updates: {len(plans)}")
     print(f"  Estimated customs enabled: {args.allow_estimated_customs}")
     print(f"  Fallback COO: {args.fallback_coo.strip().upper()}")
