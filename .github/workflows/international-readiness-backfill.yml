@@ -32,6 +32,11 @@ on:
         options:
           - "false"
           - "true"
+      statuses:
+        description: "Comma-separated Shopify product statuses to scan"
+        required: true
+        default: "active,draft"
+        type: string
 
 jobs:
   backfill:
@@ -59,7 +64,7 @@ jobs:
           FALLBACK_COO: ${{ inputs.fallback_coo }}
         run: |
           set -o pipefail
-          ARGS=(--csv-out international_readiness_backfill_report.csv --fallback-coo "${{ inputs.fallback_coo }}")
+          ARGS=(--csv-out international_readiness_backfill_report.csv --fallback-coo "${{ inputs.fallback_coo }}" --statuses "${{ inputs.statuses }}")
           if [ "${{ inputs.apply }}" = "true" ]; then
             ARGS+=(--apply)
           fi
@@ -75,6 +80,7 @@ jobs:
           echo "allow_estimated_customs=${{ inputs.allow_estimated_customs }}" >> "$GITHUB_STEP_SUMMARY"
           echo "fallback_coo=${{ inputs.fallback_coo }}" >> "$GITHUB_STEP_SUMMARY"
           echo "overwrite=${{ inputs.overwrite }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "statuses=${{ inputs.statuses }}" >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
           python -u scripts/international_readiness_backfill.py "${ARGS[@]}" 2>&1 | tee international_readiness_backfill_output.txt
           cat international_readiness_backfill_output.txt >> "$GITHUB_STEP_SUMMARY"
