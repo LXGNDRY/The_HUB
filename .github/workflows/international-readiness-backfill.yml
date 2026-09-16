@@ -22,7 +22,7 @@ on:
       fallback_coo:
         description: "2-letter COO fallback for missing COO"
         required: true
-        default: "CN"
+        default: "US"
         type: string
       overwrite:
         description: "Overwrite existing Shopify values instead of only filling blanks"
