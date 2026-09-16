@@ -414,7 +414,7 @@ def main() -> None:
         action="store_true",
         help="Allow estimated HS/COO fallback writes. Without this, only missing weights are planned.",
     )
-    parser.add_argument("--fallback-coo", default=os.getenv("FALLBACK_COO", "CN"), help="2-letter COO fallback for missing COO. Default: CN")
+    parser.add_argument("--fallback-coo", default=os.getenv("FALLBACK_COO", "US"), help="2-letter COO fallback for missing COO. Default: US")
     parser.add_argument("--overwrite", action="store_true", help="Overwrite existing values. Default only fills missing values.")
     parser.add_argument("--csv-out", default="international_readiness_backfill_report.csv")
     parser.add_argument("--sleep", type=float, default=0.2, help="Delay between writes to avoid rate pressure")
