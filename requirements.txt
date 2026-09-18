@@ -16,7 +16,7 @@ apscheduler>=3.11.3
 # through the entire protobuf/grpcio version space to reconcile this group
 # with the AI/Content group, which can hang for 30+ minutes in CI.
 protobuf>=5.29.0,<6.0.0
-google-cloud-billing>=1.13.0
+google-cloud-billing>=1.20.0
 # google-cloud-compute>=1.49.0 hard-requires protobuf>=6.33.5, which conflicts
 # with the protobuf<6.0.0 pin above (needed for aiplatform/generativeai).
 # Capped below that until aiplatform/generativeai support protobuf 6.
