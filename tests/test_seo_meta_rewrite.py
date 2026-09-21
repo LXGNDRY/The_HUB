@@ -1,4 +1,10 @@
-from scripts.seo_meta_rewrite import DESC_MAX, TITLE_MAX, _fallback_meta, _truncate, generate_meta
+from scripts.seo_meta_rewrite import (
+    DESC_MAX,
+    TITLE_MAX,
+    _fallback_meta,
+    _truncate,
+    generate_meta,
+)
 
 
 def test_truncate_leaves_short_text_untouched():
@@ -47,7 +53,7 @@ def test_generate_meta_falls_back_when_gemini_returns_incomplete_result():
         def generate_seo_meta(self, page_title, page_type):
             return {"meta_title": "", "meta_description": ""}
 
-    seo_title, seo_desc = generate_meta(_StubGemini(), "Mini Goat Oversized T-Shirt", "product")
+    seo_title, _ = generate_meta(_StubGemini(), "Mini Goat Oversized T-Shirt", "product")
     assert "Mini Goat Oversized T-Shirt" in seo_title
 
 

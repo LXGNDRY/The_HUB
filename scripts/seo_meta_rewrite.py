@@ -35,7 +35,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from modules.shopify import _get, _put  # noqa: E402
+from modules.shopify import _get, _put
 
 BRAND = "Legendary Branding"
 TITLE_MAX = 60
@@ -51,7 +51,7 @@ def _gemini():
         from modules.gemini import GeminiModule
 
         return GeminiModule(api_key=api_key)
-    except Exception as e:  # pragma: no cover - defensive, network/SDK issues
+    except Exception as e:  # noqa: BLE001 - Gemini init must not abort the run, fall back to template
         print(f"  [gemini unavailable: {e}] falling back to template generation", file=sys.stderr)
         return None
 
@@ -80,7 +80,7 @@ def generate_meta(gemini, title: str, page_type: str) -> tuple[str, str]:
             seo_desc = _truncate(result.get("meta_description") or "", DESC_MAX)
             if seo_title and seo_desc:
                 return seo_title, seo_desc
-        except Exception as e:  # pragma: no cover - defensive, network issues
+        except Exception as e:  # noqa: BLE001 - one bad Gemini call must not abort the run
             print(f"  [gemini generation failed: {e}] falling back to template", file=sys.stderr)
     return _fallback_meta(title, page_type)
 
@@ -173,7 +173,7 @@ def main() -> int:
                     {c["_type"]: {"id": c["id"], "metafields_global_title_tag": seo_title, "metafields_global_description_tag": seo_desc}},
                 )
                 col_updates += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - one failed write must not abort the batch
                 print(f"  ❌ {c['title']}: {e}")
             rate()
         else:
@@ -201,7 +201,7 @@ def main() -> int:
                     {"product": {"id": p["id"], "metafields_global_title_tag": seo_title, "metafields_global_description_tag": seo_desc}},
                 )
                 prod_updates += 1
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - one failed write must not abort the batch
                 print(f"  ❌ {p['title']}: {e}")
             rate()
         else:
