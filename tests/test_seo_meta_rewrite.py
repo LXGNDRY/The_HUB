@@ -4,6 +4,7 @@ from scripts.seo_meta_rewrite import (
     _fallback_meta,
     _truncate,
     generate_meta,
+    resolve_meta,
 )
 
 
@@ -74,3 +75,47 @@ def test_generate_meta_falls_back_when_gemini_raises():
 
     seo_title, _ = generate_meta(_BrokenGemini(), "Stay Rich Loose Fit T-Shirt", "product")
     assert "Stay Rich Loose Fit T-Shirt" in seo_title
+
+
+def test_resolve_meta_skips_when_both_fields_already_set():
+    title, desc, changed = resolve_meta(
+        None, "The Goat Hoodie", "product", "Curated Title", "Curated description.", overwrite=False
+    )
+    assert not changed
+    assert title == "Curated Title"
+    assert desc == "Curated description."
+
+
+def test_resolve_meta_preserves_curated_title_when_only_description_is_blank():
+    """Regression: a curated meta title must survive a blank description
+    getting filled in — the two fields are independent, not all-or-nothing."""
+    title, desc, changed = resolve_meta(
+        None, "The Goat Hoodie", "product", "Hand-Curated Title | LB", "", overwrite=False
+    )
+    assert changed
+    assert title == "Hand-Curated Title | LB"
+    assert desc != ""
+
+
+def test_resolve_meta_preserves_curated_description_when_only_title_is_blank():
+    title, desc, changed = resolve_meta(
+        None, "The Goat Hoodie", "product", "", "Hand-curated description.", overwrite=False
+    )
+    assert changed
+    assert desc == "Hand-curated description."
+    assert title != ""
+
+
+def test_resolve_meta_fills_both_when_both_blank():
+    title, desc, changed = resolve_meta(None, "The Goat Hoodie", "product", "", "", overwrite=False)
+    assert changed
+    assert title != "" and desc != ""
+
+
+def test_resolve_meta_overwrite_regenerates_both_even_when_set():
+    title, desc, changed = resolve_meta(
+        None, "The Goat Hoodie", "product", "Old Title", "Old description.", overwrite=True
+    )
+    assert changed
+    assert title != "Old Title"
+    assert desc != "Old description."

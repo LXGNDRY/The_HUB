@@ -85,6 +85,25 @@ def generate_meta(gemini, title: str, page_type: str) -> tuple[str, str]:
     return _fallback_meta(title, page_type)
 
 
+def resolve_meta(
+    gemini, live_title: str, page_type: str, current_title: str, current_desc: str, overwrite: bool
+) -> tuple[str, str, bool]:
+    """Decide what to write for one item, preserving each already-populated
+    field independently — a set title must survive a blank description
+    getting filled in, and vice versa — unless overwrite is requested."""
+    current_title = (current_title or "").strip()
+    current_desc = (current_desc or "").strip()
+
+    if current_title and current_desc and not overwrite:
+        return current_title, current_desc, False
+
+    gen_title, gen_desc = generate_meta(gemini, live_title, page_type)
+    final_title = gen_title if (overwrite or not current_title) else current_title
+    final_desc = gen_desc if (overwrite or not current_desc) else current_desc
+    changed = final_title != current_title or final_desc != current_desc
+    return final_title, final_desc, changed
+
+
 _PRODUCT_FIELDS = "id,title,status,metafields_global_title_tag,metafields_global_description_tag"
 
 
@@ -156,13 +175,15 @@ def main() -> int:
     col_updates = 0
     col_skipped = 0
     for c in collections:
-        has_title = bool((c.get("metafields_global_title_tag") or "").strip())
-        has_desc = bool((c.get("metafields_global_description_tag") or "").strip())
-        if has_title and has_desc and not args.overwrite:
+        current_title = c.get("metafields_global_title_tag") or ""
+        current_desc = c.get("metafields_global_description_tag") or ""
+        seo_title, seo_desc, changed = resolve_meta(
+            gemini, c["title"], "collection", current_title, current_desc, args.overwrite
+        )
+        if not changed:
             col_skipped += 1
             continue
 
-        seo_title, seo_desc = generate_meta(gemini, c["title"], "collection")
         flag = "" if apply_changes else "[DRY] "
         print(f"  {flag}{c['title']}: {seo_title}")
 
@@ -184,13 +205,15 @@ def main() -> int:
     prod_updates = 0
     prod_skipped = 0
     for p in products:
-        has_title = bool((p.get("metafields_global_title_tag") or "").strip())
-        has_desc = bool((p.get("metafields_global_description_tag") or "").strip())
-        if has_title and has_desc and not args.overwrite:
+        current_title = p.get("metafields_global_title_tag") or ""
+        current_desc = p.get("metafields_global_description_tag") or ""
+        seo_title, seo_desc, changed = resolve_meta(
+            gemini, p["title"], "product", current_title, current_desc, args.overwrite
+        )
+        if not changed:
             prod_skipped += 1
             continue
 
-        seo_title, seo_desc = generate_meta(gemini, p["title"], "product")
         flag = "" if apply_changes else "[DRY] "
         print(f"  {flag}{p['title']}: {seo_title}")
 
