@@ -65,3 +65,13 @@ def test_returns_empty_strings_when_required_keys_are_missing():
     raw = '```json\n{"title": "wrong key name"}\n```'
     result = _meta(raw)
     assert result == {"meta_title": "", "meta_description": ""}
+
+
+def test_rejects_non_string_schema_invalid_values():
+    """Regression (Codex review on PR #126): valid JSON with the wrong value
+    type (array/number/bool) must not be coerced into Python display text
+    like "['The Goat Hoodie']" or "True" and handed back as if it were a
+    real title/description."""
+    raw = '```json\n{"meta_title": ["The Goat Hoodie"], "meta_description": true}\n```'
+    result = _meta(raw)
+    assert result == {"meta_title": "", "meta_description": ""}

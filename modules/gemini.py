@@ -262,8 +262,10 @@ class GeminiModule:
         )
         raw = self.generate(prompt, temperature=0.5, max_tokens=256)
         parsed = self._extract_json_object(raw)
-        if parsed is not None and parsed.get("meta_title") and parsed.get("meta_description"):
-            return {"meta_title": str(parsed["meta_title"]), "meta_description": str(parsed["meta_description"])}
+        meta_title = parsed.get("meta_title") if parsed is not None else None
+        meta_description = parsed.get("meta_description") if parsed is not None else None
+        if isinstance(meta_title, str) and meta_title and isinstance(meta_description, str) and meta_description:
+            return {"meta_title": meta_title, "meta_description": meta_description}
         # Model didn't return parseable JSON (preamble text, unescaped quotes in the
         # title, truncated output, etc.) — never hand the caller raw/partial model
         # text, which has previously been written verbatim as a literal Shopify meta
