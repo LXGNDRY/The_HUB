@@ -11,6 +11,7 @@ Requires: GOOGLE_API_KEY env var (already set in project)
 import os
 import logging
 import json
+import re
 import requests
 
 logger = logging.getLogger("gcp-bot.gemini")
@@ -260,12 +261,39 @@ class GeminiModule:
             f"Respond ONLY as valid JSON: {{\"meta_title\": \"...\", \"meta_description\": \"...\"}}"
         )
         raw = self.generate(prompt, temperature=0.5, max_tokens=256)
+        parsed = self._extract_json_object(raw)
+        if parsed is not None and parsed.get("meta_title") and parsed.get("meta_description"):
+            return {"meta_title": str(parsed["meta_title"]), "meta_description": str(parsed["meta_description"])}
+        # Model didn't return parseable JSON (preamble text, unescaped quotes in the
+        # title, truncated output, etc.) — never hand the caller raw/partial model
+        # text, which has previously been written verbatim as a literal Shopify meta
+        # title (e.g. "```json{\"meta_title\": ..."). Empty strings signal failure so
+        # callers fall back to their own safe default instead.
+        logger.warning("[gemini] generate_seo_meta: could not parse a valid JSON object from model output")
+        return {"meta_title": "", "meta_description": ""}
+
+    @staticmethod
+    def _extract_json_object(raw: str) -> dict | None:
+        """Pull the first valid {...} JSON object out of raw model text, which may
+        be wrapped in a markdown code fence and/or preceded or followed by
+        commentary the model added despite being told to respond with JSON only."""
+        text = (raw or "").strip()
+        # Strip a markdown code fence around the JSON, if present (handles
+        # ```json\n{...}\n``` and bare ```{...}```, with or without a trailing newline).
+        fence_match = re.search(r"```(?:json)?\s*(\{.*\})\s*```", text, re.DOTALL)
+        candidate = fence_match.group(1) if fence_match else text
+        # Fall back to the first balanced-looking {...} span, in case there's no
+        # fence but the model still added a preamble/trailing remark.
+        if not fence_match:
+            start = candidate.find("{")
+            end = candidate.rfind("}")
+            if start != -1 and end != -1 and end > start:
+                candidate = candidate[start : end + 1]
         try:
-            # Strip markdown code fences if present
-            cleaned = raw.strip().strip("```json").strip("```").strip()
-            return json.loads(cleaned)
-        except Exception:
-            return {"meta_title": raw[:60], "meta_description": raw[60:220]}
+            result = json.loads(candidate)
+            return result if isinstance(result, dict) else None
+        except (json.JSONDecodeError, ValueError):
+            return None
 
     def generate_social_caption(self, product_name: str, platform: str = "instagram", tone: str = "streetwear") -> str:
         """

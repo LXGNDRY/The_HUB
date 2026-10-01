@@ -2,6 +2,7 @@ from scripts.seo_meta_rewrite import (
     DESC_MAX,
     TITLE_MAX,
     _fallback_meta,
+    _looks_like_valid_meta,
     _truncate,
     generate_meta,
     resolve_meta,
@@ -119,3 +120,30 @@ def test_resolve_meta_overwrite_regenerates_both_even_when_set():
     assert changed
     assert title != "Old Title"
     assert desc != "Old description."
+
+
+def test_looks_like_valid_meta_rejects_raw_json_artifacts():
+    """Regression: a malformed Gemini response previously surfaced as this
+    literal text written to Shopify's meta title field."""
+    assert not _looks_like_valid_meta('```json{"meta_title": "The Goat Hoodie"')
+    assert not _looks_like_valid_meta('{"meta_title": "The Goat Hoodie"}')
+    assert not _looks_like_valid_meta("")
+
+
+def test_looks_like_valid_meta_accepts_normal_text():
+    assert _looks_like_valid_meta("The Goat Hoodie | Legendary Branding")
+
+
+def test_generate_meta_falls_back_when_gemini_returns_raw_json_artifact():
+    """Even if a Gemini-layer bug somehow slips raw JSON text through,
+    generate_meta must reject it and use the safe template instead of ever
+    handing it back to the caller for a Shopify write."""
+
+    class _BuggyGemini:
+        def generate_seo_meta(self, page_title, page_type):
+            return {"meta_title": '```json{"meta_title": "The Goat Hoodie"', "meta_description": "Shop now."}
+
+    seo_title, _ = generate_meta(_BuggyGemini(), "The Goat Hoodie", "product")
+    assert "```" not in seo_title
+    assert "The Goat Hoodie" in seo_title
+    assert seo_title.endswith("Legendary Branding")

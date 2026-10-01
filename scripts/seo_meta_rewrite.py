@@ -72,13 +72,20 @@ def _fallback_meta(title: str, page_type: str) -> tuple[str, str]:
     return seo_title, seo_desc
 
 
+def _looks_like_valid_meta(text: str) -> bool:
+    """Defense-in-depth against ever writing a raw/partially-parsed model
+    response (e.g. "```json{\"meta_title\": ...") to Shopify as if it were
+    real copy."""
+    return bool(text) and "```" not in text and '"meta_title"' not in text and not text.startswith("{")
+
+
 def generate_meta(gemini, title: str, page_type: str) -> tuple[str, str]:
     if gemini is not None:
         try:
             result = gemini.generate_seo_meta(page_title=title, page_type=page_type)
             seo_title = _truncate(result.get("meta_title") or "", TITLE_MAX)
             seo_desc = _truncate(result.get("meta_description") or "", DESC_MAX)
-            if seo_title and seo_desc:
+            if _looks_like_valid_meta(seo_title) and _looks_like_valid_meta(seo_desc):
                 return seo_title, seo_desc
         except Exception as e:  # noqa: BLE001 - one bad Gemini call must not abort the run
             print(f"  [gemini generation failed: {e}] falling back to template", file=sys.stderr)
