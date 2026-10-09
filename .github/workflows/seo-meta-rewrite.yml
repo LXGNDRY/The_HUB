@@ -60,7 +60,7 @@ jobs:
 
       - name: Upload report artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: seo-meta-rewrite-${{ github.run_id }}
           path: seo_meta_rewrite_output.txt
