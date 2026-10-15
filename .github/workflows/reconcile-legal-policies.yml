@@ -1,5 +1,10 @@
 name: Reconcile Shopify Legal Policies
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/reconcile_legal_policies.py'
+      - '.github/workflows/reconcile-legal-policies.yml'
   workflow_dispatch:
     inputs:
       apply:
@@ -19,7 +24,7 @@ jobs:
         env:
           SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
           SHOPIFY_SHOP_DOMAIN: lngndny.myshopify.com
-          DRY_RUN: ${{ inputs.apply && '0' || '1' }}
+          DRY_RUN: ${{ github.event_name == 'push' && '0' || (inputs.apply && '0' || '1') }}
         run: python3 scripts/reconcile_legal_policies.py
       - name: Save pre-change backups
         if: always()
