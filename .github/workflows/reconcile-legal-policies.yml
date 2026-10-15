@@ -1,0 +1,36 @@
+name: Reconcile Shopify Legal Policies
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/reconcile_legal_policies.py'
+      - '.github/workflows/reconcile-legal-policies.yml'
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: "Write to live Shopify policies (false = dry run)"
+        required: true
+        type: boolean
+        default: false
+permissions:
+  contents: read
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconcile policies against live shipping configuration
+        env:
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_SHOP_DOMAIN: lngndny.myshopify.com
+          DRY_RUN: ${{ github.event_name == 'push' && '0' || (inputs.apply && '0' || '1') }}
+        run: python3 scripts/reconcile_legal_policies.py
+      - name: Save pre-change backups
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shopify-legal-policy-backups
+          path: policy-backups/
+          if-no-files-found: ignore
+          retention-days: 30
