@@ -41,7 +41,7 @@ jobs:
 
       - name: Upload report artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: compliance-v2-audit-${{ github.run_id }}
           path: |
