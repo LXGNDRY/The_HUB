@@ -76,7 +76,6 @@ def _handle_product_created(payload: dict):
       1. Fill missing image alt text
       2. Submit product URL to Google Indexing API
       3. Ping IndexNow
-    SEO meta rewrite is deferred to the nightly batch (seo_meta_rewrite.py).
     """
     product_id = payload.get("id")
     handle = payload.get("handle", "")
