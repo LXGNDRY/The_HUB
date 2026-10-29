@@ -73,13 +73,15 @@ def campaign_locations(ga) -> tuple:
     for row in ga.search(customer_id=CUSTOMER_ID, query="""
             SELECT campaign.id, campaign_criterion.negative, campaign_criterion.location.geo_target_constant
             FROM campaign_criterion
-            WHERE campaign_criterion.type = 'LOCATION' AND campaign.status != 'REMOVED'"""):
+            WHERE campaign_criterion.type = 'LOCATION' AND campaign.status != 'REMOVED'
+              AND campaign_criterion.status != 'REMOVED'"""):
         geo = row.campaign_criterion.location.geo_target_constant
         if geo:
             (neg if row.campaign_criterion.negative else pos).setdefault(row.campaign.id, []).append(geo)
     proximity = {row.campaign.id for row in ga.search(customer_id=CUSTOMER_ID, query="""
             SELECT campaign.id FROM campaign_criterion
-            WHERE campaign_criterion.type = 'PROXIMITY' AND campaign.status != 'REMOVED'""")}
+            WHERE campaign_criterion.type = 'PROXIMITY' AND campaign.status != 'REMOVED'
+              AND campaign_criterion.status != 'REMOVED'""")}
     return campaigns, pos, neg, proximity
 
 
