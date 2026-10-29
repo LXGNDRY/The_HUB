@@ -82,9 +82,11 @@ def shipping():
 
 
 def ads_link():
-    links = [s for s in gmc.account_services() if "googleAdsLink" in s or "adsLink" in s]
+    links = [s for s in gmc.account_services() if s.get("provider") == "providers/GOOGLE_ADS"]
     for s in links:
-        print(f"  {s}")
+        state = s.get("handshake", {}).get("approvalState")
+        print(f"  AdsID: {s.get('externalAccountId')} | approval: {state} "
+              f"| campaignsManagement: {s.get('campaignsManagement')}")
     if not links:
         print("  No Ads links found")
     return links

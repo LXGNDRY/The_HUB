@@ -30,55 +30,84 @@ def shopify_headers() -> dict:
     return {"X-Shopify-Access-Token": token}
 
 
+def _tier(rate: dict) -> dict:
+    """One Shopify rate with its order-subtotal / weight conditions kept."""
+    def num(v):
+        return float(v) if v not in (None, "") else None
+    return {"name": rate.get("name"), "price": float(rate.get("price", 0)),
+            "min_subtotal": num(rate.get("min_order_subtotal")), "max_subtotal": num(rate.get("max_order_subtotal")),
+            "min_weight": num(rate.get("weight_low")), "max_weight": num(rate.get("weight_high"))}
+
+
+def _shipping_class(tiers: list) -> dict:
+    """free_always: a $0 tier with no conditions. free_over: $0 tier gated by a minimum, plus paid tiers."""
+    free = [t for t in tiers if t["price"] == 0]
+    paid = [t["price"] for t in tiers if t["price"] > 0]
+    unconditional = [t for t in free if not t["min_subtotal"] and not t["min_weight"]]
+    thresholds = [t["min_subtotal"] for t in free if t["min_subtotal"]]
+    return {
+        "free_always": bool(unconditional) and not paid,
+        "free_over": min(thresholds) if thresholds and paid else None,
+        "min_paid": min(paid, default=None),
+    }
+
+
 def shopify_countries() -> dict:
-    """country code -> {zone, free, min_paid} from Shopify shipping zones."""
+    """country code -> {zone, tiers, free_always, free_over, min_paid} from Shopify shipping zones."""
     r = requests.get(f"https://{SHOP}/admin/api/{API_VERSION}/shipping_zones.json",
                      headers=shopify_headers(), timeout=60)
     r.raise_for_status()
     out = {}
     for zone in r.json().get("shipping_zones", []):
         rates = zone.get("price_based_shipping_rates", []) + zone.get("weight_based_shipping_rates", [])
-        prices = [float(x.get("price", 0)) for x in rates]
-        info = {
-            "zone": zone.get("name"),
-            "free": any(p == 0 for p in prices),
-            "min_paid": min((p for p in prices if p > 0), default=None),
-            "carrier_calculated": bool(zone.get("carrier_shipping_rate_providers")),
-        }
+        tiers = [_tier(x) for x in rates]
+        info = {"zone": zone.get("name"), "tiers": tiers, **_shipping_class(tiers),
+                "carrier_calculated": bool(zone.get("carrier_shipping_rate_providers"))}
         for c in zone.get("countries", []):
             if c.get("code") and c["code"] != "*":
                 out[c["code"]] = info
     return out
 
 
-def gmc_countries(settings: dict) -> dict:
-    """country code -> list of {service, active, rate, currency} from GMC shipping settings."""
-    out = {}
+def gmc_countries(settings: dict) -> tuple:
+    """(active, inactive_only): country -> [{service, rate, currency}] for active services; countries with
+    only inactive services."""
+    active, inactive = {}, {}
     for svc in settings.get("services", []):
         rate_groups = svc.get("rateGroups", [])
         rate = gmc.flat_rate(rate_groups[0]) if rate_groups else None
+        if rate == "NO_SHIPPING":
+            continue
+        target = active if svc.get("active", False) else inactive
         for code in svc.get("deliveryCountries", []):
-            out.setdefault(code, []).append({
-                "service": svc.get("serviceName"), "active": svc.get("active", False),
-                "rate": rate, "currency": svc.get("currencyCode"),
-            })
-    return out
+            target.setdefault(code, []).append({"service": svc.get("serviceName"), "rate": rate,
+                                                "currency": svc.get("currencyCode")})
+    return active, sorted(set(inactive) - set(active))
 
 
-def compare(shop: dict, g: dict) -> dict:
-    only_shopify = sorted(set(shop) - set(g))
-    only_gmc = sorted(set(g) - set(shop))
+def _mismatch(code: str, s: dict, g: list):
+    rates = {x["rate"] for x in g}
+    if s["free_always"] and "0.00" not in rates:
+        return {"country": code, "issue": "Shopify free, GMC has no free service"}
+    if s["free_over"] is not None and rates == {"0.00"}:
+        return {"country": code, "issue": f"GMC free for all orders; Shopify charges "
+                                          f"${s['min_paid']:.2f} below ${s['free_over']:.2f}"}
+    if not s["free_always"] and s["free_over"] is None and s["min_paid"] is not None \
+            and f"{s['min_paid']:.2f}" not in rates:
+        return {"country": code, "issue": f"paid rate differs (Shopify ${s['min_paid']:.2f}, GMC {sorted(rates)})"}
+    return None
+
+
+def compare(shop: dict, g: dict, inactive_only: list) -> dict:
+    missing = sorted(set(shop) - set(g))
     mismatches = []
     for code in sorted(set(shop) & set(g)):
-        rates = {s["rate"] for s in g[code] if s["active"]}
-        s = shop[code]
-        if s["free"] and "0.00" not in rates:
-            mismatches.append({"country": code, "issue": "Shopify free, GMC has no free service",
-                               "shopify": s, "gmc": g[code]})
-        elif s["min_paid"] is not None and not s["free"] and rates and f"{s['min_paid']:.2f}" not in rates:
-            mismatches.append({"country": code, "issue": "paid rate differs",
-                               "shopify": s, "gmc": g[code]})
-    return {"missing_in_gmc": only_shopify, "not_in_shopify": only_gmc, "rate_mismatches": mismatches}
+        m = _mismatch(code, shop[code], g[code])
+        if m:
+            mismatches.append({**m, "shopify": shop[code], "gmc": g[code]})
+    return {"missing_in_gmc": missing,
+            "of_which_only_inactive_in_gmc": sorted(set(missing) & set(inactive_only)),
+            "not_in_shopify": sorted(set(g) - set(shop)), "rate_mismatches": mismatches}
 
 
 def feed_inventory() -> list:
@@ -120,16 +149,17 @@ def main():
     report = {}
     print("=== GMC shipping settings (Merchant API v1) ===")
     settings = section("shipping_settings", gmc.shipping_settings)
-    g = {} if "error" in settings else gmc_countries(settings)
+    g, inactive_only = ({}, []) if "error" in settings else gmc_countries(settings)
     print(f"  GMC services: {len(settings.get('services', []))}, countries: {len(g)}")
     print("=== Shopify shipping zones ===")
     shop = section("shopify_zones", shopify_countries)
     shop = {} if "error" in shop else shop
     print(f"  Shopify countries: {len(shop)}")
     if shop and g:
-        report["comparison"] = compare(shop, g)
+        report["comparison"] = compare(shop, g, inactive_only)
         c = report["comparison"]
         print(f"  In Shopify, missing in GMC ({len(c['missing_in_gmc'])}): {c['missing_in_gmc']}")
+        print(f"  ...of which only inactive GMC services: {c['of_which_only_inactive_in_gmc']}")
         print(f"  In GMC, not in Shopify ({len(c['not_in_shopify'])}): {c['not_in_shopify']}")
         print(f"  Rate mismatches ({len(c['rate_mismatches'])}):")
         for m in c["rate_mismatches"]:
