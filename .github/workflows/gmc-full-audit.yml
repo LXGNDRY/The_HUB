@@ -12,7 +12,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - run: pip install google-auth google-api-python-client -q
+      - run: pip install google-auth requests -q
       - name: Run full GMC audit
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}

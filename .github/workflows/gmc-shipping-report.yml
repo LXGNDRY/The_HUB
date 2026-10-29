@@ -1,0 +1,28 @@
+name: GMC Shipping Report
+
+on:
+  workflow_dispatch:
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - run: pip install google-auth requests -q
+      - name: Shopify vs GMC shipping report (read-only)
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          SHOPIFY_ADMIN_TOKEN: ${{ secrets.SHOPIFY_ADMIN_TOKEN }}
+          SHOPIFY_CLIENT_ID: ${{ secrets.SHOPIFY_CLIENT_ID }}
+          SHOPIFY_CLIENT_SECRET: ${{ secrets.SHOPIFY_CLIENT_SECRET }}
+        run: python scripts/gmc_shipping_report.py
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: gmc-shipping-report
+          path: outputs/gmc_shipping_report.json
+          if-no-files-found: ignore

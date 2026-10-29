@@ -12,33 +12,25 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: "3.11"
-      - run: pip install google-auth google-api-python-client -q
-      - name: Dump shipping structure
+      - run: pip install google-auth requests -q
+      - name: Dump shipping structure (Merchant API v1)
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
         run: |
           python - << 'PYEOF'
           import json, os, sys
-          from google.oauth2 import service_account
-          from googleapiclient.discovery import build
-
-          sa_info = json.loads(os.environ["GCP_SA_KEY"])
-          creds = service_account.Credentials.from_service_account_info(
-              sa_info, scopes=["https://www.googleapis.com/auth/content"])
-          service = build("content", "v2.1", credentials=creds)
-          MERCHANT_ID = 582171114
-          resp = service.shippingsettings().get(
-              merchantId=MERCHANT_ID, accountId=MERCHANT_ID).execute()
-          import os as _os
-          _os.makedirs("outputs", exist_ok=True)
+          sys.path.insert(0, ".")
+          from modules import merchant_api as gmc
+          resp = gmc.shipping_settings()
+          os.makedirs("outputs", exist_ok=True)
           with open("outputs/gmc_shipping.json", "w") as f:
               json.dump(resp, f, indent=2)
           print(f"Services: {len(resp.get('services', []))}")
           for svc in resp.get("services", []):
-              print(f"  '{svc.get('name')}' | countries: {svc.get('deliveryCountries', [])} | active: {svc.get('active')}")
-              for rg in svc.get("rateGroups", []):
-                  sv = rg.get("singleValue", {})
-                  print(f"    rate: {sv.get('flatRate', 'N/A')}")
+              groups = svc.get("rateGroups", [])
+              rate = gmc.flat_rate(groups[0]) if groups else None
+              print(f"  '{svc.get('serviceName')}' | countries: {svc.get('deliveryCountries', [])} "
+                    f"| active: {svc.get('active')} | rate: {rate} {svc.get('currencyCode')}")
           PYEOF
       - uses: actions/upload-artifact@v7
         if: always()
