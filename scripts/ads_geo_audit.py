@@ -64,7 +64,7 @@ def ads_client() -> GoogleAdsClient:
 
 
 def campaign_locations(ga) -> tuple:
-    """(campaigns {id: {name, status}}, positives {id: [geo resource]}, negatives {id: [geo resource]})"""
+    """(campaigns {id: {name, status}}, positives {id: [geo]}, negatives {id: [geo]}, proximity {campaign ids})"""
     campaigns, pos, neg = {}, {}, {}
     for row in ga.search(customer_id=CUSTOMER_ID, query="""
             SELECT campaign.id, campaign.name, campaign.status FROM campaign
@@ -77,7 +77,10 @@ def campaign_locations(ga) -> tuple:
         geo = row.campaign_criterion.location.geo_target_constant
         if geo:
             (neg if row.campaign_criterion.negative else pos).setdefault(row.campaign.id, []).append(geo)
-    return campaigns, pos, neg
+    proximity = {row.campaign.id for row in ga.search(customer_id=CUSTOMER_ID, query="""
+            SELECT campaign.id FROM campaign_criterion
+            WHERE campaign_criterion.type = 'PROXIMITY' AND campaign.status != 'REMOVED'""")}
+    return campaigns, pos, neg, proximity
 
 
 def resolve_geo(ga, resources: set) -> dict:
@@ -98,19 +101,23 @@ def main():
     markets = market_countries()
     print(f"Shopify Markets countries (active): {len(markets)}")
     ga = ads_client().get_service("GoogleAdsService")
-    campaigns, pos, neg = campaign_locations(ga)
+    campaigns, pos, neg, proximity = campaign_locations(ga)
     geo = resolve_geo(ga, {g for lst in list(pos.values()) + list(neg.values()) for g in lst})
     report = {"markets_countries": sorted(markets), "campaigns": []}
     for cid, c in campaigns.items():
         targeted = sorted({geo.get(g, {}).get("country", g) for g in pos.get(cid, [])})
         excluded = sorted({geo.get(g, {}).get("country", g) for g in neg.get(cid, [])})
         outside = sorted(set(targeted) - markets)
-        entry = {"id": cid, **c, "targets_all_countries": not targeted, "targeted": targeted,
+        has_radius = cid in proximity
+        entry = {"id": cid, **c, "targets_all_countries": not targeted and not has_radius,
+                 "has_proximity_targets": has_radius, "targeted": targeted,
                  "excluded": excluded, "outside_markets": outside,
                  "in_markets_not_targeted": sorted(markets - set(targeted)) if targeted else []}
         report["campaigns"].append(entry)
         print(f"\n[{c['status']}] {c['name']} (id={cid})")
-        if not targeted:
+        if has_radius:
+            print("  Has PROXIMITY (radius) targets: NOT compared against Markets, review manually")
+        elif not targeted:
             print("  No location criteria -> targets ALL countries (includes non-market countries)")
         print(f"  Targeted ({len(targeted)}): {targeted}")
         print(f"  Outside Shopify Markets ({len(outside)}): {outside}")
